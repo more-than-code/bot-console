@@ -1,4 +1,4 @@
-# deploybot-webapp
+# bot-console
 
 SvelteKit dashboard for deploybot. This pass shows Telegraf host metrics from Postgres on pi4. The host list is every row in `metrics.hosts`, plus any host that wrote a metric row in the last 7 days. The browser never connects to the database. Services, databases, and ops history are navigation placeholders only.
 
