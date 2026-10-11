@@ -43,6 +43,22 @@ type UptimeRow = {
 	uptime_seconds: number | string | null;
 };
 
+type MemoryBytesRow = {
+	host: string;
+	time: Date | string | null;
+	used: number | string | null;
+	total: number | string | null;
+	available: number | string | null;
+};
+
+type DiskBytesRow = {
+	host: string;
+	time: Date | string | null;
+	used: number | string | null;
+	total: number | string | null;
+	free: number | string | null;
+};
+
 /** Tables or columns that are not in this database stay empty until restart. */
 const absent = new Set<string>();
 let registryMode: 'full' | 'names' | 'off' = 'full';
@@ -238,6 +254,41 @@ async function loadLatestUptime(name: string | null): Promise<UptimeRow[]> {
 	`;
 }
 
+// Own queries so a missing byte column blanks capacity only, not used_percent.
+async function loadLatestMemoryBytes(name: string | null): Promise<MemoryBytesRow[]> {
+	const sql = getSql();
+	return sql<MemoryBytesRow[]>`
+		SELECT DISTINCT ON (host)
+			host,
+			(time AT TIME ZONE 'UTC') AS time,
+			used::float8 AS used,
+			total::float8 AS total,
+			available::float8 AS available
+		FROM metrics.mem
+		WHERE used_percent IS NOT NULL
+			AND time >= (now() AT TIME ZONE 'UTC') - ${RECENT_HOST_WINDOW}::interval
+			AND (${name}::text IS NULL OR host = ${name})
+		ORDER BY host, time DESC
+	`;
+}
+
+async function loadLatestDiskBytes(name: string | null): Promise<DiskBytesRow[]> {
+	const sql = getSql();
+	return sql<DiskBytesRow[]>`
+		SELECT DISTINCT ON (host)
+			host,
+			(time AT TIME ZONE 'UTC') AS time,
+			used::float8 AS used,
+			total::float8 AS total,
+			free::float8 AS free
+		FROM metrics.disk
+		WHERE path = '/' AND used_percent IS NOT NULL
+			AND time >= (now() AT TIME ZONE 'UTC') - ${RECENT_HOST_WINDOW}::interval
+			AND (${name}::text IS NULL OR host = ${name})
+		ORDER BY host, time DESC, device
+	`;
+}
+
 function gaugeSamples(rows: TimedValue[], field: GaugeField): FieldSample[] {
 	return rows.flatMap((row) => {
 		if (!row.host) return [];
@@ -269,6 +320,36 @@ function uptimeSamples(rows: UptimeRow[]): FieldSample[] {
 	});
 }
 
+function memoryByteSamples(rows: MemoryBytesRow[]): FieldSample[] {
+	return rows.flatMap((row) => {
+		if (!row.host) return [];
+		return [
+			{
+				host: row.host,
+				time: iso(row.time),
+				memoryUsedBytes: num(row.used),
+				memoryTotalBytes: num(row.total),
+				memoryAvailableBytes: num(row.available)
+			}
+		];
+	});
+}
+
+function diskByteSamples(rows: DiskBytesRow[]): FieldSample[] {
+	return rows.flatMap((row) => {
+		if (!row.host) return [];
+		return [
+			{
+				host: row.host,
+				time: iso(row.time),
+				diskUsedBytes: num(row.used),
+				diskTotalBytes: num(row.total),
+				diskFreeBytes: num(row.free)
+			}
+		];
+	});
+}
+
 /**
  * Hosts are the registry plus any host tag in recent metric rows.
  * Each metric is its own query so a missing table or column blanks that
@@ -278,27 +359,42 @@ export async function listHosts(name: string | null): Promise<Overview> {
 	if (name !== null && !isHostName(name)) {
 		return { generatedAt: new Date().toISOString(), hosts: [] };
 	}
-	const [generatedAt, registry, discoveredGroups, cpu, memory, disk, temp, load, uptime] =
-		await Promise.all([
-			loadGeneratedAt(),
-			loadRegistry(name),
-			Promise.all(
-				METRIC_TABLES.map((table) => optional(`discover.${table}`, () => discoverHosts(table, name), []))
-			),
-			optional('latest.cpu', () => loadLatestGauge('cpu', name), []),
-			optional('latest.memory', () => loadLatestGauge('memory', name), []),
-			optional('latest.disk', () => loadLatestGauge('disk', name), []),
-			optional('latest.temp', () => loadLatestGauge('temp', name), []),
-			optional('latest.load', () => loadLatestLoad(name), []),
-			optional('latest.uptime', () => loadLatestUptime(name), [])
-		]);
+	const [
+		generatedAt,
+		registry,
+		discoveredGroups,
+		cpu,
+		memory,
+		disk,
+		temp,
+		load,
+		uptime,
+		memoryBytes,
+		diskBytes
+	] = await Promise.all([
+		loadGeneratedAt(),
+		loadRegistry(name),
+		Promise.all(
+			METRIC_TABLES.map((table) => optional(`discover.${table}`, () => discoverHosts(table, name), []))
+		),
+		optional('latest.cpu', () => loadLatestGauge('cpu', name), []),
+		optional('latest.memory', () => loadLatestGauge('memory', name), []),
+		optional('latest.disk', () => loadLatestGauge('disk', name), []),
+		optional('latest.temp', () => loadLatestGauge('temp', name), []),
+		optional('latest.load', () => loadLatestLoad(name), []),
+		optional('latest.uptime', () => loadLatestUptime(name), []),
+		optional('latest.memory.bytes', () => loadLatestMemoryBytes(name), []),
+		optional('latest.disk.bytes', () => loadLatestDiskBytes(name), [])
+	]);
 	const samples = [
 		...gaugeSamples(cpu, 'cpuPercent'),
 		...gaugeSamples(memory, 'memoryPercent'),
 		...gaugeSamples(disk, 'diskPercent'),
 		...gaugeSamples(temp, 'tempC'),
 		...loadSamples(load),
-		...uptimeSamples(uptime)
+		...uptimeSamples(uptime),
+		...memoryByteSamples(memoryBytes),
+		...diskByteSamples(diskBytes)
 	];
 	return {
 		generatedAt,

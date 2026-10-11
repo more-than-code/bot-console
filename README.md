@@ -49,12 +49,12 @@ PORT=5180 HOST=0.0.0.0 node build
 | Path | Behavior |
 |------|----------|
 | `/` | One card per known host: CPU %, memory %, root disk %, CPU temperature, load, uptime, and last report in Pacific/Auckland. A host with no metric timestamp in the last 2 minutes is `stale` and the card turns red. That includes a registry row that has never reported. A metric with no rows shows `n/a`. Each card links to `/pi/[host]`. |
-| `/pi/[host]?range=1h\|1d\|1w` | Charts for the last hour (30s buckets), day (5m), or week (30m). A series with no rows says `No data`. |
+| `/pi/[host]?range=1h\|1d\|1w` | Charts for the last hour (30s buckets), day (5m), or week (30m). A series with no rows says `No data`. Memory and root-disk cards, and those chart titles, show used / total when the latest total is present (`1.1 / 7.6 GB (14.9%)`), the percent alone when total is missing, and `n/a` when all three are missing. The chart lines stay percent. |
 | `/services`, `/databases`, `/ops` | Coming soon. |
 
 Both live pages render the first payload on the server and then poll every 15 seconds.
 
-CPU % is `100 - usage_idle` for `cpu = 'cpu-total'`. Memory is `metrics.mem.used_percent`. Disk is `metrics.disk.used_percent` where `path = '/'`. Temperature is `metrics.temp.temp` for `sensor = 'cpu_thermal'`. Load and uptime come from `metrics.system` (Telegraf writes them on separate rows).
+CPU % is `100 - usage_idle` for `cpu = 'cpu-total'`. Memory is `metrics.mem.used_percent`. Disk is `metrics.disk.used_percent` where `path = '/'`. The same latest rows also carry memory `used`, `total`, and `available`, and root-disk `used`, `total`, and `free`, as bytes. Temperature is `metrics.temp.temp` for `sensor = 'cpu_thermal'`. Load and uptime come from `metrics.system` (Telegraf writes them on separate rows).
 
 Network and disk I/O charts are per-second rates from cumulative counters. Per-interface (or per-disk) deltas that go backwards are dropped as counter resets. Network sums every interface except `lo`. Disk I/O uses whole disks only (`mmcblk0`, `nvme0n1`, `sda`, …), not partitions.
 
@@ -79,8 +79,14 @@ A missing metric table or column becomes `null` for that metric. The other metri
       "role": "coding-node",
       "runs": "short note from metrics.hosts.hosts",
       "cpuPercent": 0.2,
-      "memoryPercent": 9.5,
-      "diskPercent": 11.9,
+      "memoryPercent": 14.9,
+      "memoryUsedBytes": 1221152768,
+      "memoryTotalBytes": 8200626176,
+      "memoryAvailableBytes": 6979473408,
+      "diskPercent": 12.3,
+      "diskUsedBytes": 7291064320,
+      "diskTotalBytes": 62290444288,
+      "diskFreeBytes": 51816525824,
       "tempC": 57.5,
       "load1": 0,
       "load5": 0.1,
@@ -111,5 +117,7 @@ A missing metric table or column becomes `null` for that metric. The other metri
 ```
 
 Rates are bytes per second. `generatedAt` and `t` are ISO-8601 UTC. The UI renders them in Pacific/Auckland.
+
+`host` on `/api/pi/:host` is the same object as an overview host. Any capacity field may be null. The overview cards still show memory and disk as percents.
 
 The dashboard is meant for the home LAN and Tailscale. It does not authenticate viewers; do not publish the port.

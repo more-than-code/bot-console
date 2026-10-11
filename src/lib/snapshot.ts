@@ -16,7 +16,13 @@ export type FieldSample = {
 	time: string | null;
 	cpuPercent?: number | null;
 	memoryPercent?: number | null;
+	memoryUsedBytes?: number | null;
+	memoryTotalBytes?: number | null;
+	memoryAvailableBytes?: number | null;
 	diskPercent?: number | null;
+	diskUsedBytes?: number | null;
+	diskTotalBytes?: number | null;
+	diskFreeBytes?: number | null;
 	tempC?: number | null;
 	load1?: number | null;
 	load5?: number | null;
@@ -38,7 +44,13 @@ function blank(name: string): HostSnapshot {
 		runs: null,
 		cpuPercent: null,
 		memoryPercent: null,
+		memoryUsedBytes: null,
+		memoryTotalBytes: null,
+		memoryAvailableBytes: null,
 		diskPercent: null,
+		diskUsedBytes: null,
+		diskTotalBytes: null,
+		diskFreeBytes: null,
 		tempC: null,
 		load1: null,
 		load5: null,
@@ -59,10 +71,27 @@ function ensure(map: Map<string, Draft>, name: string): Draft | null {
 	return draft;
 }
 
+const BYTE_FIELDS = [
+	'memoryUsedBytes',
+	'memoryTotalBytes',
+	'memoryAvailableBytes',
+	'diskUsedBytes',
+	'diskTotalBytes',
+	'diskFreeBytes'
+] as const;
+
+function wholeBytes(value: number | null | undefined): number | null {
+	if (value == null || !Number.isFinite(value) || value < 0) return null;
+	return Math.round(value);
+}
+
 function applySample(snap: HostSnapshot, sample: FieldSample): void {
 	if (sample.cpuPercent !== undefined) snap.cpuPercent = round(sample.cpuPercent, 1);
 	if (sample.memoryPercent !== undefined) snap.memoryPercent = round(sample.memoryPercent, 1);
 	if (sample.diskPercent !== undefined) snap.diskPercent = round(sample.diskPercent, 1);
+	for (const key of BYTE_FIELDS) {
+		if (sample[key] !== undefined) snap[key] = wholeBytes(sample[key]);
+	}
 	if (sample.tempC !== undefined) snap.tempC = round(sample.tempC, 1);
 	if (sample.load1 !== undefined) snap.load1 = round(sample.load1, 2);
 	if (sample.load5 !== undefined) snap.load5 = round(sample.load5, 2);

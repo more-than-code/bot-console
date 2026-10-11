@@ -274,6 +274,18 @@ dd {
 	align-items: baseline;
 }
 
+.chart-title {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 0.15rem 0.65rem;
+	min-width: 0;
+}
+
+.chart-title .meta {
+	margin: 0;
+}
+
 .chart h2 {
 	font-size: 1rem;
 	font-weight: 650;
@@ -327,12 +339,13 @@ dd {
 
 .stats {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
 	gap: 0.7rem;
 	margin-top: 1rem;
 }
 
 .stats div {
+	display: block;
 	background: var(--card);
 	border: 1px solid var(--line);
 	border-radius: 12px;

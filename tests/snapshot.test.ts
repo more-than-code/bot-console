@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { RECENT_HOST_WINDOW, STALE_AFTER, STALE_AFTER_MS } from '../src/lib/limits.ts';
 import { isMissingMetricShape } from '../src/lib/pg-error.ts';
 import { assembleSnapshots, type RegistryInfo } from '../src/lib/snapshot.ts';
+import { isHostDetail } from '../src/lib/types.ts';
 
 const generatedAt = '2026-10-11T07:00:00.000Z';
 
@@ -107,6 +108,100 @@ test('unsafe names are dropped and the newest timestamp wins', () => {
 	assert.equal(hosts[0].memoryPercent, 2);
 	assert.equal(hosts[0].lastReported, '2026-10-11T06:59:00.000Z');
 	assert.equal(hosts[0].online, true);
+});
+
+test('capacity bytes are rounded onto the snapshot', () => {
+	const hosts = assembleSnapshots({
+		registry: [row('pi1', 'coding-node')],
+		discovered: [],
+		samples: [
+			{
+				host: 'pi1',
+				time: '2026-10-11T06:59:30.000Z',
+				memoryPercent: 14.89,
+				memoryUsedBytes: 1221152768.4,
+				memoryTotalBytes: 8200626176,
+				memoryAvailableBytes: 6979473408.2,
+				diskPercent: 12.335,
+				diskUsedBytes: 7291064320,
+				diskTotalBytes: 62290444288,
+				diskFreeBytes: 51816525824
+			}
+		],
+		generatedAt,
+		staleMs: STALE_AFTER_MS
+	});
+	assert.equal(hosts[0].memoryPercent, 14.9);
+	assert.equal(hosts[0].memoryUsedBytes, 1221152768);
+	assert.equal(hosts[0].memoryTotalBytes, 8200626176);
+	assert.equal(hosts[0].memoryAvailableBytes, 6979473408);
+	assert.equal(hosts[0].diskPercent, 12.3);
+	assert.equal(hosts[0].diskUsedBytes, 7291064320);
+	assert.equal(hosts[0].diskTotalBytes, 62290444288);
+	assert.equal(hosts[0].diskFreeBytes, 51816525824);
+});
+
+test('missing and non-finite capacity stays null and does not drop the host', () => {
+	const hosts = assembleSnapshots({
+		registry: [row('grok-bot-box', 'workstation'), row('pi2')],
+		discovered: [],
+		samples: [
+			{
+				host: 'pi2',
+				time: '2026-10-11T06:59:00.000Z',
+				memoryPercent: 4,
+				memoryUsedBytes: Number.NaN,
+				memoryTotalBytes: Number.POSITIVE_INFINITY,
+				memoryAvailableBytes: 0,
+				diskUsedBytes: -4.2
+			}
+		],
+		generatedAt,
+		staleMs: STALE_AFTER_MS
+	});
+	assert.equal(hosts[0].name, 'grok-bot-box');
+	assert.equal(hosts[0].memoryUsedBytes, null);
+	assert.equal(hosts[0].memoryTotalBytes, null);
+	assert.equal(hosts[0].memoryAvailableBytes, null);
+	assert.equal(hosts[0].diskUsedBytes, null);
+	assert.equal(hosts[0].diskTotalBytes, null);
+	assert.equal(hosts[0].diskFreeBytes, null);
+	assert.equal(hosts[0].tempC, null);
+	assert.equal(hosts[1].name, 'pi2');
+	assert.equal(hosts[1].memoryPercent, 4);
+	assert.equal(hosts[1].memoryUsedBytes, null);
+	assert.equal(hosts[1].memoryTotalBytes, null);
+	assert.equal(hosts[1].memoryAvailableBytes, 0);
+	assert.equal(hosts[1].diskUsedBytes, null);
+	assert.equal(hosts[1].diskTotalBytes, null);
+	assert.equal(hosts[1].diskFreeBytes, null);
+});
+
+test('isHostDetail accepts nullable capacity fields and rejects a non-number', () => {
+	const detail = {
+		generatedAt,
+		range: '1h' as const,
+		host: { name: 'pi1' },
+		points: []
+	};
+	assert.equal(isHostDetail(detail), true);
+	assert.equal(
+		isHostDetail({
+			...detail,
+			host: {
+				name: 'pi1',
+				memoryUsedBytes: 1,
+				memoryTotalBytes: null,
+				memoryAvailableBytes: 0,
+				diskUsedBytes: 2,
+				diskTotalBytes: 3,
+				diskFreeBytes: 1
+			}
+		}),
+		true
+	);
+	assert.equal(isHostDetail({ ...detail, host: { name: 'pi1', diskTotalBytes: '58' } }), false);
+	assert.equal(isHostDetail({ ...detail, host: { name: 'pi1', memoryUsedBytes: Number.NaN } }), false);
 });
 
 test('missing relation errors are the only ones treated as empty metrics', () => {

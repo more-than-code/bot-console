@@ -9,6 +9,7 @@
 
 	let {
 		title,
+		subtitle = null,
 		times,
 		series,
 		format,
@@ -17,6 +18,7 @@
 		bucketMs = 0
 	}: {
 		title: string;
+		subtitle?: string | null;
 		times: string[];
 		series: ChartSeries[];
 		format: (value: number) => string;
@@ -158,7 +160,10 @@
 
 <figure class="chart">
 	<div class="chart-head">
-		<h2>{title}</h2>
+		<div class="chart-title">
+			<h2>{title}</h2>
+			{#if subtitle}<p class="meta num">{subtitle}</p>{/if}
+		</div>
 		<p class="legend">
 			{#each layout?.drawn ?? [] as item (item.label)}
 				<span>

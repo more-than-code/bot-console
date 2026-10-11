@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import LineChart from '$lib/components/LineChart.svelte';
 	import {
+		formatCapacity,
 		formatLoad,
 		formatPercent,
 		formatRate,
@@ -22,6 +23,12 @@
 	);
 	const times = $derived(detail.points.map((point) => point.t));
 	const bucketMs = $derived(RANGES[detail.range].bucketMs);
+	const memoryCapacity = $derived(
+		formatCapacity(detail.host.memoryUsedBytes, detail.host.memoryTotalBytes, detail.host.memoryPercent)
+	);
+	const diskCapacity = $derived(
+		formatCapacity(detail.host.diskUsedBytes, detail.host.diskTotalBytes, detail.host.diskPercent)
+	);
 	const rangeKeys = Object.keys(RANGES) as RangeKey[];
 
 	function column(pick: (point: (typeof detail.points)[number]) => number | null): Array<number | null> {
@@ -99,11 +106,11 @@
 	</div>
 	<div>
 		<dt>Memory</dt>
-		<dd class="num">{formatPercent(detail.host.memoryPercent)}</dd>
+		<dd class="num">{memoryCapacity}</dd>
 	</div>
 	<div>
 		<dt>Disk</dt>
-		<dd class="num">{formatPercent(detail.host.diskPercent)}</dd>
+		<dd class="num">{diskCapacity}</dd>
 	</div>
 	<div>
 		<dt>Temp</dt>
@@ -133,6 +140,7 @@
 	/>
 	<LineChart
 		title="Memory"
+		subtitle={memoryCapacity}
 		{times}
 		{bucketMs}
 		yMin={0}
@@ -142,6 +150,7 @@
 	/>
 	<LineChart
 		title="Disk /"
+		subtitle={diskCapacity}
 		{times}
 		{bucketMs}
 		yMin={0}

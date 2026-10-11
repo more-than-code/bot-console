@@ -48,6 +48,7 @@ tests/                       node:test, import paths end in .ts
 - Database access stays in `src/lib/server/`. The client polls same-origin `/api` routes.
 - Queries are parameterized. `isHostName` checks shape only. A host is known when it is in `metrics.hosts` or in `cpu`, `mem`, `disk`, `temp`, `system`, `net`, or `diskio` within `RECENT_HOST_WINDOW` (7 days). `/pi/[host]` is 404 otherwise. Range is `1h`, `1d`, or `1w`.
 - Each metric query is isolated. `42P01` or `42703` blanks that metric and is remembered until restart. Empty rows stay `null` (`n/a` on a card, `No data` on a chart) and do not drop the host.
+- Latest memory and disk bytes are their own queries (`latest.memory.bytes`, `latest.disk.bytes`), same 7-day `DISTINCT ON` window as the gauges. Disk path is `/`. API fields: `memoryUsedBytes`, `memoryTotalBytes`, `memoryAvailableBytes`, `diskUsedBytes`, `diskTotalBytes`, `diskFreeBytes` (`number | null`). A missing byte column blanks only those fields.
 - A host is stale when it has no cpu, memory, disk, temperature, load, or uptime timestamp in the last 2 minutes (`STALE_AFTER` / `STALE_AFTER_MS`). A registry row with no metric rows is stale, and its card is red. Pages poll every 15 seconds (`POLL_MS`).
 - `metrics.time` is timestamp without time zone holding UTC. Compare with `now() AT TIME ZONE 'UTC'`. Send `value AT TIME ZONE 'UTC'` to Node so it is a real instant. Session `TimeZone` is UTC.
 - Gauge charts use `time_bucket`: 30 seconds, 5 minutes, 30 minutes.

@@ -40,9 +40,54 @@ export function formatTick(iso: string, spanMs: number): string {
 	return formatter.format(date);
 }
 
-export function formatPercent(value: number | null): string {
+export function formatPercent(value: number | null | undefined): string {
 	if (value == null || !Number.isFinite(value)) return 'n/a';
 	return `${value.toFixed(1)}%`;
+}
+
+// 1024-based so memory and disk match the kernel totals. Labels stay GB/TB, the same words formatRate uses, not GiB/TiB.
+const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const;
+
+function byteUnit(bytes: number): { scale: number; label: (typeof BYTE_UNITS)[number] } {
+	let scale = 1;
+	let index = 0;
+	while (bytes >= scale * 1024 && index < BYTE_UNITS.length - 1) {
+		scale *= 1024;
+		index += 1;
+	}
+	return { scale, label: BYTE_UNITS[index] };
+}
+
+function formatScaled(amount: number): string {
+	const digits = Math.abs(amount) >= 100 ? 0 : 1;
+	const text = amount.toFixed(digits);
+	return text.endsWith('.0') ? text.slice(0, -2) : text;
+}
+
+export function formatBytes(value: number | null | undefined): string {
+	if (value == null || !Number.isFinite(value) || value < 0) return 'n/a';
+	const { scale, label } = byteUnit(value);
+	return `${formatScaled(value / scale)} ${label}`;
+}
+
+/**
+ * Used and total share the unit of total. No total falls back to the percent
+ * alone. Nothing usable is `n/a`.
+ */
+export function formatCapacity(
+	used: number | null | undefined,
+	total: number | null | undefined,
+	percent: number | null | undefined
+): string {
+	const totalOk = total != null && Number.isFinite(total) && total >= 0;
+	if (!totalOk) return formatPercent(percent);
+	const usedOk = used != null && Number.isFinite(used) && used >= 0;
+	const { scale, label } = byteUnit(total);
+	const usedText = usedOk ? formatScaled(used / scale) : 'n/a';
+	const totalText = formatScaled(total / scale);
+	const body = `${usedText} / ${totalText} ${label}`;
+	if (percent == null || !Number.isFinite(percent)) return body;
+	return `${body} (${formatPercent(percent)})`;
 }
 
 export function formatTemp(value: number | null): string {
