@@ -46,7 +46,7 @@ export function getSql(): Sql {
 			max_lifetime: 60 * 30,
 			connect_timeout: 10,
 			connection: {
-				application_name: 'pim-webapp',
+				application_name: 'deploybot-webapp',
 				statement_timeout: 15000,
 				default_transaction_read_only: true,
 				TimeZone: 'UTC'

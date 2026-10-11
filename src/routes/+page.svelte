@@ -41,7 +41,7 @@
 </script>
 
 <svelte:head>
-	<title>Cluster · Pi Monitor</title>
+	<title>Cluster · deploybot</title>
 </svelte:head>
 
 <h1>Cluster</h1>

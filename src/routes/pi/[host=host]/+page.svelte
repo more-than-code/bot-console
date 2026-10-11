@@ -61,7 +61,7 @@
 </script>
 
 <svelte:head>
-	<title>{detail.host.name} · Pi Monitor</title>
+	<title>{detail.host.name} · deploybot</title>
 </svelte:head>
 
 <p><a class="back" href="/">Cluster</a></p>

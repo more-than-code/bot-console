@@ -3,7 +3,7 @@
 </script>
 
 <svelte:head>
-	<title>{title} · Pi Monitor</title>
+	<title>{title} · deploybot</title>
 </svelte:head>
 
 <h1>{title}</h1>

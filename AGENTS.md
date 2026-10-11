@@ -1,8 +1,8 @@
-# pim-webapp
+# deploybot-webapp
 
-SvelteKit dashboard for Pi Monitor. Reads `cluster_metrics.metrics` with the read-only login in `.env`. Umbrella: `/home/joe/workspace/pi-monitor`.
+SvelteKit dashboard for deploybot. Reads `cluster_metrics.metrics` with the read-only login in `.env`. Umbrella: `/home/joe/workspace/deploybot`.
 
-This pass is Telegraf host metrics only: `/` and `/pi/[host]`. Services, databases, and ops are coming-soon routes. Do not build them unless asked. Do not touch Telegraf, database roles, systemd units, `~/pgdata`, or `../pim-agent`.
+This pass is Telegraf host metrics only: `/` and `/pi/[host]`. Services, databases, and ops are coming-soon routes. Do not build them unless asked. Do not touch Telegraf, database roles, systemd units, `~/pgdata`, or `../deploybot-agent`.
 
 ## Commands
 
