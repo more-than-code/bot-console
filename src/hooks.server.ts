@@ -1,6 +1,6 @@
 import type { Handle } from '@sveltejs/kit';
 
-const PRIVATE_PAGES = new Set(['/', '/services', '/databases', '/ops']);
+const PRIVATE_PAGES = new Set(['/', '/services', '/processes', '/databases', '/ops']);
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const response = await resolve(event);
