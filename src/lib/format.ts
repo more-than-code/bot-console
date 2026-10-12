@@ -113,6 +113,25 @@ export function formatUptime(seconds: number | null): string {
 
 const RATE_UNITS = ['B/s', 'KB/s', 'MB/s', 'GB/s'] as const;
 
+export function formatLatency(ms: number | null | undefined): string {
+	if (ms == null || !Number.isFinite(ms) || ms < 0) return 'n/a';
+	if (ms < 10) return `${ms.toFixed(1)} ms`;
+	return `${Math.round(ms)} ms`;
+}
+
+/** RSS and, when present, that process's share of host RAM. */
+export function formatProcessMemory(
+	bytes: number | null | undefined,
+	percent: number | null | undefined
+): string {
+	const size = formatBytes(bytes);
+	const share = formatPercent(percent);
+	if (size === 'n/a' && share === 'n/a') return 'n/a';
+	if (size === 'n/a') return share;
+	if (share === 'n/a') return size;
+	return `${size} (${share})`;
+}
+
 export function formatRate(value: number | null): string {
 	if (value == null || !Number.isFinite(value) || value < 0) return 'n/a';
 	let amount = value;

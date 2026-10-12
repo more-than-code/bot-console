@@ -3,8 +3,10 @@ import { test } from 'node:test';
 import {
 	formatBytes,
 	formatCapacity,
+	formatLatency,
 	formatLoad,
 	formatPercent,
+	formatProcessMemory,
 	formatRate,
 	formatTick,
 	formatUptime,
@@ -61,6 +63,20 @@ test('formatBytes rejects null, zero-like invalid, and non-finite values', () =>
 	assert.equal(formatBytes(Number.NaN), 'n/a');
 	assert.equal(formatBytes(Number.POSITIVE_INFINITY), 'n/a');
 	assert.equal(formatBytes(-1), 'n/a');
+});
+
+test('formatLatency and formatProcessMemory', () => {
+	assert.equal(formatLatency(null), 'n/a');
+	assert.equal(formatLatency(Number.NaN), 'n/a');
+	assert.equal(formatLatency(-1), 'n/a');
+	assert.equal(formatLatency(0), '0.0 ms');
+	assert.equal(formatLatency(9.94), '9.9 ms');
+	assert.equal(formatLatency(10), '10 ms');
+	assert.equal(formatLatency(10.6), '11 ms');
+	assert.equal(formatProcessMemory(null, null), 'n/a');
+	assert.equal(formatProcessMemory(120 * 1024 * 1024, 4.2), '120 MB (4.2%)');
+	assert.equal(formatProcessMemory(null, 4.2), '4.2%');
+	assert.equal(formatProcessMemory(1024, null), '1 KB');
 });
 
 test('formatBytes keeps huge values on the largest unit', () => {
