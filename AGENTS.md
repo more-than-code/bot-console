@@ -1,5 +1,7 @@
 # bot-console
 
+Design v2 (2026-10-13): `docs/design.md` covers OAuth sign-in and moving reads to bot-api-server. Cross-repo design: umbrella `docs/design-bot-agent-deploy.md`. Design only.
+
 SvelteKit dashboard for deploybot. Reads `cluster_metrics.metrics` with the read-only login in `.env`. Umbrella: `/home/joe/workspace/deploybot`.
 
 Overview, per-host charts, and Services are built. Databases and ops are still coming-soon routes. Do not build them unless asked. Do not apply SQL, install or reload Telegraf, restart systemd units, or change pi4 from an agent session. Do not print `.env`.
