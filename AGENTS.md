@@ -1,6 +1,6 @@
 # bot-console
 
-Design v2 (2026-10-13): `docs/design.md` covers OAuth sign-in and moving reads to bot-api-server. Cross-repo design: umbrella `docs/design-bot-agent-deploy.md`. Design only.
+Design v2 (2026-10-13): `docs/design.md` covers OAuth sign-in and moving reads to bot-api-server. Wave 1 of the console (sign-in, projects, hosts, join tokens, device approval) is implemented and stays off unless `BOT_API_URL` is set. Cross-repo design: umbrella `docs/design-bot-agent-deploy.md`.
 
 SvelteKit dashboard for deploybot. Reads `cluster_metrics.metrics` with the read-only login in `.env`. Umbrella: `/home/joe/workspace/deploybot`.
 
@@ -26,7 +26,9 @@ SvelteKit 2 (not 3): config stays in `svelte.config.js`, imports use `$lib`, and
 ## Layout
 
 ```
-src/hooks.server.ts          security headers, no-store on pages and /api
+src/hooks.server.ts          security headers, no-store, and the BOT_API_URL session gate
+src/lib/server/api.ts        bot-api-server client (Bearer, envelope, 35s timeout)
+src/lib/server/session.ts    bot_session cookie, safe next path, public routes
 src/lib/server/db.ts         postgres.js pool, .env fallback, read-only session
 src/lib/server/metrics.ts    overview and series SQL
 src/lib/server/services.ts   services registry, procstat, unit, and HTTP reads
@@ -44,7 +46,10 @@ src/params/host.ts           route matcher
 src/routes/+page.*           cluster cards
 src/routes/pi/[host=host]/   charts
 src/routes/services/         service health and per-host processes
-src/routes/api/              JSON polled by the pages
+src/routes/api/              JSON polled by the metric pages
+src/routes/signin/           Google sign-in, only when BOT_API_URL is set
+src/routes/projects/         projects, members, join tokens, settings
+src/routes/hosts/            host services, snapshot, and probe
 tests/                       node:test, import paths end in .ts
 ```
 

@@ -33,7 +33,7 @@ Do not commit `.env` or print the password. `.env` is gitignored.
 | `pnpm build` | Production build into `build/` |
 | `pnpm preview` | Preview the build on `0.0.0.0:5180` |
 | `pnpm check` | `svelte-check` |
-| `pnpm test` | Unit tests for formatting, host names, series merge, and the services view |
+| `pnpm test` | Unit tests for formatting, host names, series merge, the services view, and auth |
 
 Production:
 
@@ -53,6 +53,10 @@ PORT=5180 HOST=0.0.0.0 node build
 | `/services?host=&q=&order=&dir=&page=&pageSize=` | Service health only. Host chips, a debounced search box, and one paged table. Column headers are links that sort ascending or descending. A service name opens that service on Processes. An old `service=` bookmark explains the move and links there. Missing `metrics.services` shows an empty state instead of an error. |
 | `/processes?host=&service=&q=&sort=&dir=&page=&pageSize=` | Per-host processes for the latest sample window. Same host chips, search, and paged sortable table. `sort` defaults to `cpu` and `dir` to `desc`. The process column is a shortened command line when one was stored (Node reports every process as `MainThread`). Missing `metrics.procstat` shows an empty state instead of an error. |
 | `/databases`, `/ops` | Coming soon. |
+| `/signin` | Google sign-in when `BOT_API_URL` is set. 404 when it is not. |
+| `/projects`, `/projects/[id]` | Projects, hosts, members, join tokens, and owner settings. 404 when auth is off. |
+| `/hosts/[id]` | One host's services, a snapshot, and a probe per health check. 404 when auth is off. |
+| `/device` | Approve or deny a device code for the signed-in user. 404 when auth is off. |
 
 The live pages render the first payload on the server and then poll every 15 seconds. `/`, `/services`, `/processes`, `/databases`, `/ops`, and `/pi/[host]` send `cache-control: no-store`.
 
@@ -132,4 +136,18 @@ Service queries look back 10 minutes for the latest procstat, unit, and HTTP row
 
 The Services registry, the procstat column changes, and the `systemd_units` and `http_response` tables are defined in `bot-agent/sql/010_procstat_and_services.sql`. The dashboard does not create them. Telegraf does not already have those two measurements. Manifests and the Telegraf snippets live in `bot-agent/` and are described in `docs/spec-v1.md`.
 
-The dashboard is meant for the home LAN and Tailscale. It does not authenticate viewers; do not publish the port.
+The dashboard is meant for the home LAN and Tailscale. With `BOT_API_URL` unset it does not authenticate viewers. Do not publish the port.
+
+## Auth (v2)
+
+Auth is off unless `BOT_API_URL` is set to an origin with no path, query, or userinfo. `https` is accepted. `http` is accepted only for `localhost`, `127.0.0.1`, and `::1`, or when `BOT_API_ALLOW_INSECURE_HTTP=1` (tailnet dev only). An empty or missing value keeps today's dashboard: no sign-in page, no Projects link, and no calls to bot-api-server. Overview, per-host, services, and processes keep reading Postgres.
+
+When `BOT_API_URL` is set, every page and `/api/*` route requires a session. The exceptions are `/signin`, `/auth/google/callback`, and static assets. A page without a session redirects to `/signin?next=<path>`, and `next` has to be a same-origin relative path. `/api/*` answers 401 JSON.
+
+Sign-in is one "Sign in with Google" button. The server asks bot-api-server for the Google URL, stores the OAuth `state` and `next` in a short-lived HttpOnly cookie, and sends the browser to `authorize_url`. That redirect happens only when the URL is `https` and its parsed hostname is in `BOT_API_OAUTH_AUTHORIZE_HOSTS` (comma-separated, default `accounts.google.com`). The browser is sent to the parsed URL, not the raw string. The callback checks `state`, posts the code to `/v1/auth/google/callback`, and stores the API token in the `bot_session` cookie. That cookie is HttpOnly, SameSite=Lax, Path=/, Max-Age 604800, and `Secure` only when the console request itself is https. The browser does not receive the session token in a response body.
+
+`/signout` asks the API to delete the session and always clears the cookie. `/device?code=` shows the client name and that the device acts as you, with your project roles, then approves or denies it. `/projects` lists and creates projects. `/projects/[id]` has hosts (status, last seen, version, and an admin revoke step), members, join tokens, and owner settings. `/hosts/[id]` lists services and can request a snapshot or probe a health check. Mutations are form posts to this app. The server calls bot-api-server.
+
+A join token is shown once, on the create result, and is not written to browser storage. The install command is shown with it only when it is exactly `printf '%s' '<token>' | sudo -u bot-agent bot-agent init --server '<url>' --join-token-stdin` and the token inside it is the token just issued. Otherwise the page says `Install command not shown: unexpected format` and the copy button is for the token only. Buttons follow the caller's project role. The API still enforces that role. `forbidden` and `not_found` are messages on the page. Lists that stop at the page or item cap, or that see a repeated cursor, say `More items not shown`.
+
+`vite dev` reads `BOT_API_URL`, `BOT_API_ALLOW_INSECURE_HTTP`, and `BOT_API_OAUTH_AUTHORIZE_HOSTS` from the environment or `.env` through `$env/dynamic/private`. `node build` does not load `.env` for these variables, so export them or use a systemd `EnvironmentFile=`. There is no API server in the unit tests. They mock `fetch`. This console has not been run against bot-api-server or Google.
