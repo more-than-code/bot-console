@@ -9,6 +9,7 @@ import {
 	needsNoStore,
 	signinLocation
 } from '$lib/server/session';
+import { applyThemeMarker, parseTheme, THEME_COOKIE } from '$lib/theme';
 
 function applyHeaders(pathname: string, response: Response): Response {
 	response.headers.set('x-content-type-options', 'nosniff');
@@ -79,6 +80,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 		redirect(303, signinLocation(event.url));
 	}
 
-	const response = await resolve(event);
+	const theme = parseTheme(event.cookies.get(THEME_COOKIE));
+	const response = await resolve(event, {
+		transformPageChunk: ({ html }) => applyThemeMarker(html, theme)
+	});
 	return applyHeaders(event.url.pathname, response);
 };

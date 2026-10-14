@@ -230,7 +230,6 @@ async function renameService(event: RequestEvent, serviceId: string, form: FormD
 	try {
 		await apiFetch(event, `/v1/services/${serviceId}`, { method: 'PATCH', body: JSON.stringify(body) });
 		const dest = new URL(backTo(event.url), event.url.origin);
-		dest.searchParams.delete('services.edit');
 		const qs = dest.searchParams.toString();
 		redirect(303, qs ? `${dest.pathname}?${qs}` : dest.pathname);
 	} catch (err) {

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { Alert } from '$lib/components/ui/alert';
 
 	let {
 		kind,
@@ -10,4 +11,10 @@
 	} = $props();
 </script>
 
-<p class="notice {kind}" role={kind === 'error' ? 'alert' : 'status'}>{@render children()}</p>
+<Alert
+	variant={kind === 'error' ? 'destructive' : 'default'}
+	role={kind === 'error' ? 'alert' : 'status'}
+	class={kind === 'success' ? 'text-status-up' : undefined}
+>
+	{@render children()}
+</Alert>

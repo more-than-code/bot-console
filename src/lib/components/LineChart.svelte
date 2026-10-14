@@ -33,6 +33,21 @@
 
 	let hover = $state<number | null>(null);
 
+	const chartText: Record<string, string> = {
+		'var(--chart-1)': 'text-chart-1',
+		'var(--chart-2)': 'text-chart-2',
+		'var(--chart-3)': 'text-chart-3',
+		'var(--chart-4)': 'text-chart-4',
+		'var(--chart-5)': 'text-chart-5'
+	};
+	const chartBg: Record<string, string> = {
+		'var(--chart-1)': 'bg-chart-1',
+		'var(--chart-2)': 'bg-chart-2',
+		'var(--chart-3)': 'bg-chart-3',
+		'var(--chart-4)': 'bg-chart-4',
+		'var(--chart-5)': 'bg-chart-5'
+	};
+
 	const layout = $derived.by(() => {
 		const count = Math.min(times.length, ...series.map((item) => item.values.length));
 		const finite: number[] = [];
@@ -158,26 +173,27 @@
 	}
 </script>
 
-<figure class="chart">
-	<div class="chart-head">
-		<div class="chart-title">
-			<h2>{title}</h2>
-			{#if subtitle}<p class="meta num">{subtitle}</p>{/if}
+<figure class="bg-card relative min-w-0 rounded-xl p-3 ring-1 ring-foreground/10">
+	<div class="mb-2 flex min-w-0 flex-wrap items-start justify-between gap-2">
+		<div>
+			<h2 class="text-base font-medium">{title}</h2>
+			{#if subtitle}<p class="text-muted-foreground font-mono text-sm">{subtitle}</p>{/if}
 		</div>
-		<p class="legend">
+		<p class="flex flex-wrap gap-x-3 gap-y-1 text-sm">
 			{#each layout?.drawn ?? [] as item (item.label)}
-				<span>
-					<span class="swatch" style="background: {item.color}"></span>
+				<span class="inline-flex items-center gap-1.5">
+					<span class="size-2 rounded-sm {chartBg[item.color] ?? 'bg-foreground'}"></span>
 					{item.label}
-					{item.latestText}
+					<span class="font-mono">{item.latestText}</span>
 				</span>
 			{/each}
 		</p>
 	</div>
 	{#if !layout}
-		<p class="empty">No data</p>
+		<p class="text-muted-foreground text-sm">No data</p>
 	{:else}
 		<svg
+			class="h-auto w-full"
 			viewBox="0 0 {VB_W} {VB_H}"
 			role="img"
 			aria-label={title}
@@ -190,10 +206,10 @@
 					x2={VB_W - pad.r}
 					y1={tick.y}
 					y2={tick.y}
-					stroke="#2c3b50"
+					stroke="var(--border)"
 					stroke-width="1"
 				/>
-				<text x={pad.l - 8} y={tick.y + 4} text-anchor="end" fill="#9aa8ba" font-size="12">
+				<text x={pad.l - 8} y={tick.y + 4} text-anchor="end" fill="var(--muted-foreground)" font-size="12">
 					{format(tick.value)}
 				</text>
 			{/each}
@@ -219,21 +235,24 @@
 					x2={hoverDetail.x}
 					y1={pad.t}
 					y2={VB_H - pad.b}
-					stroke="#9aa8ba"
+					stroke="var(--muted-foreground)"
 					stroke-dasharray="3 3"
 				/>
 			{/if}
 			{#each layout.xTicks as tick, index (index)}
-				<text x={tick.x} y={VB_H - 8} text-anchor="middle" fill="#9aa8ba" font-size="12">
+				<text x={tick.x} y={VB_H - 8} text-anchor="middle" fill="var(--muted-foreground)" font-size="12">
 					{tick.label}
 				</text>
 			{/each}
 		</svg>
 		{#if hoverDetail}
-			<div class="tip" style="left: {Math.min(78, Math.max(18, (hoverDetail.x / VB_W) * 100))}%; top: 3.2rem">
+			<div
+				class="bg-popover text-popover-foreground pointer-events-none absolute z-10 rounded-md px-2 py-1 text-xs shadow-md ring-1 ring-foreground/10"
+				style="left: {Math.min(78, Math.max(18, (hoverDetail.x / VB_W) * 100))}%; top: 3.2rem"
+			>
 				<strong>{hoverDetail.label}</strong>
 				{#each hoverDetail.rows as row (row.label)}
-					<span style="color: {row.color}">{row.label} {row.text}</span>
+					<span class="block {chartText[row.color] ?? 'text-foreground'}">{row.label} {row.text}</span>
 				{/each}
 			</div>
 		{/if}

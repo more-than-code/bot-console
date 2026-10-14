@@ -1,4 +1,8 @@
 <script lang="ts">
+	import Check from '@lucide/svelte/icons/check';
+	import Copy from '@lucide/svelte/icons/copy';
+	import { Button } from '$lib/components/ui/button';
+
 	let { value, label }: { value: string; label: string } = $props();
 	let note = $state('');
 
@@ -12,7 +16,13 @@
 	}
 </script>
 
-<button type="button" onclick={copy} aria-live="polite">{note === 'Copied' ? 'Copied' : label}</button>
+<Button type="button" variant="outline" size="sm" onclick={copy} aria-live="polite">
+	{#if note === 'Copied'}
+		<Check class="size-4" />Copied
+	{:else}
+		<Copy class="size-4" />{label}
+	{/if}
+</Button>
 {#if note && note !== 'Copied'}
-	<p class="sub" role="status">{note}</p>
+	<p class="text-muted-foreground text-sm" role="status">{note}</p>
 {/if}

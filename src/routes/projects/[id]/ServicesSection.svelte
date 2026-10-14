@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
+	import { untrack } from 'svelte';
+	import Activity from '@lucide/svelte/icons/activity';
+	import RowAction from '$lib/components/RowAction.svelte';
 	import type { Host, ProbeView, ProjectServiceRow } from '$lib/api-types';
 	import DataTable from '$lib/components/DataTable.svelte';
 	import Notice from '$lib/components/Notice.svelte';
@@ -14,9 +17,15 @@
 		serviceHostReachable,
 		showProjectColumn
 	} from '$lib/host-view';
-	import { canRenameService, serviceEditCancelHref, serviceEditHref, serviceLabel } from '$lib/service-label';
+	import { canRenameService, serviceLabel } from '$lib/service-label';
 	import { serverHostHiddenFields } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
+	import { Button } from '$lib/components/ui/button';
+	import * as Card from '$lib/components/ui/card';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
+	import * as Select from '$lib/components/ui/select';
+	import RenameService from './RenameService.svelte';
 
 	let {
 		projectId,
@@ -56,8 +65,15 @@
 	const hostHidden = $derived(serverHostHiddenFields(page.url.searchParams, 'services'));
 	const selectedHost = $derived(page.url.searchParams.get('services.host'));
 	const hostChosen = $derived(serviceHosts.some((host) => host.id === selectedHost));
-	const editingId = $derived(page.url.searchParams.get('services.edit'));
 	const probed = $derived(rows.find((row) => row.id === probeServiceId) ?? null);
+	let hostValue = $state(untrack(() => (hostChosen && selectedHost ? selectedHost : 'all')));
+	const hostLabel = $derived(
+		hostValue === 'all' ? 'All hosts' : (serviceHosts.find((host) => host.id === hostValue)?.name ?? 'All hosts')
+	);
+
+	$effect(() => {
+		hostValue = hostChosen && selectedHost ? selectedHost : 'all';
+	});
 
 	function ports(values: number[]): string {
 		return values.length ? values.join(', ') : 'n/a';
@@ -83,38 +99,48 @@
 	<Notice kind="error">{message}</Notice>
 {/if}
 {#if probe}
-	<div class="panel" role="status">
-		<h2>Probe</h2>
-		<dl>
-			<div><dt>Service</dt><dd>{probed ? serviceLabel(probed) : (probe.service ?? 'n/a')}</dd></div>
-			<div><dt>Host</dt><dd>{probed?.host_name ?? 'n/a'}</dd></div>
-			<div><dt>Check</dt><dd>{probe.protocol ?? 'n/a'} {probe.port ?? ''} {probe.path ?? ''}</dd></div>
-			<div><dt>Result</dt><dd>{probe.result ?? 'n/a'}</dd></div>
-			<div><dt>HTTP</dt><dd>{probe.http_status ?? 'n/a'}</dd></div>
-			<div><dt>Latency</dt><dd>{formatLatency(probe.latency_ms)}</dd></div>
-			<div><dt>Checked</dt><dd>{formatWhen(probe.checked_at)}</dd></div>
-		</dl>
-	</div>
+	<Card.Root class="mb-4" role="status">
+		<Card.Header>
+			<Card.Title>Probe</Card.Title>
+		</Card.Header>
+		<Card.Content>
+			<dl class="grid gap-2 sm:grid-cols-2">
+				<div><dt class="text-muted-foreground text-sm">Service</dt><dd>{probed ? serviceLabel(probed) : (probe.service ?? 'n/a')}</dd></div>
+				<div><dt class="text-muted-foreground text-sm">Host</dt><dd>{probed?.host_name ?? 'n/a'}</dd></div>
+				<div><dt class="text-muted-foreground text-sm">Check</dt><dd class="font-mono">{probe.protocol ?? 'n/a'} {probe.port ?? ''} {probe.path ?? ''}</dd></div>
+				<div><dt class="text-muted-foreground text-sm">Result</dt><dd>{probe.result ?? 'n/a'}</dd></div>
+				<div><dt class="text-muted-foreground text-sm">HTTP</dt><dd>{probe.http_status ?? 'n/a'}</dd></div>
+				<div><dt class="text-muted-foreground text-sm">Latency</dt><dd>{formatLatency(probe.latency_ms)}</dd></div>
+				<div><dt class="text-muted-foreground text-sm">Checked</dt><dd>{formatWhen(probe.checked_at)}</dd></div>
+			</dl>
+		</Card.Content>
+	</Card.Root>
 {/if}
 
-<h2 id="services-heading" class="sr">Services</h2>
+<h2 id="services-heading" class="sr-only">Services</h2>
 {#if omitted > 0}
-	<p class="sub">{omitted} more {omitted === 1 ? 'row' : 'rows'} left out.</p>
+	<p class="text-muted-foreground mb-2 text-sm">{omitted} more {omitted === 1 ? 'row' : 'rows'} left out.</p>
 {/if}
-<form class="form-row" method="GET" action={page.url.pathname}>
+<form class="mb-3 flex min-w-0 flex-wrap items-end gap-2" method="GET" action={page.url.pathname}>
 	{#each hostHidden as field (field.name)}
-		<input type="hidden" name={field.name} value={field.value} />
+		<Input type="hidden" name={field.name} value={field.value} />
 	{/each}
-	<label class="field">
-		Host
-		<select name="services.host">
-			<option value="" selected={selectedHost == null || selectedHost === '' || !hostChosen}>All hosts</option>
-			{#each serviceHosts as host (host.id)}
-				<option value={host.id} selected={host.id === selectedHost}>{host.name}</option>
-			{/each}
-		</select>
-	</label>
-	<button type="submit">Apply</button>
+	<Input type="hidden" name="services.host" value={hostValue === 'all' ? '' : hostValue} />
+	<div class="grid min-w-0 flex-1 gap-1.5 sm:max-w-xs">
+		<Label for="services-host">Host</Label>
+		<Select.Root type="single" bind:value={hostValue}>
+			<Select.Trigger id="services-host" class="w-full">
+				<Select.Value placeholder="All hosts">{hostLabel}</Select.Value>
+			</Select.Trigger>
+			<Select.Content>
+				<Select.Item value="all">All hosts</Select.Item>
+				{#each serviceHosts as host (host.id)}
+					<Select.Item value={host.id}>{host.name}</Select.Item>
+				{/each}
+			</Select.Content>
+		</Select.Root>
+	</div>
+	<Button type="submit" variant="outline">Apply</Button>
 </form>
 <DataTable
 	{rows}
@@ -130,52 +156,43 @@
 >
 	{#snippet row(service)}
 		<tr id={serviceDomId(service.id)}>
-			<td>
-				{#if editingId === service.id && renameAllowed(service)}
-					<form method="POST" action={actionUrlFrom(page.url, 'rename')} class="actions" use:enhance>
-						<input type="hidden" name="service_id" value={service.id} />
-						<label>
-							<span class="sr">Display name</span>
-							<input
-								class="inline-input"
-								type="text"
-								name="display_name"
-								maxlength="64"
-								autocomplete="off"
-								value={typedFor(service)}
-							/>
-						</label>
-						<button type="submit">Save</button>
-						<button type="submit" name="clear" value="1">Clear</button>
-						<a href={serviceEditCancelHref(page.url)}>Cancel</a>
-					</form>
-				{:else}
-					{serviceLabel(service)}
-					{#if renameAllowed(service)}
-						<a href={serviceEditHref(page.url, service.id)}>Rename</a>
-					{/if}
+			<td class="p-2 align-middle">
+				<span class="mr-2">{serviceLabel(service)}</span>
+				{#if renameAllowed(service)}
+					<RenameService
+						action={actionUrlFrom(page.url, 'rename')}
+						serviceId={service.id}
+						rowLabel={serviceLabel(service)}
+						value={typedFor(service)}
+						failed={renameServiceId === service.id}
+						{message}
+					/>
 				{/if}
 			</td>
-			<td><a href="/hosts/{service.host_id}">{service.host_name}</a></td>
+			<td class="p-2 align-middle"><a class="text-primary underline-offset-4 hover:underline" href="/hosts/{service.host_id}">{service.host_name}</a></td>
 			{#if showProject}
-				<td>{service.project_name}</td>
+				<td class="p-2 align-middle">{service.project_name}</td>
 			{/if}
-			<td>{service.kind}</td>
-			<td>{ports(service.ports)}</td>
-			<td><StatusBadge status={service.health?.status ?? 'unknown'} /></td>
-			<td>{formatWhen(service.last_seen_at)}</td>
-			<td class="wrap">
+			<td class="p-2 align-middle">{service.kind}</td>
+			<td class="p-2 align-middle font-mono">{ports(service.ports)}</td>
+			<td class="p-2 align-middle"><StatusBadge status={service.health?.status ?? 'unknown'} /></td>
+			<td class="p-2 align-middle">{formatWhen(service.last_seen_at)}</td>
+			<td class="p-2 align-middle whitespace-normal">
 				{#if service.checksMessage}
-					<span class="sub">{service.checksMessage}</span>
+					<span class="text-muted-foreground text-sm">{service.checksMessage}</span>
 				{:else if service.checks.length === 0}
-					<span class="sub">No health checks.</span>
+					<span class="text-muted-foreground text-sm">No health checks.</span>
 				{:else}
 					{#each service.checks as check (check.id)}
-						<form method="POST" action={actionUrlFrom(page.url, 'probe')} class="actions" use:enhance>
-							<input type="hidden" name="service_id" value={service.id} />
-							<input type="hidden" name="check_id" value={check.id} />
-							<span>{check.protocol} {check.port}{check.path ?? ''}{check.enabled ? '' : ' (disabled)'}</span>
-							<button type="submit" aria-label="Probe {serviceLabel(service)} {check.protocol} {check.port}">Probe</button>
+						<form method="POST" action={actionUrlFrom(page.url, 'probe')} class="mb-1 flex flex-wrap items-center gap-2" use:enhance>
+							<Input type="hidden" name="service_id" value={service.id} />
+							<Input type="hidden" name="check_id" value={check.id} />
+							<span class="font-mono text-sm">{check.protocol} {check.port}{check.path ?? ''}{check.enabled ? '' : ' (disabled)'}</span>
+							<RowAction
+								type="submit"
+								label="Probe {serviceLabel(service)} {check.protocol} {check.port}"
+								icon={Activity}
+							/>
 						</form>
 					{/each}
 				{/if}

@@ -1,20 +1,22 @@
 <script lang="ts">
+	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
+
 	let { items }: { items: Array<{ label: string; href?: string }> } = $props();
 </script>
 
-<nav class="crumbs" aria-label="Breadcrumb">
-	<ol>
+<Breadcrumb.Root aria-label="Breadcrumb">
+	<Breadcrumb.List>
 		{#each items as item, index (index)}
-			<li>
-				{#if index > 0}
-					<span aria-hidden="true">›</span>
-				{/if}
+			{#if index > 0}
+				<Breadcrumb.Separator />
+			{/if}
+			<Breadcrumb.Item>
 				{#if item.href}
-					<a href={item.href}>{item.label}</a>
+					<Breadcrumb.Link href={item.href}>{item.label}</Breadcrumb.Link>
 				{:else}
-					<span aria-current="page">{item.label}</span>
+					<Breadcrumb.Page>{item.label}</Breadcrumb.Page>
 				{/if}
-			</li>
+			</Breadcrumb.Item>
 		{/each}
-	</ol>
-</nav>
+	</Breadcrumb.List>
+</Breadcrumb.Root>

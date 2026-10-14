@@ -435,7 +435,7 @@ test('a server-mode data table keeps the given row order and pages with cursors'
 	assert.ok(both.indexOf('>beta<') < both.indexOf('>alpha<'));
 	assert.equal(both.includes('/projects/1?tab=services&services.cursor=prev-token'), true);
 	assert.equal(both.includes('/projects/1?tab=services&services.cursor=next-token'), true);
-	assert.match(both, /class="pager"/);
+	assert.match(both, /aria-label="Pagination"/);
 
 	const first = render(DataTable, {
 		props: {
@@ -462,7 +462,7 @@ test('a server-mode data table keeps the given row order and pages with cursors'
 			server: { total: 2, prevCursor: null, nextCursor: null }
 		}
 	} as never).body;
-	assert.equal(onePage.includes('class="pager"'), false);
+	assert.equal(onePage.includes('aria-label="Pagination"'), false);
 });
 
 test('a client-mode data table sorts and pages the rows it was given', () => {

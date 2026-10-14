@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { untrack } from 'svelte';
+	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
 	import { SEARCH_DEBOUNCE_MS, SEARCH_MAX } from '$lib/table-query';
 
 	let {
@@ -56,13 +58,13 @@
 	}
 </script>
 
-<form class="search" {action} method="get" role="search" onsubmit={onsubmit}>
+<form class="mb-3 flex min-w-0 flex-wrap items-center gap-2" {action} method="get" role="search" onsubmit={onsubmit}>
 	{#each hidden as field (field.name)}
-		<input type="hidden" name={field.name} value={field.value} />
+		<Input type="hidden" name={field.name} value={field.value} />
 	{/each}
-	<label>
-		<span class="sr">{label}</span>
-		<input
+	<label class="min-w-0 flex-1">
+		<span class="sr-only">{label}</span>
+		<Input
 			type="search"
 			name={name}
 			maxlength={SEARCH_MAX}
@@ -71,5 +73,5 @@
 			oninput={oninput}
 		/>
 	</label>
-	<button type="submit">Search</button>
+	<Button type="submit" variant="outline">Search</Button>
 </form>

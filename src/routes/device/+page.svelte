@@ -4,6 +4,10 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { formatWhen } from '$lib/format';
 	import { actionUrl } from '$lib/url';
+	import { Button } from '$lib/components/ui/button';
+	import * as Card from '$lib/components/ui/card';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
 
 	let { data, form } = $props();
 
@@ -28,26 +32,41 @@
 	<p>
 		<strong>{data.device.client_name}</strong> acts as you, with your project roles.
 	</p>
-	<p class="sub">Code {data.device.user_code}. Expires {formatWhen(data.device.expires_at)}.</p>
-	<p class="sub">{statusText[data.device.status] ?? 'This code cannot be used.'}</p>
+	<p class="text-muted-foreground text-sm">Code <span class="text-foreground font-mono">{data.device.user_code}</span>. Expires {formatWhen(data.device.expires_at)}.</p>
+	<p class="text-muted-foreground mb-4 text-sm">{statusText[data.device.status] ?? 'This code cannot be used.'}</p>
 	{#if data.device.status === 'pending'}
-		<div class="actions">
+		<div class="flex flex-wrap gap-2">
 			<form method="POST" action={actionUrl('approve', { code: data.code || undefined })} use:enhance>
-				<input type="hidden" name="code" value={data.code} />
-				<button type="submit">Approve</button>
+				<Input type="hidden" name="code" value={data.code} />
+				<Button type="submit">Approve</Button>
 			</form>
 			<form method="POST" action={actionUrl('deny', { code: data.code || undefined })} use:enhance>
-				<input type="hidden" name="code" value={data.code} />
-				<button type="submit" class="danger">Deny</button>
+				<Input type="hidden" name="code" value={data.code} />
+				<Button type="submit" variant="destructive">Deny</Button>
 			</form>
 		</div>
 	{/if}
 {:else}
-	<form method="GET" class="panel">
-		<label class="field">
-			Device code
-			<input name="code" value={data.code} autocomplete="off" autocapitalize="off" spellcheck="false" required />
-		</label>
-		<button type="submit">Continue</button>
-	</form>
+	<Card.Root>
+		<Card.Content>
+			<form method="GET" class="grid gap-3">
+				<Label class="grid gap-1.5" for="device-code">
+					Device code
+					<Input
+						id="device-code"
+						class="font-mono"
+						name="code"
+						value={data.code}
+						autocomplete="off"
+						autocapitalize="off"
+						spellcheck="false"
+						required
+					/>
+				</Label>
+				<div>
+					<Button type="submit">Continue</Button>
+				</div>
+			</form>
+		</Card.Content>
+	</Card.Root>
 {/if}

@@ -72,6 +72,8 @@ describe('auth session', { concurrency: false }, () => {
 
 	test('public paths and the original no-store set', () => {
 		assert.equal(isPublicPath('/signin'), true);
+		assert.equal(isPublicPath('/theme'), true);
+		assert.equal(isPublicPath('/theme/__data.json'), true);
 		assert.equal(isPublicPath('/auth/google/callback'), true);
 		assert.equal(isPublicPath('/favicon.ico'), true);
 		assert.equal(isPublicPath('/_app/immutable/chunk.js'), true);

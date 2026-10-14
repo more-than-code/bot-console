@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { canRenameService, processServiceHref, serviceEditCancelHref, serviceEditHref, serviceLabel } from '../src/lib/service-label.ts';
+import { canRenameService, processServiceHref, serviceLabel } from '../src/lib/service-label.ts';
 
 const PROJECT = '00000000-0000-4000-8000-000000000010';
 const OTHER = '00000000-0000-4000-8000-000000000099';
@@ -51,17 +51,4 @@ test('a process service link caps services.q at 100 code points', () => {
 	const emojiHref = new URL(processServiceHref(PROJECT, host, `${emoji}z`), 'http://console.example');
 	assert.equal(emojiHref.searchParams.get('services.q'), emoji);
 	assert.equal([...(emojiHref.searchParams.get('services.q') ?? '')].length, 100);
-});
-
-test('service edit links set and clear services.edit', () => {
-	const url = new URL(
-		`http://console.example/projects/${PROJECT}?tab=services&services.q=api&confirm=rename&/rename`
-	);
-	const href = serviceEditHref(url, '00000000-0000-4000-8000-0000000000bb');
-	assert.equal(
-		href,
-		`/projects/${PROJECT}?tab=services&services.q=api&services.edit=00000000-0000-4000-8000-0000000000bb`
-	);
-	const cancel = serviceEditCancelHref(new URL(href, 'http://console.example'));
-	assert.equal(cancel, `/projects/${PROJECT}?tab=services&services.q=api`);
 });

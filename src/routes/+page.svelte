@@ -1,1 +1,1 @@
-<p class="sub">Redirecting to projects.</p>
+<p class="text-muted-foreground text-sm">Redirecting to projects.</p>

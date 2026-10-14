@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
+	import CommandText from '$lib/components/CommandText.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
 	import LineChart from '$lib/components/LineChart.svelte';
 	import Notice from '$lib/components/Notice.svelte';
@@ -11,6 +12,8 @@
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 	import { RANGES, type RangeKey } from '$lib/ranges';
+	import { Button } from '$lib/components/ui/button';
+	import * as Card from '$lib/components/ui/card';
 
 	let {
 		host,
@@ -68,98 +71,106 @@
 	}
 </script>
 
-<dl class="facts">
-	<div><dt>Status</dt><dd><StatusBadge status={host.status} /></dd></div>
-	<div><dt>Last seen</dt><dd>{formatWhen(host.last_seen_at)}</dd></div>
-	<div><dt>Agent</dt><dd>{host.agent_version ?? 'n/a'}</dd></div>
-	<div><dt>System</dt><dd>{host.os}/{host.arch}</dd></div>
-	<div><dt>Always on</dt><dd>{host.always_on ? 'yes' : 'no'}</dd></div>
+<dl class="mb-4 grid gap-3 sm:grid-cols-2">
+	<div><dt class="text-muted-foreground text-sm">Status</dt><dd><StatusBadge status={host.status} /></dd></div>
+	<div><dt class="text-muted-foreground text-sm">Last seen</dt><dd>{formatWhen(host.last_seen_at)}</dd></div>
+	<div><dt class="text-muted-foreground text-sm">Agent</dt><dd class="font-mono">{host.agent_version ?? 'n/a'}</dd></div>
+	<div><dt class="text-muted-foreground text-sm">System</dt><dd>{host.os}/{host.arch}</dd></div>
+	<div><dt class="text-muted-foreground text-sm">Always on</dt><dd>{host.always_on ? 'yes' : 'no'}</dd></div>
 </dl>
 
-<nav class="ranges" aria-label="Time range">
+<nav class="mb-3 flex flex-wrap gap-2" aria-label="Time range">
 	{#each rangeKeys as key (key)}
-		<a href="?tab=overview&range={key}" aria-current={range === key ? 'page' : undefined}>{RANGES[key].label}</a>
+		<Button
+			href="?tab=overview&range={key}"
+			variant={range === key ? 'default' : 'outline'}
+			size="sm"
+			aria-current={range === key ? 'page' : undefined}>{RANGES[key].label}</Button>
 	{/each}
 </nav>
 
-<form method="POST" action={actionUrlFrom(page.url, 'snapshot')} use:enhance>
-	<button type="submit">Snapshot</button>
+<form method="POST" action={actionUrlFrom(page.url, 'snapshot')} class="mb-4" use:enhance>
+	<Button type="submit">Snapshot</Button>
 </form>
 
 {#if snapshot}
-	<div class="panel">
-		<h2>Snapshot</h2>
-		<p class="sub">Sampled {formatWhen(snapshot.sampled_at)}.</p>
-		<dl>
-			<div><dt>CPU</dt><dd>{formatPercent(snapshot.cpu_percent)}</dd></div>
-			<div>
-				<dt>Memory</dt>
-				<dd>
-					{snapshot.mem
-						? formatCapacity(snapshot.mem.used, snapshot.mem.total, snapshot.mem.used_percent)
-						: 'n/a'}
-				</dd>
-			</div>
-			<div>
-				<dt>Load</dt>
-				<dd>
-					{snapshot.load
-						? `${formatLoad(snapshot.load[0])} ${formatLoad(snapshot.load[1])} ${formatLoad(snapshot.load[2])}`
-						: 'n/a'}
-				</dd>
-			</div>
-			<div><dt>Temp</dt><dd>{formatTemp(snapshot.temp_celsius)}</dd></div>
-			<div><dt>Uptime</dt><dd>{formatUptime(snapshot.uptime_sec)}</dd></div>
-		</dl>
-		{#if snapshot.disks.length > 0}
-			<span id="snapshot-disks" class="sr">Disks</span>
-			<DataTable
-				rows={snapshot.disks}
-				columns={diskColumns}
-				id="snapshot-disks"
-				labelledBy="snapshot-disks"
-				empty="No disks."
-				rowKey={(disk) => disk.path}
-			>
-				{#snippet row(disk)}
-					<tr>
-						<td>{disk.path}</td>
-						<td>{formatCapacity(disk.used, disk.total, disk.used_percent)}</td>
-					</tr>
-				{/snippet}
-			</DataTable>
-		{/if}
-		{#if snapshot.top.length > 0}
-			<span id="snapshot-top" class="sr">Top processes</span>
-			<DataTable
-				rows={snapshot.top}
-				columns={topColumns}
-				id="snapshot-top"
-				labelledBy="snapshot-top"
-				empty="No processes."
-				rowKey={(row) => row.pid}
-			>
-				{#snippet row(row)}
-					<tr>
-						<td>{row.pid}</td>
-						<td class="wrap">{row.cmdline || row.process_name || 'n/a'}</td>
-						<td>{row.user || 'n/a'}</td>
-						<td>{rawNumber(row.cpu_usage)}</td>
-						<td>{formatBytes(row.memory_rss)}</td>
-					</tr>
-				{/snippet}
-			</DataTable>
-		{/if}
-	</div>
+	<Card.Root class="mb-4">
+		<Card.Header>
+			<Card.Title>Snapshot</Card.Title>
+			<Card.Description>Sampled {formatWhen(snapshot.sampled_at)}.</Card.Description>
+		</Card.Header>
+		<Card.Content class="grid min-w-0 gap-3">
+			<dl class="grid gap-2 sm:grid-cols-2">
+				<div><dt class="text-muted-foreground text-sm">CPU</dt><dd>{formatPercent(snapshot.cpu_percent)}</dd></div>
+				<div>
+					<dt class="text-muted-foreground text-sm">Memory</dt>
+					<dd>
+						{snapshot.mem
+							? formatCapacity(snapshot.mem.used, snapshot.mem.total, snapshot.mem.used_percent)
+							: 'n/a'}
+					</dd>
+				</div>
+				<div>
+					<dt class="text-muted-foreground text-sm">Load</dt>
+					<dd>
+						{snapshot.load
+							? `${formatLoad(snapshot.load[0])} ${formatLoad(snapshot.load[1])} ${formatLoad(snapshot.load[2])}`
+							: 'n/a'}
+					</dd>
+				</div>
+				<div><dt class="text-muted-foreground text-sm">Temp</dt><dd>{formatTemp(snapshot.temp_celsius)}</dd></div>
+				<div><dt class="text-muted-foreground text-sm">Uptime</dt><dd>{formatUptime(snapshot.uptime_sec)}</dd></div>
+			</dl>
+			{#if snapshot.disks.length > 0}
+				<span id="snapshot-disks" class="sr-only">Disks</span>
+				<DataTable
+					rows={snapshot.disks}
+					columns={diskColumns}
+					id="snapshot-disks"
+					labelledBy="snapshot-disks"
+					empty="No disks."
+					rowKey={(disk) => disk.path}
+				>
+					{#snippet row(disk)}
+						<tr>
+							<td class="p-2 align-middle font-mono">{disk.path}</td>
+							<td class="p-2 align-middle">{formatCapacity(disk.used, disk.total, disk.used_percent)}</td>
+						</tr>
+					{/snippet}
+				</DataTable>
+			{/if}
+			{#if snapshot.top.length > 0}
+				<span id="snapshot-top" class="sr-only">Top processes</span>
+				<DataTable
+					rows={snapshot.top}
+					columns={topColumns}
+					id="snapshot-top"
+					labelledBy="snapshot-top"
+					empty="No processes."
+					rowKey={(row) => row.pid}
+				>
+					{#snippet row(row)}
+						<tr>
+							<td class="p-2 align-middle font-mono">{row.pid}</td>
+							<td class="max-w-64 p-2 align-middle"><CommandText value={row.cmdline || row.process_name || 'n/a'} /></td>
+							<td class="p-2 align-middle">{row.user || 'n/a'}</td>
+							<td class="p-2 text-right font-mono align-middle">{rawNumber(row.cpu_usage)}</td>
+							<td class="p-2 text-right font-mono align-middle">{formatBytes(row.memory_rss)}</td>
+						</tr>
+					{/snippet}
+				</DataTable>
+			{/if}
+		</Card.Content>
+	</Card.Root>
 {/if}
 
-<p class="sub">Charts refresh every 30 seconds while this tab is visible.</p>
+<p class="text-muted-foreground mb-3 text-sm">Charts refresh every 30 seconds while this tab is visible.</p>
 
-<div class="charts">
+<div class="grid min-w-0 gap-4 md:grid-cols-2">
 	{#each charts as item (item.spec.m)}
 		{#if item.chart?.message}
-			<figure class="chart">
-				<h2>{item.spec.title}</h2>
+			<figure class="bg-card min-w-0 rounded-xl p-3 ring-1 ring-foreground/10">
+				<h2 class="mb-2 text-base font-medium">{item.spec.title}</h2>
 				<Notice kind="error">{item.chart.message}</Notice>
 			</figure>
 		{:else}

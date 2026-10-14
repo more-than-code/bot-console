@@ -1,6 +1,8 @@
 <script lang="ts" generics="Row">
 	import { page } from '$app/state';
 	import type { Snippet } from 'svelte';
+	import { Button } from '$lib/components/ui/button';
+	import * as Table from '$lib/components/ui/table';
 	import {
 		applyTable,
 		ariaSort,
@@ -123,58 +125,56 @@
 	/>
 {/if}
 {#if shown.length === 0}
-	<p class="empty">{empty}</p>
+	<p class="text-muted-foreground text-sm">{empty}</p>
 {:else}
-	<div class="table-wrap">
-		<table class="data" aria-labelledby={labelledBy}>
-			<thead>
-				<tr>
-					{#each columns as column (column.key)}
-						<th scope="col" class:num={column.numeric} aria-sort={ariaSort(column, active)}>
-							{#if column.sortable}
-								<a class="sort" href={sortLink(column)} aria-label={sortName(column)}>
-									{#if column.srLabel}<span class="sr">{column.label}</span>{:else}{column.label}{/if}
-								</a>
-							{:else if column.srLabel}
-								<span class="sr">{column.label}</span>
-							{:else}
-								{column.label}
-							{/if}
-						</th>
-					{/each}
-				</tr>
-			</thead>
-			<tbody>
-				{#each shown as item, index (rowKey ? rowKey(item) : index)}
-					{@render row(item)}
+	<Table.Root aria-labelledby={labelledBy}>
+		<Table.Header>
+			<Table.Row>
+				{#each columns as column (column.key)}
+					<Table.Head scope="col" class={column.numeric ? 'text-right' : undefined} aria-sort={ariaSort(column, active)}>
+						{#if column.sortable}
+							<Button href={sortLink(column)} variant="ghost" size="sm" class="-ml-2" aria-label={sortName(column)}>
+								{#if column.srLabel}<span class="sr-only">{column.label}</span>{:else}{column.label}{/if}
+							</Button>
+						{:else if column.srLabel}
+							<span class="sr-only">{column.label}</span>
+						{:else}
+							{column.label}
+						{/if}
+					</Table.Head>
 				{/each}
-			</tbody>
-		</table>
-	</div>
+			</Table.Row>
+		</Table.Header>
+		<Table.Body>
+			{#each shown as item, index (rowKey ? rowKey(item) : index)}
+				{@render row(item)}
+			{/each}
+		</Table.Body>
+	</Table.Root>
 	{#if showPager}
-		<nav class="pager" aria-label="Pagination">
+		<nav class="pager mt-3 flex flex-wrap items-center gap-2 text-sm" aria-label="Pagination">
 			<span>{pagerText}</span>
 			{#if server}
 				{#if server.prevCursor}
-					<a href={cursorHref(server.prevCursor)}>Prev</a>
+					<Button href={cursorHref(server.prevCursor)} variant="outline" size="sm">Prev</Button>
 				{:else}
-					<span class="pager-muted">Prev</span>
+					<Button variant="outline" size="sm" disabled>Prev</Button>
 				{/if}
 				{#if server.nextCursor}
-					<a href={cursorHref(server.nextCursor)}>Next</a>
+					<Button href={cursorHref(server.nextCursor)} variant="outline" size="sm">Next</Button>
 				{:else}
-					<span class="pager-muted">Next</span>
+					<Button variant="outline" size="sm" disabled>Next</Button>
 				{/if}
 			{:else if clientView}
 				{#if clientView.page > 1}
-					<a href={tableHref(page.url, id, { page: clientView.page - 1 })}>Prev</a>
+					<Button href={tableHref(page.url, id, { page: clientView.page - 1 })} variant="outline" size="sm">Prev</Button>
 				{:else}
-					<span class="pager-muted">Prev</span>
+					<Button variant="outline" size="sm" disabled>Prev</Button>
 				{/if}
 				{#if clientView.page < clientView.pages}
-					<a href={tableHref(page.url, id, { page: clientView.page + 1 })}>Next</a>
+					<Button href={tableHref(page.url, id, { page: clientView.page + 1 })} variant="outline" size="sm">Next</Button>
 				{:else}
-					<span class="pager-muted">Next</span>
+					<Button variant="outline" size="sm" disabled>Next</Button>
 				{/if}
 			{/if}
 		</nav>

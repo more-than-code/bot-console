@@ -2,7 +2,7 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
-	import type { ProjectActionData, ProjectScope } from '$lib/project-action';
+	import { servicesRenameView, type ProjectActionData, type ProjectScope } from '$lib/project-action';
 	import HostsSection from './HostsSection.svelte';
 	import MembersSection from './MembersSection.svelte';
 	import ServicesSection from './ServicesSection.svelte';
@@ -13,6 +13,7 @@
 	const action = $derived((form ?? null) as ProjectActionData | null);
 	const scope = $derived<ProjectScope>(action?.scope ?? data.tab ?? 'hosts');
 	const sectionMessage = $derived(action?.scope === scope ? (action.message ?? null) : null);
+	const rename = $derived(servicesRenameView(action));
 
 	const tabs = $derived(
 		data.project
@@ -68,8 +69,8 @@
 			message={sectionMessage ?? data.servicesMessage}
 			probe={action?.scope === 'services' ? (action.probe ?? null) : null}
 			probeServiceId={action?.scope === 'services' ? (action.probeServiceId ?? null) : null}
-			renameServiceId={action?.scope === 'services' ? (action.renameServiceId ?? null) : null}
-			typedName={action?.scope === 'services' && action.displayName != null ? action.displayName : null}
+			renameServiceId={rename.renameServiceId}
+			typedName={rename.typedName}
 		/>
 	{:else if scope === 'members'}
 		<MembersSection

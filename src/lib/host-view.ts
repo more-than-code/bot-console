@@ -56,8 +56,8 @@ export const METRIC_SPECS: readonly MetricSpec[] = [
 		yMax: null,
 		format: 'rate',
 		series: [
-			{ name: 'rx_bps', label: 'Receive', color: 'var(--chart-6)' },
-			{ name: 'tx_bps', label: 'Transmit', color: 'var(--chart-7)' }
+			{ name: 'rx_bps', label: 'Receive', color: 'var(--chart-1)' },
+			{ name: 'tx_bps', label: 'Transmit', color: 'var(--chart-5)' }
 		]
 	},
 	{
@@ -67,8 +67,8 @@ export const METRIC_SPECS: readonly MetricSpec[] = [
 		yMax: null,
 		format: 'rate',
 		series: [
-			{ name: 'read_bps', label: 'Read', color: 'var(--chart-6)' },
-			{ name: 'write_bps', label: 'Write', color: 'var(--chart-7)' }
+			{ name: 'read_bps', label: 'Read', color: 'var(--chart-2)' },
+			{ name: 'write_bps', label: 'Write', color: 'var(--chart-4)' }
 		]
 	},
 	{

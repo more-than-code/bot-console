@@ -1,7 +1,14 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
-	import { page } from '$app/state';
-	import { confirmHref, confirmIsOpen, typeToConfirmMatches } from '$lib/confirm';
+	import Ban from '@lucide/svelte/icons/ban';
+	import ShieldOff from '@lucide/svelte/icons/shield-off';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import UserMinus from '@lucide/svelte/icons/user-minus';
+	import type { Component } from 'svelte';
+	import ConfirmForm from '$lib/components/ConfirmForm.svelte';
+	import RowAction from '$lib/components/RowAction.svelte';
+	import { nextFormDialog, type DialogOutcome } from '$lib/dialog-open';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog';
+	import { buttonVariants } from '$lib/components/ui/button';
 
 	type TypeToConfirm = {
 		name: string;
@@ -16,7 +23,8 @@
 		confirmLabel,
 		message,
 		hidden = [],
-		typeToConfirm = null
+		typeToConfirm = null,
+		rowLabel = null
 	}: {
 		id: string;
 		action: string;
@@ -26,79 +34,57 @@
 		hidden?: Array<{ name: string; value: string }>;
 		/** Visible text the user must type. Nothing hidden carries `expected`. */
 		typeToConfirm?: TypeToConfirm | null;
+		/** Set on a table row. The trigger is then icon-only. */
+		rowLabel?: string | null;
 	} = $props();
 
-	let opened = $state(false);
-	let dismissed = $state(false);
+	let open = $state(false);
+	let sawFailure = $state(false);
 	let typed = $state('');
-	let js = $state(false);
-	let confirmButton = $state<HTMLButtonElement | null>(null);
-	let confirmInput = $state<HTMLInputElement | null>(null);
 
-	const showing = $derived(confirmIsOpen(opened, page.url.searchParams.get('confirm'), id, dismissed));
-	const confirmLink = $derived(confirmHref(page.url, id));
-	const matched = $derived(typeToConfirm == null || typeToConfirmMatches(typed, typeToConfirm.expected));
-
-	const cancelHref = $derived.by(() => {
-		const params = new URLSearchParams(page.url.searchParams);
-		params.delete('confirm');
-		const qs = params.toString();
-		return qs ? `${page.url.pathname}?${qs}` : page.url.pathname;
-	});
-
-	function plainClick(event: MouseEvent): boolean {
-		return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+	function settle(outcome: DialogOutcome) {
+		const next = nextFormDialog({ open, sawFailure }, outcome);
+		open = next.open;
+		sawFailure = next.sawFailure;
+		if (next.resetDraft) typed = '';
 	}
 
-	function open(event: MouseEvent) {
-		if (!plainClick(event)) return;
-		event.preventDefault();
-		typed = '';
-		dismissed = false;
-		opened = true;
+	const destructive = $derived(/delete|remove|revoke/i.test(label));
+
+	function rowIcon(text: string): Component {
+		if (/credential/i.test(text)) return ShieldOff;
+		if (/remove/i.test(text)) return UserMinus;
+		if (/delete/i.test(text)) return Trash2;
+		return Ban;
 	}
 
-	function close(event: MouseEvent) {
-		if (!plainClick(event)) return;
-		event.preventDefault();
-		typed = '';
-		opened = false;
-		dismissed = true;
-	}
-
-	$effect(() => {
-		js = true;
-	});
-
-	$effect(() => {
-		if (!opened) return;
-		if (typeToConfirm) confirmInput?.focus();
-		else confirmButton?.focus();
-	});
+	const Icon = $derived(rowIcon(rowLabel ?? label));
 </script>
 
-{#if showing}
-	<form method="POST" {action} use:enhance>
-		<p>{message}</p>
-		{#each hidden as field (field.name)}
-			<input type="hidden" name={field.name} value={field.value} />
-		{/each}
-		{#if typeToConfirm}
-			<label class="field">
-				{typeToConfirm.label}
-				<input name={typeToConfirm.name} autocomplete="off" bind:value={typed} bind:this={confirmInput} />
-			</label>
-		{/if}
-		<div class="actions">
-			<button
-				type="submit"
-				class="danger"
-				disabled={js && typeToConfirm != null && !matched}
-				bind:this={confirmButton}
-			>{confirmLabel}</button>
-			<a href={cancelHref} onclick={close}>Cancel</a>
-		</div>
-	</form>
-{:else}
-	<a class="button danger" href={confirmLink} onclick={open}>{label}</a>
-{/if}
+<AlertDialog.Root bind:open>
+	{#if rowLabel}
+		<RowAction label={rowLabel} icon={Icon} {destructive}>
+			{#snippet trigger(props)}
+				<AlertDialog.Trigger {...props}>
+					<Icon class="size-4" />
+				</AlertDialog.Trigger>
+			{/snippet}
+		</RowAction>
+	{:else}
+		<AlertDialog.Trigger class={buttonVariants({ variant: destructive ? 'destructive' : 'outline', size: 'sm' })}>
+			<Icon class="size-4" />
+			{label}
+		</AlertDialog.Trigger>
+	{/if}
+	<AlertDialog.Content>
+		<AlertDialog.Header>
+			<AlertDialog.Title>{confirmLabel}</AlertDialog.Title>
+			<AlertDialog.Description>{message}</AlertDialog.Description>
+		</AlertDialog.Header>
+		<ConfirmForm {id} {action} {confirmLabel} {hidden} {typeToConfirm} bind:typed onSettled={settle}>
+			{#snippet cancel()}
+				<AlertDialog.Cancel type="button">Cancel</AlertDialog.Cancel>
+			{/snippet}
+		</ConfirmForm>
+	</AlertDialog.Content>
+</AlertDialog.Root>

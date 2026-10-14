@@ -36,21 +36,21 @@
 	<Notice kind="error">{message}</Notice>
 {/if}
 {#if omitted > 0}
-	<p class="sub">{omitted} more {omitted === 1 ? 'row' : 'rows'} left out.</p>
+	<p class="text-muted-foreground mb-2 text-sm">{omitted} more {omitted === 1 ? 'row' : 'rows'} left out.</p>
 {/if}
 {#if truncated}
-	<p class="sub">More items not shown</p>
+	<p class="text-muted-foreground mb-2 text-sm">More items not shown</p>
 {/if}
-<h2 id="hosts-heading" class="sr">Hosts</h2>
+<h2 id="hosts-heading" class="sr-only">Hosts</h2>
 <DataTable rows={hosts} {columns} id="hosts" labelledBy="hosts-heading" empty="No hosts enrolled." rowKey={(host) => host.id}>
 	{#snippet row(host)}
 		<tr>
-			<td><a href="/hosts/{host.id}">{host.name}</a></td>
-			<td><StatusBadge status={host.status} /></td>
-			<td>{formatWhen(host.last_seen_at)}</td>
-			<td>{host.agent_version ?? 'n/a'}</td>
+			<td class="p-2 align-middle"><a class="text-primary underline-offset-4 hover:underline" href="/hosts/{host.id}">{host.name}</a></td>
+			<td class="p-2 align-middle"><StatusBadge status={host.status} /></td>
+			<td class="p-2 align-middle">{formatWhen(host.last_seen_at)}</td>
+			<td class="p-2 align-middle font-mono">{host.agent_version ?? 'n/a'}</td>
 			{#if canAdmin}
-				<td>
+				<td class="p-2 align-middle">
 					<ConfirmAction
 						id="revoke-host-{host.id}"
 						action={actionUrlFrom(page.url, 'revokeCredential')}
@@ -58,6 +58,7 @@
 						confirmLabel="Revoke credential"
 						message="Revoke the credential for {host.name}? The agent connection closes."
 						hidden={[{ name: 'host_id', value: host.id }]}
+						rowLabel="Revoke credential {host.name}"
 					/>
 				</td>
 			{/if}

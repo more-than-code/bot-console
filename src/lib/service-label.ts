@@ -54,27 +54,3 @@ export function canRenameService(input: {
 	if (input.hostOwnerProjectId === input.projectId) return true;
 	return input.serviceProjectId === input.projectId;
 }
-
-/** Open the inline rename form. Keeps the table query. */
-export function serviceEditHref(url: URL, serviceId: string): string {
-	const params = new URLSearchParams(url.searchParams);
-	for (const key of [...params.keys()]) {
-		if (key.startsWith('/')) params.delete(key);
-	}
-	params.delete('confirm');
-	params.set('services.edit', serviceId);
-	const qs = params.toString();
-	return qs ? `${url.pathname}?${qs}` : url.pathname;
-}
-
-/** Leave the inline rename form without posting. */
-export function serviceEditCancelHref(url: URL): string {
-	const params = new URLSearchParams(url.searchParams);
-	params.delete('services.edit');
-	for (const key of [...params.keys()]) {
-		if (key.startsWith('/')) params.delete(key);
-	}
-	params.delete('confirm');
-	const qs = params.toString();
-	return qs ? `${url.pathname}?${qs}` : url.pathname;
-}

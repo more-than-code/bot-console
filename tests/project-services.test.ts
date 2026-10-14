@@ -1,15 +1,19 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
 import { render } from 'svelte/server';
 import type { Host, ProbeView, ProcessSample, ProjectServiceRow } from '../src/lib/api-types.ts';
+import RenameForm from '../src/lib/components/RenameForm.svelte';
+import { serviceHostReachable } from '../src/lib/host-view.ts';
+import { nextRenameOpen, servicesRenameView } from '../src/lib/project-action.ts';
 import ProcessesTab from '../src/routes/hosts/[id]/ProcessesTab.svelte';
 import { load as hostLoad } from '../src/routes/hosts/[id]/+page.server.ts';
 import ProjectPage from '../src/routes/projects/[id]/+page.svelte';
 import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import { actions as projectActions, load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
 import { formatLatency, formatWhen } from '../src/lib/format.ts';
-import { serviceEditCancelHref, serviceEditHref } from '../src/lib/service-label.ts';
+
 import { parseHost, parseListPayload, parseProjectService, parseService, parseServicePage } from '../src/lib/server/shape.ts';
 import { actionUrlFrom } from '../src/lib/url.ts';
 import {
@@ -317,8 +321,8 @@ describe('project services', { concurrency: false }, () => {
 		assert.match(unreachableHtml, /That host is not available for this project\./);
 	});
 
-	test('rename keeps the table query, drops services.edit, and keeps a rejected value', async () => {
-		const url = `http://console.example/projects/${PROJECT.id}?tab=services&services.q=api&services.sort=host&services.dir=asc&services.cursor=abc&services.edit=${SERVICE_ID}&/rename`;
+	test('rename keeps the table query and keeps a rejected value', async () => {
+		const url = `http://console.example/projects/${PROJECT.id}?tab=services&services.q=api&services.sort=host&services.dir=asc&services.cursor=abc&/rename`;
 		const calls = installFetch((call) => {
 			assert.equal(call.method, 'PATCH');
 			assert.equal(call.url.pathname, `/v1/services/${SERVICE_ID}`);
@@ -346,7 +350,6 @@ describe('project services', { concurrency: false }, () => {
 				assert.equal(dest.searchParams.get('services.sort'), 'host');
 				assert.equal(dest.searchParams.get('services.dir'), 'asc');
 				assert.equal(dest.searchParams.get('services.cursor'), 'abc');
-				assert.equal(dest.searchParams.has('services.edit'), false);
 				assert.equal(dest.searchParams.has('/rename'), false);
 				return true;
 			}
@@ -409,18 +412,31 @@ describe('project services', { concurrency: false }, () => {
 			assert.equal(rejectedData.message, code);
 			assert.equal(rejectedData.displayName, '  Widget  ');
 			assert.equal(rejectedData.renameServiceId, SERVICE_ID);
+			const view = servicesRenameView({
+				scope: 'services',
+				message: rejectedData.message,
+				renameServiceId: rejectedData.renameServiceId,
+				displayName: rejectedData.displayName
+			});
+			assert.equal(view.open, true);
+			assert.equal(view.renameServiceId, SERVICE_ID);
+			assert.equal(view.typedName, '  Widget  ');
 			setPageUrl(url);
 			const rejectedHtml = decode(
-				renderServices([serviceRow('Lab')], {
-					message: rejectedData.message,
-					renameServiceId: rejectedData.renameServiceId,
-					typedName: rejectedData.displayName
-				})
+				render(RenameForm, {
+					props: {
+						action: actionUrlFrom(new URL(url), 'rename'),
+						serviceId: view.renameServiceId ?? SERVICE_ID,
+						value: view.typedName ?? '',
+						message: rejectedData.message ?? null
+					}
+				}).body
 			);
 			assert.match(rejectedHtml, /role="alert"/);
 			assert.equal(rejectedHtml.includes(code), true);
 			assert.equal(rejectedHtml.includes('value="  Widget  "'), true);
 			assert.match(rejectedHtml, /name="display_name"/);
+			assert.equal(namedControl(rejectedHtml, 'clear', '1'), true);
 		}
 
 		const projectRename = installFetch(() => envelope(null));
@@ -774,8 +790,8 @@ describe('project services', { concurrency: false }, () => {
 		setPageUrl(url);
 		const html = decode(render(ProjectPage, { props: { data: data as never, form: null } }).body);
 		assert.match(html, /aria-current="page">Services</);
-		assert.equal(html.includes('>Rename<'), false);
-		assert.match(html, />Probe</);
+		assert.equal(html.includes('aria-label="Rename '), false);
+		assert.match(html, /aria-label="Probe api http 80"/);
 	});
 
 	test('a search over 100 characters or containing NUL is refused before the API', async () => {
@@ -916,7 +932,7 @@ test('the Project column renders only when a row is from another project', () =>
 	assert.equal(same.includes('>Project<'), false);
 	const mixed = decode(renderServices([serviceRow('Lab'), serviceRow('Other', { id: CHECK_ID, project_name: 'Other' })]));
 	assert.equal(mixed.includes('>Project<'), true);
-	assert.equal(same.includes('>Rename<'), true);
+	assert.match(same, /aria-label="Rename Widget"/);
 
 	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
 	const viewer = decode(
@@ -924,21 +940,21 @@ test('the Project column renders only when a row is from another project', () =>
 			canAdmin: false
 		})
 	);
-	assert.equal(viewer.includes('>Rename<'), false);
+	assert.equal(viewer.includes('aria-label="Rename '), false);
 
 	const foreign = decode(
 		renderServices([serviceRow('Other', { project_id: OTHER_ID, project_name: 'Other' })], {
 			hosts: [hostRow(OTHER_ID)]
 		})
 	);
-	assert.equal(foreign.includes('>Rename<'), false);
+	assert.equal(foreign.includes('aria-label="Rename '), false);
 
 	const shared = decode(
 		renderServices([serviceRow('Lab', { project_id: PROJECT.id })], {
 			hosts: [hostRow(OTHER_ID)]
 		})
 	);
-	assert.equal(shared.includes('>Rename<'), true);
+	assert.match(shared, /aria-label="Rename Widget"/);
 });
 
 test('the project probe form keeps the table query and shows the service label', () => {
@@ -960,7 +976,6 @@ test('the project probe form keeps the table query and shows the service label',
 	assert.equal(action.includes('services.q=api'), true);
 	assert.equal(action.includes('services.sort'), true);
 	assert.equal(action.includes('&/probe'), true);
-	assert.equal(action.includes('services.edit'), false);
 	setPageUrl(pageUrl);
 	const html = decode(
 		renderServices([serviceRow('Lab')], {
@@ -1023,7 +1038,10 @@ test('a process row links for a member and stays plain text otherwise', () => {
 		}).body
 	);
 	assert.equal(linked.includes(href), true);
-	assert.equal(linked.includes(`<a href="${href}">API</a>`), true);
+	assert.equal(
+		[...linked.matchAll(/<a\b[^>]*>API<\/a>/g)].some((match) => match[0].includes(`href="${href}"`)),
+		true
+	);
 	assert.match(linked, />node</);
 	assert.match(linked, />orphan</);
 	assert.equal(linked.includes('>node</a>'), false);
@@ -1049,23 +1067,60 @@ test('a process row links for a member and stays plain text otherwise', () => {
 	assert.equal(plain.includes('>node</a>'), false);
 });
 
-test('services.edit renders the rename form only when that row may be renamed', () => {
-	const url = new URL(
-		`http://console.example/projects/${PROJECT.id}?tab=services&services.q=api&services.edit=${SERVICE_ID}`
-	);
+test('a failed rename opens from the action result and a success closes it', () => {
+	assert.deepEqual(nextRenameOpen({ open: false, sawFailure: false }, true), { open: true, sawFailure: true });
+	assert.deepEqual(nextRenameOpen({ open: true, sawFailure: true }, true), { open: true, sawFailure: true });
+	assert.deepEqual(nextRenameOpen({ open: false, sawFailure: true }, true), { open: false, sawFailure: true });
+	assert.deepEqual(nextRenameOpen({ open: true, sawFailure: true }, false), { open: false, sawFailure: false });
+	assert.deepEqual(nextRenameOpen({ open: true, sawFailure: false }, false), { open: true, sawFailure: false });
+	assert.deepEqual(nextRenameOpen({ open: false, sawFailure: false }, false), { open: false, sawFailure: false });
+
+	const failed = servicesRenameView({
+		scope: 'services',
+		message: 'conflict',
+		renameServiceId: SERVICE_ID,
+		displayName: '  Widget  '
+	});
+	assert.equal(failed.open, true);
+	assert.equal(failed.renameServiceId, SERVICE_ID);
+	assert.equal(failed.typedName, '  Widget  ');
+	assert.deepEqual(servicesRenameView(null), { renameServiceId: null, typedName: null, open: false });
+	assert.deepEqual(servicesRenameView({ scope: 'hosts', message: 'no' }), {
+		renameServiceId: null,
+		typedName: null,
+		open: false
+	});
+	assert.deepEqual(servicesRenameView({ scope: 'services', message: 'saved' }), {
+		renameServiceId: null,
+		typedName: null,
+		open: false
+	});
+	const opened = servicesRenameView({ scope: 'services', renameServiceId: SERVICE_ID });
+	assert.equal(opened.open, true);
+	assert.equal(opened.typedName, null);
+});
+
+test('the rename dialog posts display_name only when that row may be renamed', () => {
+	const url = new URL(`http://console.example/projects/${PROJECT.id}?tab=services&services.q=api`);
 	setPageUrl(url);
 	const html = decode(renderServices([serviceRow('Lab')]));
+	assert.match(html, /aria-label="Rename Widget"/);
+	assert.equal(html.includes('name="display_name"'), false);
+
 	const action = actionUrlFrom(url, 'rename');
-	assert.equal(html.includes(`action="${action}"`), true);
-	assert.match(html, /method="POST"/);
-	assert.match(html, new RegExp(`name="service_id"[^>]*value="${SERVICE_ID}"`));
-	assert.match(html, /name="display_name"/);
-	assert.match(html, /maxlength="64"/);
-	assert.match(html, />Save</);
-	assert.match(html, /name="clear"[^>]*value="1"/);
-	assert.match(html, />Clear</);
-	assert.equal(html.includes(`href="${serviceEditCancelHref(url)}"`), true);
-	assert.equal(html.includes('>Rename<'), false);
+	const form = decode(
+		render(RenameForm, {
+			props: { action, serviceId: SERVICE_ID, value: 'Widget' }
+		}).body
+	);
+	assert.equal(form.includes(`action="${action}"`), true);
+	assert.match(form, /method="POST"/);
+	assert.equal(hiddenInput(form, 'service_id', SERVICE_ID), true);
+	assert.match(form, /name="display_name"/);
+	assert.match(form, /maxlength="64"/);
+	assert.match(form, />Save</);
+	assert.equal(namedControl(form, 'clear', '1'), true);
+	assert.match(form, />Clear</);
 
 	const blocked = decode(
 		renderServices([serviceRow('Other', { project_id: OTHER_ID, project_name: 'Other' })], {
@@ -1073,14 +1128,14 @@ test('services.edit renders the rename form only when that row may be renamed', 
 		})
 	);
 	assert.equal(blocked.includes('name="display_name"'), false);
-	assert.equal(blocked.includes('>Rename<'), false);
+	assert.equal(blocked.includes('aria-label="Rename '), false);
 	assert.equal(blocked.includes('>Save<'), false);
 	assert.equal(blocked.includes('Widget'), true);
 
 	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
 	const unknownHost = decode(renderServices([serviceRow('Lab')], { hosts: [] }));
-	assert.match(unknownHost, />Rename</);
-	assert.equal(unknownHost.includes(serviceEditHref(new URL(`http://console.example/projects/${PROJECT.id}?tab=services`), SERVICE_ID)), true);
+	assert.match(unknownHost, /aria-label="Rename Widget"/);
+	assert.equal(unknownHost.includes('name="display_name"'), false);
 });
 
 test('the host filter lists owned hosts and deploy shares', () => {
@@ -1099,13 +1154,19 @@ test('the host filter lists owned hosts and deploy shares', () => {
 		})
 	);
 	assert.match(html, /name="services\.host"/);
-	assert.match(html, />All hosts</);
+	assert.match(html, /All hosts/);
 	assert.match(html, />pi1</);
-	assert.match(html, />deploy-box</);
 	assert.equal(html.includes('metrics-box'), false);
 	assert.equal(html.includes(metricsId), false);
-	assert.equal(html.includes(deployId), true);
-	const hostForm = html.slice(html.indexOf('class="form-row"'), html.indexOf('</form>'));
+	assert.equal(serviceHostReachable(hostRow(PROJECT.id)), true);
+	assert.equal(serviceHostReachable({ relation: 'shared', share_level: 'deploy' }), true);
+	assert.equal(serviceHostReachable({ relation: 'shared', share_level: 'metrics' }), false);
+	const servicesSource = readFileSync(new URL('../src/routes/projects/[id]/ServicesSection.svelte', import.meta.url), 'utf8');
+	assert.match(servicesSource, /hosts\.filter\(\(host\) => serviceHostReachable\(host\)\)/);
+	assert.match(servicesSource, /\{#each serviceHosts/);
+	assert.match(servicesSource, /placeholder="All hosts"/);
+	const methodAt = html.indexOf('method="GET"');
+	const hostForm = html.slice(html.lastIndexOf('<form', methodAt), html.indexOf('</form>', methodAt));
 	assert.equal(hiddenInput(hostForm, 'services.q', 'api'), true);
 	assert.equal(hiddenInput(hostForm, 'services.sort', 'host'), true);
 	assert.equal(hiddenInput(hostForm, 'services.dir', 'desc'), true);
@@ -1116,5 +1177,12 @@ function hiddenInput(html: string, name: string, value: string): boolean {
 	return [...html.matchAll(/<input\b[^>]*>/g)].some((match) => {
 		const tag = match[0];
 		return tag.includes('type="hidden"') && tag.includes(`name="${name}"`) && tag.includes(`value="${value}"`);
+	});
+}
+
+function namedControl(html: string, name: string, value: string): boolean {
+	return [...html.matchAll(/<(?:button|input)\b[^>]*>/g)].some((match) => {
+		const tag = match[0];
+		return tag.includes(`name="${name}"`) && tag.includes(`value="${value}"`);
 	});
 }

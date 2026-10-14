@@ -8,6 +8,10 @@
 	import { formatWhen } from '$lib/format';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
+	import { Button } from '$lib/components/ui/button';
+	import * as Card from '$lib/components/ui/card';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
 
 	let { data, form } = $props();
 
@@ -28,19 +32,28 @@
 	<Notice kind="error">{form?.message ?? data.message}</Notice>
 {/if}
 
-<form method="POST" action={actionUrlFrom(page.url, 'create')} class="panel" use:enhance>
-	<label class="field">
-		New project name
-		<input name="name" required maxlength="80" autocomplete="off" />
-	</label>
-	<button type="submit">Create project</button>
-</form>
+<Card.Root class="mb-6">
+	<Card.Header>
+		<Card.Title>New project</Card.Title>
+	</Card.Header>
+	<Card.Content>
+		<form method="POST" action={actionUrlFrom(page.url, 'create')} class="grid gap-3" use:enhance>
+			<Label class="grid gap-1.5" for="project-name">
+				New project name
+				<Input id="project-name" name="name" required maxlength={80} autocomplete="off" />
+			</Label>
+			<div>
+				<Button type="submit">Create project</Button>
+			</div>
+		</form>
+	</Card.Content>
+</Card.Root>
 
 {#if data.omitted > 0}
-	<p class="sub">{data.omitted} more {data.omitted === 1 ? 'row' : 'rows'} left out.</p>
+	<p class="text-muted-foreground mb-2 text-sm">{data.omitted} more {data.omitted === 1 ? 'row' : 'rows'} left out.</p>
 {/if}
 {#if data.truncated}
-	<p class="sub">More items not shown</p>
+	<p class="text-muted-foreground mb-2 text-sm">More items not shown</p>
 {/if}
 <DataTable
 	rows={data.projects}
@@ -52,10 +65,10 @@
 >
 	{#snippet row(project)}
 		<tr>
-			<td><a href="/projects/{project.id}">{project.name}</a></td>
-			<td>{project.slug}</td>
-			<td>{project.role}</td>
-			<td>{formatWhen(project.created_at)}</td>
+			<td class="p-2 align-middle"><a class="text-primary underline-offset-4 hover:underline" href="/projects/{project.id}">{project.name}</a></td>
+			<td class="p-2 align-middle">{project.slug}</td>
+			<td class="p-2 align-middle">{project.role}</td>
+			<td class="p-2 align-middle">{formatWhen(project.created_at)}</td>
 		</tr>
 	{/snippet}
 </DataTable>

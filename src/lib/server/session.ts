@@ -57,6 +57,7 @@ export function isStaticAsset(pathname: string): boolean {
 export function isPublicPath(pathname: string): boolean {
 	const path = logicalPath(pathname);
 	if (path === '/signin' || path.startsWith('/signin/')) return true;
+	if (path === '/theme' || path.startsWith('/theme/')) return true;
 	if (path === '/auth/google/callback') return true;
 	return isStaticAsset(path);
 }
