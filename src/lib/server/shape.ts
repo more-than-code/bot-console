@@ -1,4 +1,5 @@
 import type {
+	CreatedInvite,
 	DeviceView,
 	Grant,
 	Health,
@@ -6,6 +7,8 @@ import type {
 	Host,
 	HostStatus,
 	ShareLevel,
+	Invite,
+	InviteLookup,
 	JoinToken,
 	Member,
 	ProbeView,
@@ -19,7 +22,7 @@ import type {
 	User
 } from '../api-types';
 import { isRole } from './roles';
-import { acceptedInstallCommand, consentRedirect, isJoinToken, isOauthRequestId, isUuid } from './validate';
+import { acceptedInstallCommand, acceptedInviteUrl, consentRedirect, isJoinToken, isOauthRequestId, isUuid } from './validate';
 
 const CONTROL = /[\u0000-\u001F\u007F]/;
 const PATH_MAX_BYTES = 512;
@@ -177,6 +180,61 @@ export function parseJoinToken(value: unknown): JoinToken | null {
 	if (used_by_host_id === undefined) return null;
 	if (used_by_host_id !== null && !isUuid(used_by_host_id)) return null;
 	return { id, host_name_hint, created_by, created_at, expires_at, used_at, used_by_host_id, revoked_at };
+}
+
+function inviteRole(value: unknown): Invite['role'] | null {
+	if (value === 'admin' || value === 'viewer') return value;
+	return null;
+}
+
+function boundedInt(value: unknown, min: number, max: number): number | null {
+	if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) return null;
+	return value;
+}
+
+/** List row. Extra fields, including token and url, are dropped. A bad field fails the row. */
+export function parseInvite(value: unknown): Invite | null {
+	if (!isRecord(value)) return null;
+	const id = text(value.id, 36);
+	const created_by = text(value.created_by, 36);
+	const created_at = timestamp(value.created_at);
+	const expires_at = timestamp(value.expires_at);
+	const role = inviteRole(value.role);
+	const max_uses = boundedInt(value.max_uses, 1, 50);
+	const uses = boundedInt(value.uses, 0, 50);
+	const revoked_at = optionalText(value.revoked_at, 64);
+	if (!id || !isUuid(id) || !created_by || !isUuid(created_by) || !created_at || !expires_at || !role) return null;
+	if (max_uses == null || uses == null || uses > max_uses || revoked_at === undefined) return null;
+	return { id, role, created_by, created_at, expires_at, max_uses, uses, revoked_at };
+}
+
+/** Create body. The plaintext token is checked, then only the url and role are kept. */
+export function parseCreatedInvite(value: unknown, origin: string): CreatedInvite | null {
+	const invite = parseInvite(value);
+	if (!invite || !isRecord(value)) return null;
+	const token = text(value.token, 43);
+	if (!token) return null;
+	const url = acceptedInviteUrl(token, value.url, origin);
+	if (!url) return null;
+	return { url, role: invite.role };
+}
+
+export function parseInviteLookup(value: unknown): InviteLookup | null {
+	if (!isRecord(value)) return null;
+	const project_id = text(value.project_id, 36);
+	const project_name = text(value.project_name, 80);
+	const role = inviteRole(value.role);
+	if (!project_id || !isUuid(project_id) || !project_name || !role) return null;
+	if (typeof value.already_member !== 'boolean') return null;
+	return { project_id, project_name, role, already_member: value.already_member };
+}
+
+/** Accept can return the caller's current role, including owner. The redirect uses only the id. */
+export function parseInviteAccept(value: unknown): { project_id: string } | null {
+	if (!isRecord(value)) return null;
+	const project_id = text(value.project_id, 36);
+	if (!project_id || !isUuid(project_id) || !isRole(value.role)) return null;
+	return { project_id };
 }
 
 function parseHealth(value: unknown): Health | null | undefined {

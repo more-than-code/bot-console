@@ -20,17 +20,17 @@ Steps 2 and 3 landed together. The console no longer reads Postgres. Host overvi
 
 ## Auth (BFF)
 
-- New routes: `/signin` (Google only for now; GitHub later), `/auth/google/callback`, `/signout`, `/device` (the device-code approval page for MCP clients: sign in, enter the code, approve; umbrella §7), `/oauth/consent` (MCP browser consent: client name marked unverified, full redirect host, Allow or Deny), and `/account/apps` (Connected apps, linked from the header account menu, with a revoke action).
+- New routes: `/signin` (Google only for now; GitHub later), `/auth/google/callback`, `/signout`, `/device` (the device-code approval page for MCP clients: sign in, enter the code, approve; umbrella §7), `/oauth/consent` (MCP browser consent: client name marked unverified, full redirect host, Allow or Deny), `/account/apps` (Connected apps, linked from the header account menu, with a revoke action), and `/invite/[token]` (join a project from an invite link: lookup on load, Join posts accept, then 303 to that project).
 - Sign-in: a server route calls bot-api-server `GET /v1/auth/google/start`, then redirects. The callback route posts `code` and `state` to `POST /v1/auth/google/callback` and receives the session token once.
 - Cookie `bot_session`: `HttpOnly`, `SameSite=Lax`, `Path=/`, `Max-Age=604800`, and `Secure` when the origin is HTTPS (the dev `:5180` is HTTP over the tailnet, so no `Secure` there).
-- `hooks.server.ts`: read the cookie, call `GET /v1/me` (cached for each request), and put the user in `event.locals`. Unauthenticated page requests redirect to `/signin`. `/api/*` returns 401.
+- `hooks.server.ts`: read the cookie, call `GET /v1/me` (cached for each request), and put the user in `event.locals`. Unauthenticated page requests redirect to `/signin`. `/api/*` returns 401. `safeNext` allows `/invite/<token>` only when the token is 43 base64url characters, with no query or extra segment. A signed-out `/invite/` request returns that redirect itself with `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, and `X-Frame-Options: DENY`. `/signin` responses send `Referrer-Policy: no-referrer` and `Cache-Control: no-store`, so `next` is not sent on to Google.
 - Every server-side call to bot-api-server sends `Authorization: Bearer <cookie value>`. The browser never talks to bot-api-server.
 - Mutating forms (phase 2 deploy/run/stop/restart) send one `idempotency_key` per click and reuse it on retry. SvelteKit's origin check covers CSRF for form POSTs.
 
 ## New pages
 
 - **Projects:** list, create (the creator becomes owner), rename and delete (owner).
-- **Members:** list; admins add, remove, and change viewer/admin roles; the owner transfers ownership.
+- **Members:** list; admins add, remove, and change viewer/admin roles; the owner transfers ownership. Admin+ creates an invite link (viewer or admin, expiry 1, 7, or 30 days, uses 1, 5, or 25). The url is shown once in that dialog and is not put in the page URL, a cookie, or a log. Closing the dialog clears it; opening the dialog again shows the empty form. A url is shown only when its origin is this console's origin and its path is `/invite/<token>`. Pending invites list role, creator, expiry, uses, and status, and revoke with an icon-only Ban action.
 - **Hosts:** per project: status (online, offline, or asleep for `always_on=false`), last seen, agent version; admin+ revokes a credential.
 - **Join host:** admin+ creates a join token and sees it **once**, with the install command. The page never shows the token again.
 - **Ops (phase 2):** logs for every member, viewers included. Deploy (by container name: adopt if it exists, create otherwise) for admin+. Run, stop, and restart for admin+ on `owned` services. Results come back inline. History reads `GET /v1/projects/{id}/audit`. This replaces the spec-v1 rule that "the dashboard does not drive ops".
@@ -50,8 +50,8 @@ Pages render on the server. JavaScript is required for dialogs, the theme switch
 | `PageHeader` | Breadcrumbs, `h1`, optional subtitle and actions. |
 | `StatusBadge` | The known host and health statuses. Anything else renders as `unknown`. |
 | `Notice` | Error, info, and success text. Errors are alerts. The others are status. |
-| `RowAction` | Icon-only ghost button for every action inside a table row. The `aria-label` and the tooltip are the action plus the row (for example "Rename port 22 · root"). Destructive rows use the destructive text colour. Rename is Pencil, probe Activity, revoke credential ShieldOff, remove member UserMinus, change role UserCog, revoke join token Ban, delete Trash2. Actions outside a table keep a text label. |
-| `ConfirmAction` | Alert dialog for revoke credential, delete project, remove member, and revoke join token. The dialog holds the POST form (`ConfirmForm`). Inside a table row the trigger is a `RowAction`. Delete project asks the user to type the project name, and Confirm stays disabled until that text matches. The server still rejects a mismatch. No hidden field carries the project name. |
+| `RowAction` | Icon-only ghost button for every action inside a table row. The `aria-label` and the tooltip are the action plus the row (for example "Rename port 22 · root"). Destructive rows use the destructive text colour. Rename is Pencil, probe Activity, revoke credential ShieldOff, remove member UserMinus, change role UserCog, revoke join token Ban, revoke invite Ban, delete Trash2. Actions outside a table keep a text label. |
+| `ConfirmAction` | Alert dialog for revoke credential, delete project, remove member, revoke join token, and revoke invite. The dialog holds the POST form (`ConfirmForm`). Inside a table row the trigger is a `RowAction`. Delete project asks the user to type the project name, and Confirm stays disabled until that text matches. The server still rejects a mismatch. No hidden field carries the project name. |
 | `actionUrlFrom` | Named form actions on host and project pages. Keeps the current query, including table search, sort, and page, then appends `&/<name>`. |
 | `backTo` | Success redirect for a same-page project action. Same path and query, minus `confirm` and the `/name` action key. |
 

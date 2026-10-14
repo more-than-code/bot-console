@@ -31,3 +31,42 @@ export function formDialogOutcome(resultType: string): DialogOutcome {
 	if (resultType === 'failure' || resultType === 'error') return 'failure';
 	return 'idle';
 }
+
+export type InviteSecretState = {
+	open: boolean;
+	sawFailure: boolean;
+	shownUrl: string | null;
+	seenUrl: string | null;
+};
+
+/**
+ * A new invite url is shown once. Closing the dialog clears it, and opening
+ * again with the same action result shows the empty form. A new url shows again.
+ * With no url, the failure dialog rule applies.
+ */
+export function nextInviteSecret(
+	state: InviteSecretState,
+	input: { inviteUrl: string | null; failed: boolean; open: boolean }
+): InviteSecretState {
+	let open = input.open;
+	let { sawFailure } = state;
+	let shownUrl = state.shownUrl;
+	let seenUrl = state.seenUrl;
+	const url = input.inviteUrl;
+
+	if (url && url !== seenUrl) {
+		seenUrl = url;
+		shownUrl = url;
+		open = true;
+		sawFailure = false;
+	} else if (!url) {
+		seenUrl = null;
+		shownUrl = null;
+		const dialog = nextFormDialog({ open, sawFailure }, input.failed ? 'failure' : 'idle');
+		open = dialog.open;
+		sawFailure = dialog.sawFailure;
+	}
+
+	if (!open) shownUrl = null;
+	return { open, sawFailure, shownUrl, seenUrl };
+}

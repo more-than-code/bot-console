@@ -1,5 +1,5 @@
 import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
-import type { Host, JoinToken, Member, ProjectService, ProjectServiceRow } from '$lib/api-types';
+import type { Host, Invite, JoinToken, Member, ProjectService, ProjectServiceRow } from '$lib/api-types';
 import { SERVICE_DEFAULT_DIR, SERVICE_DEFAULT_SORT, serviceColumns, serviceHostReachable } from '$lib/host-view';
 import type { ProjectScope } from '$lib/project-action';
 import { ApiError, actionFailure, apiFetch, apiList, loadFailure } from '$lib/server/api';
@@ -8,8 +8,10 @@ import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
 import { roleAtLeast, uiRole } from '$lib/server/roles';
 import {
+	parseCreatedInvite,
 	parseCreatedJoin,
 	parseHost,
+	parseInvite,
 	parseJoinToken,
 	parseMember,
 	parseProbe,
@@ -123,6 +125,10 @@ const empty = {
 	tokensOmitted: 0,
 	tokensTruncated: false,
 	tokensMessage: null as string | null,
+	invites: [] as Invite[],
+	invitesOmitted: 0,
+	invitesTruncated: false,
+	invitesMessage: null as string | null,
 	...noServices
 };
 
@@ -185,6 +191,21 @@ export const load: PageServerLoad = async (event) => {
 		}
 	}
 
+	let invites: Invite[] = [];
+	let invitesOmitted = 0;
+	let invitesTruncated = false;
+	let invitesMessage: string | null = null;
+	if (canAdmin) {
+		try {
+			const list = await apiList(event, `/v1/projects/${id}/invites`, parseInvite);
+			invites = list.items;
+			invitesOmitted = list.omitted;
+			invitesTruncated = list.truncated;
+		} catch (err) {
+			invitesMessage = loadFailure(err).message;
+		}
+	}
+
 	const reachableHostIds = new Set(hosts.filter(serviceHostReachable).map((host) => host.id));
 	const services = tab === 'services' ? await loadProjectServices(event, id, reachableHostIds) : noServices;
 
@@ -207,9 +228,37 @@ export const load: PageServerLoad = async (event) => {
 		tokensOmitted,
 		tokensTruncated,
 		tokensMessage,
+		invites,
+		invitesOmitted,
+		invitesTruncated,
+		invitesMessage,
 		...services
 	});
 };
+
+const INVITE_EXPIRY_SEC: Record<string, number> = {
+	'86400': 86400,
+	'604800': 604800,
+	'2592000': 2592000
+};
+
+const INVITE_USES: Record<string, number> = {
+	'1': 1,
+	'5': 5,
+	'25': 25
+};
+
+function inviteInvalid(event: RequestEvent, message: string) {
+	return fail(400, present(event, { scope: 'members' as const, inviteMessage: message }));
+}
+
+function inviteFailure(event: RequestEvent, err: unknown) {
+	if (isRedirect(err) || isHttpError(err)) throw err;
+	if (!(err instanceof ApiError)) console.error('bot api request failed');
+	const status = err instanceof ApiError && err.status >= 400 && err.status <= 599 ? err.status : 503;
+	const message = err instanceof ApiError ? err.msg : 'The API is unavailable.';
+	return fail(status, present(event, { scope: 'members' as const, inviteMessage: message }));
+}
 
 function keptName(event: RequestEvent, serviceId: string, typed: string, status: number, message: string) {
 	return fail(status, present(event, { scope: 'services', message, renameServiceId: serviceId, displayName: typed }));
@@ -308,6 +357,47 @@ export const actions: Actions = {
 		if (!isUuid(userId)) return invalid(event, 'members', 'That member is not valid.');
 		try {
 			await apiFetch(event, `/v1/projects/${id}/members/${userId}`, { method: 'DELETE' });
+			redirect(303, backTo(event.url));
+		} catch (err) {
+			return actionFailure(event, err, 'members');
+		}
+	},
+
+	createInvite: async (event) => {
+		requireUser(event);
+		const id = projectId(event.params);
+		const form = await event.request.formData();
+		const role = cleanRole(formText(form, 'role'));
+		const expires = INVITE_EXPIRY_SEC[formText(form, 'expires_in_sec')];
+		const maxUses = INVITE_USES[formText(form, 'max_uses')];
+		if (!role) return inviteInvalid(event, 'Choose admin or viewer.');
+		if (!expires) return inviteInvalid(event, 'Choose an expiry of 1, 7, or 30 days.');
+		if (!maxUses) return inviteInvalid(event, 'Choose 1, 5, or 25 uses.');
+		try {
+			const created = parseCreatedInvite(
+				await apiFetch(event, `/v1/projects/${id}/invites`, {
+					method: 'POST',
+					body: JSON.stringify({ role, expires_in_sec: expires, max_uses: maxUses })
+				}),
+				event.url.origin
+			);
+			if (!created) {
+				return fail(502, present(event, { scope: 'members' as const, inviteMessage: 'The API returned an unexpected response.' }));
+			}
+			// Stay on this response so the url is shown once. A reload is a GET and drops it.
+			return present(event, { scope: 'members' as const, inviteUrl: created.url, inviteRole: created.role });
+		} catch (err) {
+			return inviteFailure(event, err);
+		}
+	},
+
+	revokeInvite: async (event) => {
+		requireUser(event);
+		const id = projectId(event.params);
+		const inviteId = formText(await event.request.formData(), 'invite_id');
+		if (!isUuid(inviteId)) return invalid(event, 'members', 'That invite is not valid.');
+		try {
+			await apiFetch(event, `/v1/projects/${id}/invites/${inviteId}`, { method: 'DELETE' });
 			redirect(303, backTo(event.url));
 		} catch (err) {
 			return actionFailure(event, err, 'members');

@@ -23,6 +23,35 @@ export type Member = {
 	created_at: string;
 };
 
+/** Invite links are viewer or admin. Never owner. */
+export type InviteRole = 'admin' | 'viewer';
+
+/** `GET /v1/projects/{id}/invites`. No token and no url. */
+export type Invite = {
+	id: string;
+	role: InviteRole;
+	created_by: string;
+	created_at: string;
+	expires_at: string;
+	max_uses: number;
+	uses: number;
+	revoked_at: string | null;
+};
+
+/** Create result shown once. The token is only inside `url`. */
+export type CreatedInvite = {
+	url: string;
+	role: InviteRole;
+};
+
+/** `POST /v1/invites/lookup`. */
+export type InviteLookup = {
+	project_id: string;
+	project_name: string;
+	role: InviteRole;
+	already_member: boolean;
+};
+
 export type JoinToken = {
 	id: string;
 	host_name_hint: string | null;

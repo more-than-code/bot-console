@@ -1,3 +1,5 @@
+import { isInviteToken } from './validate';
+
 const CONTROL = /[\u0000-\u001F\u007F\\]/;
 const DANGEROUS_ENCODING = /%2f|%5c|%00|%09|%0a|%0d/i;
 
@@ -92,7 +94,16 @@ export function safeNext(value: string | null | undefined, fallback = '/projects
 	if (url.username || url.password || raw.username || raw.password) return fallback;
 	if (!url.pathname.startsWith('/') || url.pathname.startsWith('//') || url.pathname.includes('\\')) return fallback;
 	if (isBlockedNext(url.pathname)) return fallback;
+	if (!acceptedInviteNext(url)) return fallback;
 	return url.pathname + url.search;
+}
+
+/** `/invite/<token>` is allowed only as that one segment. Other paths are unchanged. */
+function acceptedInviteNext(url: URL): boolean {
+	const path = url.pathname;
+	if (path !== '/invite' && !path.startsWith('/invite/')) return true;
+	if (url.search !== '' || url.hash !== '') return false;
+	return isInviteToken(path.slice('/invite/'.length));
 }
 
 function decodeNext(value: string): string | null {

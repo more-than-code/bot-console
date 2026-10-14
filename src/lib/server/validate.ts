@@ -93,6 +93,39 @@ export function isJoinSecret(value: unknown): value is string {
 }
 
 const JOIN_TOKEN = /^[A-Za-z0-9_-]{16,128}$/;
+/** 256-bit unpadded base64url. One path segment, nothing else. */
+const INVITE_TOKEN = /^[A-Za-z0-9_-]{43}$/;
+
+export function isInviteToken(value: unknown): value is string {
+	return typeof value === 'string' && INVITE_TOKEN.test(value);
+}
+
+/**
+ * Shareable invite link from the API. The origin must be this console's origin
+ * and the path must be exactly `/invite/<token>`. A foreign host, an http/https
+ * mismatch, javascript:, userinfo, and a mismatched path are refused.
+ */
+export function acceptedInviteUrl(token: string, raw: unknown, origin: string): string | null {
+	if (!isInviteToken(token)) return null;
+	if (typeof origin !== 'string' || origin.length === 0 || origin.length > 2048 || CONTROL.test(origin)) return null;
+	if (typeof raw !== 'string' || raw.length < 8 || raw.length > 2048 || CONTROL.test(raw)) return null;
+	if (raw !== raw.trim()) return null;
+	let url: URL;
+	let expected: URL;
+	try {
+		url = new URL(raw);
+		expected = new URL(origin);
+	} catch {
+		return null;
+	}
+	if (expected.origin !== origin || expected.pathname !== '/' || expected.search !== '' || expected.hash !== '') return null;
+	if (url.username || url.password || url.hostname.length === 0) return null;
+	if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+	if (url.origin !== expected.origin) return null;
+	if (url.search !== '' || url.hash !== '') return null;
+	if (url.pathname !== `/invite/${token}`) return null;
+	return url.href;
+}
 const INSTALL_COMMAND = /^printf '%s' '([A-Za-z0-9_-]+)' \| sudo -u bot-agent bot-agent init --server '([^'\s]+)' --join-token-stdin$/;
 
 export function isJoinToken(value: string): boolean {

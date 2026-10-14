@@ -1,4 +1,4 @@
-import type { CreatedJoin, ProbeView } from '$lib/api-types';
+import type { CreatedJoin, InviteRole, ProbeView } from '$lib/api-types';
 import { nextFormDialog, type DialogState } from '$lib/dialog-open';
 
 export type ProjectScope = 'hosts' | 'services' | 'members' | 'tokens' | 'settings';
@@ -12,6 +12,10 @@ export type ProjectActionData = {
 	probeServiceId?: string;
 	renameServiceId?: string;
 	displayName?: string;
+	/** Set only on the create-invite action result. A reload drops it. */
+	inviteUrl?: string;
+	inviteRole?: InviteRole;
+	inviteMessage?: string;
 };
 
 export type RenameOpenState = DialogState;

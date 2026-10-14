@@ -81,6 +81,13 @@
 			canOwner={data.canOwner}
 			currentUserId={data.userId ?? null}
 			message={sectionMessage ?? data.membersMessage}
+			invites={data.invites}
+			invitesOmitted={data.invitesOmitted}
+			invitesTruncated={data.invitesTruncated}
+			invitesMessage={data.invitesMessage}
+			inviteUrl={action?.scope === 'members' ? (action.inviteUrl ?? null) : null}
+			inviteRole={action?.scope === 'members' ? (action.inviteRole ?? null) : null}
+			inviteMessage={action?.scope === 'members' ? (action.inviteMessage ?? null) : null}
 		/>
 	{:else if scope === 'tokens'}
 		<TokensSection

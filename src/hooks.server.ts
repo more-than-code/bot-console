@@ -27,6 +27,20 @@ function notConfigured(): Response {
 	});
 }
 
+/** Document navigations are 303. Client data requests keep SvelteKit's JSON redirect. */
+function inviteSignInRedirect(pathname: string, location: string, dataRequest: boolean): Response {
+	if (dataRequest) {
+		return applyHeaders(
+			pathname,
+			new Response(JSON.stringify({ type: 'redirect', location }), {
+				status: 200,
+				headers: { 'content-type': 'application/json', location }
+			})
+		);
+	}
+	return applyHeaders(pathname, new Response(null, { status: 303, headers: { location } }));
+}
+
 function unavailable(pathname: string): Response {
 	if (isApiPath(pathname)) {
 		return new Response(JSON.stringify({ message: 'Sign-in is temporarily unavailable.' }), {
@@ -77,6 +91,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 			if (session.kind === 'unauthorized') response.headers.append('set-cookie', clearSessionCookieHeader(event.url));
 			return applyHeaders(path, response);
 		}
+		// redirect() is handled outside this hook, so an invite URL would be a 303 with no
+		// Referrer-Policy. Return the response here so the token-bearing URL cannot leak.
+		if (path.startsWith('/invite/')) return inviteSignInRedirect(path, signinLocation(event.url), event.isDataRequest);
 		redirect(303, signinLocation(event.url));
 	}
 
