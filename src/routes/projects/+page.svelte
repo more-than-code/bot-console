@@ -1,20 +1,34 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { page } from '$app/state';
+	import DataTable from '$lib/components/DataTable.svelte';
+	import Notice from '$lib/components/Notice.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import type { Project } from '$lib/api-types';
 	import { formatWhen } from '$lib/format';
+	import type { Column } from '$lib/table';
+	import { actionUrlFrom } from '$lib/url';
 
 	let { data, form } = $props();
+
+	const columns: Column<Project>[] = [
+		{ key: 'name', label: 'Name' },
+		{ key: 'slug', label: 'Slug' },
+		{ key: 'role', label: 'Role' },
+		{ key: 'created', label: 'Created' }
+	];
 </script>
 
 <svelte:head>
 	<title>Projects · deploybot</title>
 </svelte:head>
 
-<h1>Projects</h1>
+<PageHeader title="Projects" headingId="projects-heading" />
 {#if form?.message || data.message}
-	<p class="error" role="alert">{form?.message ?? data.message}</p>
+	<Notice kind="error">{form?.message ?? data.message}</Notice>
 {/if}
 
-<form method="POST" action="?/create" class="panel" use:enhance>
+<form method="POST" action={actionUrlFrom(page.url, 'create')} class="panel" use:enhance>
 	<label class="field">
 		New project name
 		<input name="name" required maxlength="80" autocomplete="off" />
@@ -28,29 +42,20 @@
 {#if data.truncated}
 	<p class="sub">More items not shown</p>
 {/if}
-{#if data.projects.length === 0}
-	<p class="empty">No projects yet.</p>
-{:else}
-	<div class="table-wrap">
-		<table class="data">
-			<thead>
-				<tr>
-					<th>Name</th>
-					<th>Slug</th>
-					<th>Role</th>
-					<th>Created</th>
-				</tr>
-			</thead>
-			<tbody>
-				{#each data.projects as project (project.id)}
-					<tr>
-						<td><a href="/projects/{project.id}">{project.name}</a></td>
-						<td>{project.slug}</td>
-						<td>{project.role}</td>
-						<td>{formatWhen(project.created_at)}</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</div>
-{/if}
+<DataTable
+	rows={data.projects}
+	{columns}
+	id="projects"
+	labelledBy="projects-heading"
+	empty="No projects yet."
+	rowKey={(project) => project.id}
+>
+	{#snippet row(project)}
+		<tr>
+			<td><a href="/projects/{project.id}">{project.name}</a></td>
+			<td>{project.slug}</td>
+			<td>{project.role}</td>
+			<td>{formatWhen(project.created_at)}</td>
+		</tr>
+	{/snippet}
+</DataTable>

@@ -1,5 +1,7 @@
 <script lang="ts">
-	import Breadcrumbs from '$lib/components/Breadcrumbs.svelte';
+	import Notice from '$lib/components/Notice.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import Tabs from '$lib/components/Tabs.svelte';
 	import type { ProjectActionData, ProjectScope } from '$lib/project-action';
 	import HostsSection from './HostsSection.svelte';
 	import MembersSection from './MembersSection.svelte';
@@ -10,6 +12,21 @@
 	const action = $derived((form ?? null) as ProjectActionData | null);
 	const scope = $derived<ProjectScope>(action?.scope ?? data.tab ?? 'hosts');
 	const sectionMessage = $derived(action?.scope === scope ? (action.message ?? null) : null);
+
+	const tabs = $derived(
+		data.project
+			? [
+					{ key: 'hosts', label: 'Hosts', href: `/projects/${data.project.id}?tab=hosts` },
+					{ key: 'members', label: 'Members', href: `/projects/${data.project.id}?tab=members` },
+					...(data.canAdmin
+						? [{ key: 'tokens', label: 'Join tokens', href: `/projects/${data.project.id}?tab=tokens` }]
+						: []),
+					...(data.canOwner
+						? [{ key: 'settings', label: 'Settings', href: `/projects/${data.project.id}?tab=settings` }]
+						: [])
+				]
+			: []
+	);
 </script>
 
 <svelte:head>
@@ -17,32 +34,22 @@
 </svelte:head>
 
 {#if !data.project}
-	<Breadcrumbs items={[{ label: 'Projects', href: '/projects' }, { label: 'Project' }]} />
-	<h1>Project</h1>
-	<p class="error" role="alert">{data.message ?? 'This project is not available.'}</p>
+	<PageHeader title="Project" breadcrumbs={[{ label: 'Projects', href: '/projects' }, { label: 'Project' }]} />
+	<Notice kind="error">{data.message ?? 'This project is not available.'}</Notice>
 {:else}
-	<Breadcrumbs items={[{ label: 'Projects', href: '/projects' }, { label: data.project.name }]} />
-	<h1>{data.project.name}</h1>
-	<p class="sub">{data.project.slug} · your role {data.project.role}</p>
-	<nav class="nav tabs" aria-label="Project sections">
-		<a href="/projects/{data.project.id}?tab=hosts" aria-current={scope === 'hosts' ? 'page' : undefined}>Hosts</a>
-		<a href="/projects/{data.project.id}?tab=members" aria-current={scope === 'members' ? 'page' : undefined}>Members</a>
-		{#if data.canAdmin}
-			<a href="/projects/{data.project.id}?tab=tokens" aria-current={scope === 'tokens' ? 'page' : undefined}>Join tokens</a>
-		{/if}
-		{#if data.canOwner}
-			<a href="/projects/{data.project.id}?tab=settings" aria-current={scope === 'settings' ? 'page' : undefined}>Settings</a>
-		{/if}
-	</nav>
+	<PageHeader
+		title={data.project.name}
+		subtitle="{data.project.slug} · your role {data.project.role}"
+		breadcrumbs={[{ label: 'Projects', href: '/projects' }, { label: data.project.name }]}
+	/>
+	<Tabs label="Project sections" current={scope} items={tabs} />
 
 	{#if scope === 'hosts'}
 		<HostsSection
-			projectId={data.project.id}
 			hosts={data.hosts}
 			omitted={data.hostsOmitted}
 			truncated={data.hostsTruncated}
 			canAdmin={data.canAdmin}
-			confirmHostId={action?.scope === 'hosts' ? (action.confirmHostId ?? null) : null}
 			message={sectionMessage ?? data.hostsMessage}
 		/>
 	{:else if scope === 'members'}

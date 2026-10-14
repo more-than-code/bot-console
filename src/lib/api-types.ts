@@ -74,6 +74,8 @@ export type ServiceSummary = {
 	kind: 'container' | 'systemd' | 'process';
 	ports: number[];
 	health: Health | null;
+	/** From the service payload already returned by the list. Missing becomes null. */
+	last_seen_at: string | null;
 };
 
 export type ServiceRow = ServiceSummary & {

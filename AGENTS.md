@@ -30,7 +30,10 @@ src/hooks.server.ts          security headers, no-store, required BOT_API_URL, s
 src/lib/server/api.ts        bot-api-server client (Bearer, envelope, 35s timeout)
 src/lib/server/session.ts    bot_session cookie, safe next path, public routes
 src/lib/server/guard.ts      503 when BOT_API_URL is missing or invalid; require a user
-src/lib/host-view.ts         host tabs, metric series names, process search, chart alignment
+src/lib/host-view.ts         host tabs, metric series names, service and process columns, chart alignment
+src/lib/table.ts             client sort, search, and paging for DataTable
+src/lib/url.ts               actionUrl, actionUrlFrom, and backTo for named form actions
+src/lib/confirm.ts           confirm link, open state, and type-to-confirm match
 src/lib/ranges.ts            1h / 6h / 24h / 7d → from/to
 src/lib/format.ts            Pacific/Auckland and number formatting
 src/lib/series.ts            merge helper kept for the old chart shape (not on the request path)
@@ -50,7 +53,19 @@ tests/                       node:test, import paths end in .ts
 - Host ids are UUIDs. `/hosts/[id]?tab=overview|services|processes` (default overview) and `?range=1h|6h|24h|7d` (default 1h). Unknown tab or range falls back to those defaults. Range becomes `from`/`to`. `step` is omitted.
 - Overview metrics are seven parallel `GET /v1/hosts/{id}/metrics` calls (`cpu`, `mem`, `disk`, `net`, `diskio`, `system`, `temp`). A failed call sets that chart's message. The page still renders. Null points are gaps. The tab depends on `host:metrics` and invalidates it every 30 seconds while visible.
 - Services keeps the health-check fan-out: at most 50 detail reads, concurrency 6, 10 second deadline. Rows carry `id="service-{id}"`.
-- Processes calls `GET /v1/hosts/{id}/processes?sort=cpu|memory&limit=200`. Search filters pid, process, user, and cmdline in the page. It is not sent to the API. `service_id` links to `?tab=services#service-{id}`.
+- Processes calls `GET /v1/hosts/{id}/processes?sort=cpu|memory&limit=200`. DataTable search (`processes.q`) filters pid, process, user, and cmdline on the loaded rows. It is not sent to the API. `processes.sort=cpu|memory` (or the legacy `sort` param when the table sort is absent) is the API `sort`. Any other column sorts those rows in the page and the request uses `cpu`. `service_id` links to `?tab=services#service-{id}`.
 - `node --test` loads TypeScript directly. A value import from a module under test needs the `.ts` extension (`allowImportingTsExtensions`). Type-only imports are erased and can stay extensionless.
 - Do not print, log, or commit `.env`. Log only a short redacted error line.
 - Do not commit unless the user asks. Do not push or add a remote.
+
+## Shared components
+
+Route pages use the shared pieces below. Do not reimplement them under `src/routes/`. `tests/components-reuse.test.ts` fails if a route adds a `<table>`, a tab strip (`role="tablist"` or `class="nav tabs"`), `role="alert"`, `confirm(`, a `StatusText` import, or an `<h1` (the heading comes from `PageHeader`).
+
+- `DataTable` — every table. Sort, search, and paging are pure functions in `src/lib/table.ts`, driven by namespaced URL params (`<id>.q`, `<id>.sort`, `<id>.dir`, `<id>.page`) so they work without JavaScript. A column's `firstDir` is the direction used the first time that column is chosen (`asc` when omitted). Clicking the active column still toggles. Process CPU, RSS, memory, and threads open descending. The processes table default is `defaultDir="desc"`.
+- `Tabs` — host and project tab strips.
+- `PageHeader` — breadcrumbs, title, optional subtitle and actions. Every routed page with an `h1`.
+- `StatusBadge` — known status labels (`online`, `offline`, `asleep`, `revoked`, `up`, `down`, `unknown`). `StatusText` is gone.
+- `Notice` — `error` (`role="alert"`), `info`, and `success` (`role="status"`).
+- `ConfirmAction` — two-step destructive action. Without JavaScript the first control is a `?confirm=<id>` link; with JavaScript it toggles in place. Delete project sets `typeToConfirm` so the user types the project name. The server check stays the authority. No hidden field carries that name.
+- `actionUrl`, `actionUrlFrom`, and `backTo` in `src/lib/url.ts` — named form actions, `?<params>&/<name>`. `actionUrlFrom` keeps the current query (including table state) and drops `confirm` and `/name` keys. Host and project forms use it. `actionUrl` builds a query when there is no current URL. `backTo` is the same path and query after a successful same-page action: it drops `confirm` and `/name` and does not append an action. Project revoke, member, join-token revoke, and rename redirects use it. Delete project still redirects to `/projects`. Creating a project still redirects to the new project. Host probe and snapshot do not redirect.

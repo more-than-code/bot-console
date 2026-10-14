@@ -1,5 +1,6 @@
 import type { Host, ProcessItem, ProcessSample, ServiceRow } from './api-types';
 import { parseRange, type RangeKey } from './ranges';
+import type { Column, SortDir } from './table';
 
 export const METRIC_REFRESH_MS = 30_000;
 
@@ -123,11 +124,23 @@ export function parseProcessSort(value: string | null): ProcessSort {
 	return value === 'memory' ? 'memory' : 'cpu';
 }
 
+/**
+ * API `sort` for the process sample. `processes.sort=cpu|memory` wins.
+ * Any other table column still requests `cpu` (the page sorts those rows).
+ * With no table sort, the legacy `sort` param is used and unknown values fall back to cpu.
+ */
+export function processRequestSort(params: URLSearchParams): ProcessSort {
+	const tableSort = params.get('processes.sort');
+	if (tableSort === 'cpu' || tableSort === 'memory') return tableSort;
+	if (tableSort != null && tableSort !== '') return 'cpu';
+	return parseProcessSort(params.get('sort'));
+}
+
 export function hostQuery(url: URL): { tab: HostTab; range: RangeKey; processSort: ProcessSort } {
 	return {
 		tab: parseHostTab(url.searchParams.get('tab')),
 		range: parseRange(url.searchParams.get('range')),
-		processSort: parseProcessSort(url.searchParams.get('sort'))
+		processSort: processRequestSort(url.searchParams)
 	};
 }
 
@@ -139,31 +152,58 @@ export function serviceTabHref(serviceId: string): string {
 	return `?tab=services#${serviceDomId(serviceId)}`;
 }
 
-/**
- * SvelteKit named action on the current path. The action name is the search key
- * `&/name` (see `?/name`), so `tab` and `range` are still there when the page renders.
- * Omit `range` on a page that has no range.
- */
-export function hostFormAction(name: string, query: { tab: string; range?: string }): string {
-	const params = new URLSearchParams({ tab: query.tab });
-	if (query.range) params.set('range', query.range);
-	return `?${params.toString()}&/${name}`;
-}
-
 /** A sample the processes table can show. Null `sampled_at` and no rows is "no sample yet". */
 export function hasProcessSample(sample: ProcessSample | null): sample is ProcessSample & { sampled_at: string } {
 	return sample != null && sample.sampled_at != null && (sample.items.length > 0 || sample.skipped > 0);
 }
 
-/** Case-insensitive substring over pid, process name, user, and cmdline. */
-export function filterProcesses(items: ProcessItem[], q: string | null): ProcessItem[] {
-	if (q == null || q === '') return items;
-	const needle = q.toLowerCase();
-	return items.filter((item) => {
-		const hay = [String(item.pid), item.process_name, item.user, item.cmdline ?? ''].join('\n').toLowerCase();
-		return hay.includes(needle);
-	});
+/** Smallest port, or null when the list is empty. Null sorts last. */
+export function smallestPort(ports: readonly number[]): number | null {
+	let min: number | null = null;
+	for (const port of ports) {
+		if (!Number.isFinite(port)) continue;
+		if (min == null || port < min) min = port;
+	}
+	return min;
 }
+
+export const SERVICE_DEFAULT_SORT = 'name';
+export const SERVICE_DEFAULT_DIR: SortDir = 'asc';
+
+export const SERVICE_COLUMNS: Column<ServiceRow>[] = [
+	{ key: 'name', label: 'Name', sortable: true, searchable: true, value: (row) => row.name },
+	{ key: 'source', label: 'Source', value: (row) => row.source },
+	{ key: 'kind', label: 'Kind', sortable: true, searchable: true, value: (row) => row.kind },
+	{
+		key: 'ports',
+		label: 'Ports',
+		numeric: true,
+		sortable: true,
+		searchable: true,
+		value: (row) => smallestPort(row.ports),
+		searchValue: (row) => (row.ports.length ? row.ports.join(', ') : null)
+	},
+	{
+		key: 'status',
+		label: 'Health',
+		sortable: true,
+		value: (row) => row.health?.status ?? 'unknown'
+	},
+	{ key: 'lastSeen', label: 'Last seen', sortable: true, value: (row) => row.last_seen_at },
+	{ key: 'checks', label: 'Checks' }
+];
+
+export const PROCESS_COLUMNS: Column<ProcessItem>[] = [
+	{ key: 'pid', label: 'PID', numeric: true, sortable: true, searchable: true, value: (row) => row.pid },
+	{ key: 'process', label: 'Process', sortable: true, searchable: true, value: (row) => row.process_name },
+	{ key: 'user', label: 'User', sortable: true, searchable: true, value: (row) => row.user },
+	{ key: 'command', label: 'Command', sortable: true, searchable: true, value: (row) => row.cmdline ?? '' },
+	{ key: 'cpu', label: 'CPU %', numeric: true, sortable: true, firstDir: 'desc', value: (row) => row.cpu_usage },
+	{ key: 'rss', label: 'RSS', numeric: true, sortable: true, firstDir: 'desc', value: (row) => row.memory_rss },
+	{ key: 'memory', label: 'Mem %', numeric: true, sortable: true, firstDir: 'desc', value: (row) => row.memory_usage },
+	{ key: 'threads', label: 'Threads', numeric: true, sortable: true, firstDir: 'desc', value: (row) => row.num_threads },
+	{ key: 'started', label: 'Started', sortable: true, value: (row) => row.started_at }
+];
 
 /** One time axis. A series missing a timestamp, or a null value, is a gap. */
 export function alignSeries(series: ReadonlyArray<{ points: readonly MetricPoint[] }>): {

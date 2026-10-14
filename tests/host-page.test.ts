@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { isActionFailure } from '@sveltejs/kit';
 import { actions as hostActions, load as hostLoad } from '../src/routes/hosts/[id]/+page.server.ts';
-import { hostFormAction, METRIC_SPECS, type MetricChart } from '../src/lib/host-view.ts';
+import { METRIC_SPECS, type MetricChart } from '../src/lib/host-view.ts';
+import { actionUrlFrom } from '../src/lib/url.ts';
 import { RANGES, type RangeKey } from '../src/lib/ranges.ts';
 import { parseHealthChecks, parseProbe, parseProcessSample } from '../src/lib/server/shape.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER, type FetchCall } from './harness.ts';
@@ -187,6 +188,16 @@ describe('host page', { concurrency: false }, () => {
 		const fallbackCall = fallback.calls.find((call) => call.url.pathname.endsWith('/processes'));
 		assert.equal(fallbackCall?.url.searchParams.get('sort'), 'cpu');
 		assert.equal(fallback.data.processes?.sampled_at, null);
+
+		const byColumn = await loadHost(`http://console.example/hosts/${HOST_ID}?tab=processes&processes.sort=pid`, (call) => {
+			if (call.url.pathname === `/v1/hosts/${HOST_ID}`) return envelope(HOST);
+			if (call.url.pathname === `/v1/projects/${PROJECT.id}`) return envelope(PROJECT);
+			if (call.url.pathname.endsWith('/processes')) return envelope({ sampled_at: null, items: [] });
+			return envelope(null, 500, 'error', 'unexpected');
+		});
+		const byColumnCall = byColumn.calls.find((call) => call.url.pathname.endsWith('/processes'));
+		assert.equal(byColumnCall?.url.searchParams.get('sort'), 'cpu');
+		assert.equal(byColumnCall?.url.searchParams.has('q'), false);
 	});
 
 	test('one failing metric call leaves the host page and the other charts intact', async () => {
@@ -238,13 +249,14 @@ describe('host page', { concurrency: false }, () => {
 		const projectPage = readFileSync(new URL('../src/routes/projects/[id]/+page.svelte', import.meta.url), 'utf8');
 		const services = readFileSync(new URL('../src/routes/hosts/[id]/ServicesTab.svelte', import.meta.url), 'utf8');
 		const processes = readFileSync(new URL('../src/routes/hosts/[id]/ProcessesTab.svelte', import.meta.url), 'utf8');
-		assert.match(hostPage, /aria-label="Breadcrumb"|Breadcrumbs/);
+		assert.match(hostPage, /PageHeader|Breadcrumbs|aria-label="Breadcrumb"/);
 		assert.match(hostPage, /data\.projectName/);
-		assert.match(projectPage, /Breadcrumbs/);
+		assert.match(projectPage, /PageHeader|Breadcrumbs/);
 		assert.match(projectPage, /data\.project\.name/);
 		assert.match(services, /serviceDomId\(service\.id\)/);
 		assert.match(processes, /serviceTabHref\(row\.service_id\)/);
-		assert.match(processes, /filterProcesses/);
+		assert.match(processes, /DataTable/);
+		assert.match(processes, /searchLabel="Search pid, process, user, or command"/);
 		const server = readFileSync(new URL('../src/routes/hosts/[id]/+page.server.ts', import.meta.url), 'utf8');
 		assert.match(server, /depends\('host:metrics'\)/);
 		for (const key of ['1h', '6h', '24h', '7d'] as RangeKey[]) {
@@ -257,17 +269,20 @@ describe('host page', { concurrency: false }, () => {
 		const overviewTab = readFileSync(new URL('../src/routes/hosts/[id]/OverviewTab.svelte', import.meta.url), 'utf8');
 		const hostPage = readFileSync(new URL('../src/routes/hosts/[id]/+page.svelte', import.meta.url), 'utf8');
 		const hostsSection = readFileSync(new URL('../src/routes/projects/[id]/HostsSection.svelte', import.meta.url), 'utf8');
-		assert.match(servicesTab, /hostFormAction\('probe', \{ tab: 'services', range \}\)/);
+		assert.match(servicesTab, /actionUrlFrom\(page\.url, 'probe'\)/);
 		assert.match(servicesTab, /\{#if probe\}/);
-		assert.match(overviewTab, /hostFormAction\('snapshot', \{ tab: 'overview', range \}\)/);
+		assert.match(overviewTab, /actionUrlFrom\(page\.url, 'snapshot'\)/);
 		assert.match(overviewTab, /\{#if snapshot\}/);
-		assert.match(hostsSection, /hostFormAction\('askRevoke', \{ tab: 'hosts' \}\)/);
-		assert.match(hostsSection, /hostFormAction\('revokeCredential', \{ tab: 'hosts' \}\)/);
+		assert.match(hostsSection, /ConfirmAction/);
+		assert.match(hostsSection, /actionUrlFrom\(page\.url, 'revokeCredential'\)/);
 		assert.match(hostPage, /data\.tab === 'services'[\s\S]*probe=\{form\?\.probe/);
 		assert.match(hostPage, /data\.tab === 'overview'[\s\S]*snapshot=\{form\?\.snapshot/);
 
-		const probeAction = hostFormAction('probe', { tab: 'services', range: '6h' });
-		assert.equal(probeAction, '?tab=services&range=6h&/probe');
+		const probeAction = actionUrlFrom(
+			new URL(`http://console.example/hosts/${HOST_ID}?tab=services&range=6h&services.q=api&services.page=2`),
+			'probe'
+		);
+		assert.equal(probeAction, '?tab=services&range=6h&services.q=api&services.page=2&/probe');
 		const probeUrl = new URL(`http://console.example/hosts/${HOST_ID}${probeAction}`);
 		assert.equal(probeUrl.searchParams.get('tab'), 'services');
 		assert.equal(probeUrl.searchParams.get('range'), '6h');
@@ -300,7 +315,10 @@ describe('host page', { concurrency: false }, () => {
 		assert.equal(services.data.range, '6h');
 		assert.equal(services.data.message, null);
 
-		const snapshotAction = hostFormAction('snapshot', { tab: 'overview', range: '7d' });
+		const snapshotAction = actionUrlFrom(
+			new URL(`http://console.example/hosts/${HOST_ID}?tab=overview&range=7d`),
+			'snapshot'
+		);
 		assert.equal(snapshotAction, '?tab=overview&range=7d&/snapshot');
 		const snapshotUrl = new URL(`http://console.example/hosts/${HOST_ID}${snapshotAction}`);
 		assert.equal(snapshotUrl.searchParams.has('/snapshot'), true);

@@ -39,6 +39,25 @@ Steps 2 and 3 landed together. The console no longer reads Postgres. Host overvi
 
 `BOT_API_URL` is required. There is no Postgres URL or password. No OAuth secrets (they live on bot-api-server). An unset or invalid `BOT_API_URL` makes every route except static assets return 503.
 
+## Components
+
+Pages render on the server and stay usable without JavaScript. Shared pieces live in `src/lib/components/`. Colours come from the tokens in `src/app.css`.
+
+| Piece | Role |
+|---|---|
+| `DataTable` | Every table. The page passes the rows it already loaded. `src/lib/table.ts` sorts, searches (case-insensitive substring of searchable columns), and pages them from the URL: `<id>.q`, `<id>.sort`, `<id>.dir`, `<id>.page`. Sort headers and the pager are links. Search is a GET form. Default page size is 25. A table that fits on one page and has no search query shows no pager. The first click on a column uses that column's `firstDir` (ascending when omitted). A later click on the active column toggles. |
+| `Tabs` | Link strip with `aria-current="page"` for the host page and the project page. |
+| `PageHeader` | Breadcrumbs, `h1`, optional subtitle and actions. |
+| `StatusBadge` | The known host and health statuses. Anything else renders as `unknown`. |
+| `Notice` | Error, info, and success text. Errors are alerts. The others are status. |
+| `ConfirmAction` | Revoke credential, delete project, remove member, and revoke join token. Delete project asks the user to type the project name. The server still rejects a mismatch. |
+| `actionUrlFrom` | Named form actions on host and project pages. Keeps the current query, including table search, sort, and page, then appends `&/<name>`. |
+| `backTo` | Success redirect for a same-page project action. Same path and query, minus `confirm` and the `/name` action key. |
+
+The services table sorts by name (default, ascending), kind, ports, health status, and last seen, and searches name, kind, and ports. Ports sort by the smallest port number. Empty ports sort last. Search still matches the joined port text, including a port that is not the smallest on the row. That sorting is over the rows already returned by `GET /v1/hosts/{id}/services`. The process sample is still `sort=cpu|memory` and `limit=200`, and the processes table opens descending. CPU, RSS, memory, and threads also open descending when chosen from another column. `last_seen_at` is read from that service payload when it is present.
+
+`tests/components-reuse.test.ts` rejects a route that grows its own table, tab strip, alert, `confirm(`, `StatusText` import, or `<h1`.
+
 ## Tests (when implemented)
 
 - `hooks.server.ts`: cookie → `/v1/me` → locals; a missing or expired session redirects or returns 401.

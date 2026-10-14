@@ -1,6 +1,7 @@
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { compile } from 'svelte/compiler';
 
 const root = resolvePath(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -27,6 +28,12 @@ export async function resolve(specifier, context, nextResolve) {
 	if (specifier === '$env/dynamic/private') {
 		return { url: fileUrl(resolvePath(root, 'tests/stubs/env-private.ts')), shortCircuit: true };
 	}
+	if (specifier === '$app/state') {
+		return { url: fileUrl(resolvePath(root, 'tests/stubs/app-state.ts')), shortCircuit: true };
+	}
+	if (specifier === '$app/forms') {
+		return { url: fileUrl(resolvePath(root, 'tests/stubs/app-forms.ts')), shortCircuit: true };
+	}
 	if (specifier.startsWith('$lib/')) {
 		const url = withExtension(resolvePath(root, 'src/lib', specifier.slice('$lib/'.length)));
 		if (!url) throw new Error(`Cannot resolve ${specifier}`);
@@ -40,4 +47,18 @@ export async function resolve(specifier, context, nextResolve) {
 		}
 	}
 	return nextResolve(specifier, context);
+}
+
+/** Compile route and component modules so `svelte/server` `render` can load them. */
+export async function load(url, context, nextLoad) {
+	if (url.startsWith('file:') && url.endsWith('.svelte')) {
+		const filename = fileURLToPath(url);
+		const compiled = compile(readFileSync(filename, 'utf8'), {
+			filename,
+			generate: 'server',
+			css: 'external'
+		});
+		return { format: 'module', source: compiled.js.code, shortCircuit: true };
+	}
+	return nextLoad(url, context);
 }

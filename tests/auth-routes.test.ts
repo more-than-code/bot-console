@@ -389,6 +389,64 @@ describe('auth routes', { concurrency: false }, () => {
 		assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.pathname === `/v1/projects/${PROJECT.id}`), true);
 	});
 
+	test('delete without the typed project name does not call the API', async () => {
+		useApi('https://api.test');
+		const calls = installFetch(() => envelope(PROJECT));
+		const missing = await projectActions.deleteProject(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}`,
+				session: TOKEN,
+				user: USER,
+				params: { id: PROJECT.id },
+				form: {}
+			}).event as never
+		);
+		assert.equal(isActionFailure(missing), true);
+		if (!isActionFailure(missing)) assert.fail('expected the invalid result');
+		assert.equal((missing.data as { message?: string } | undefined)?.message, 'Type the project name exactly to delete it.');
+
+		const wrong = await projectActions.deleteProject(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}`,
+				session: TOKEN,
+				user: USER,
+				params: { id: PROJECT.id },
+				form: { confirm: 'lab' }
+			}).event as never
+		);
+		assert.equal(isActionFailure(wrong), true);
+		if (!isActionFailure(wrong)) assert.fail('expected the invalid result');
+		assert.equal((wrong.data as { message?: string } | undefined)?.message, 'Type the project name exactly to delete it.');
+		assert.equal(calls.some((call) => call.method === 'DELETE'), false);
+
+		const settings = readFileSync(new URL('../src/routes/projects/[id]/SettingsSection.svelte', import.meta.url), 'utf8');
+		assert.match(settings, /typeToConfirm=\{\{ name: 'confirm', expected: project\.name/);
+		assert.doesNotMatch(settings, /type="hidden"[\s\S]{0,120}project\.name/);
+		assert.doesNotMatch(settings, /hidden=\{[\s\S]*?project\.name/);
+	});
+
+	test('remove member keeps the members table query', async () => {
+		useApi('https://api.test');
+		installFetch(() => envelope(null));
+		const userId = '00000000-0000-4000-8000-0000000000aa';
+		await assert.rejects(
+			async () => {
+				await projectActions.removeMember(
+					fakeEvent({
+						url: `http://console.example/projects/${PROJECT.id}?tab=members&members.q=ada&members.page=2&confirm=remove-member-${userId}&/removeMember`,
+						session: TOKEN,
+						user: USER,
+						params: { id: PROJECT.id },
+						form: { user_id: userId }
+					}).event as never
+				);
+			},
+			(err: unknown) =>
+				isRedirect(err) &&
+				err.location === `/projects/${PROJECT.id}?tab=members&members.q=ada&members.page=2`
+		);
+	});
+
 	test('probe posts only check_id and a snapshot result drops the session token', async () => {
 		useApi('https://api.test');
 		const calls = installFetch((call) => {

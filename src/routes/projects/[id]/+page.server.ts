@@ -8,6 +8,7 @@ import { present } from '$lib/server/redact';
 import { roleAtLeast, uiRole } from '$lib/server/roles';
 import { parseHost, parseJoinToken, parseMember, parseCreatedJoin, parseProject } from '$lib/server/shape';
 import { cleanEmail, cleanExpiry, cleanHint, cleanName, cleanRole, isUuid } from '$lib/server/validate';
+import { backTo } from '$lib/url';
 import type { Actions, PageServerLoad, RequestEvent } from './$types';
 
 function projectId(params: { id?: string }): string {
@@ -143,7 +144,7 @@ export const actions: Actions = {
 		if (!isUuid(hostId)) return invalid(event, 'hosts', 'That host is not valid.');
 		try {
 			await apiFetch(event, `/v1/hosts/${hostId}/credential`, { method: 'DELETE' });
-			redirect(303, `/projects/${id}?tab=hosts`);
+			redirect(303, backTo(event.url));
 		} catch (err) {
 			return actionFailure(event, err, 'hosts');
 		}
@@ -162,7 +163,7 @@ export const actions: Actions = {
 				method: 'POST',
 				body: JSON.stringify({ email, role })
 			});
-			redirect(303, `/projects/${id}?tab=members`);
+			redirect(303, backTo(event.url));
 		} catch (err) {
 			return actionFailure(event, err, 'members');
 		}
@@ -181,7 +182,7 @@ export const actions: Actions = {
 				method: 'PATCH',
 				body: JSON.stringify({ role })
 			});
-			redirect(303, `/projects/${id}?tab=members`);
+			redirect(303, backTo(event.url));
 		} catch (err) {
 			return actionFailure(event, err, 'members');
 		}
@@ -194,7 +195,7 @@ export const actions: Actions = {
 		if (!isUuid(userId)) return invalid(event, 'members', 'That member is not valid.');
 		try {
 			await apiFetch(event, `/v1/projects/${id}/members/${userId}`, { method: 'DELETE' });
-			redirect(303, `/projects/${id}?tab=members`);
+			redirect(303, backTo(event.url));
 		} catch (err) {
 			return actionFailure(event, err, 'members');
 		}
@@ -210,7 +211,7 @@ export const actions: Actions = {
 				method: 'POST',
 				body: JSON.stringify({ user_id: userId })
 			});
-			redirect(303, `/projects/${id}?tab=members`);
+			redirect(303, backTo(event.url));
 		} catch (err) {
 			return actionFailure(event, err, 'members');
 		}
@@ -254,7 +255,7 @@ export const actions: Actions = {
 		if (!isUuid(tokenId)) return invalid(event, 'tokens', 'That join token is not valid.');
 		try {
 			await apiFetch(event, `/v1/projects/${id}/join-tokens/${tokenId}`, { method: 'DELETE' });
-			redirect(303, `/projects/${id}?tab=tokens`);
+			redirect(303, backTo(event.url));
 		} catch (err) {
 			return actionFailure(event, err, 'tokens');
 		}
@@ -267,7 +268,7 @@ export const actions: Actions = {
 		if (!name) return invalid(event, 'settings', 'Enter a project name (1–80 characters).');
 		try {
 			await apiFetch(event, `/v1/projects/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
-			redirect(303, `/projects/${id}?tab=settings`);
+			redirect(303, backTo(event.url));
 		} catch (err) {
 			return actionFailure(event, err, 'settings');
 		}

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import Notice from '$lib/components/Notice.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 
 	let { data, form } = $props();
 	const next = $derived(form?.next ?? data.next);
@@ -9,12 +11,12 @@
 	<title>Sign in · deploybot</title>
 </svelte:head>
 
-<h1>Sign in</h1>
+<PageHeader title="Sign in" />
 {#if data.signedInName}
 	<p class="sub">Signed in as {data.signedInName}. <a href="/projects">Go to projects</a>.</p>
 {/if}
 {#if form?.message}
-	<p class="error" role="alert">{form.message}</p>
+	<Notice kind="error">{form.message}</Notice>
 {/if}
 <form method="POST" use:enhance>
 	<input type="hidden" name="next" value={next} />

@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { invalidate } from '$app/navigation';
-	import Breadcrumbs from '$lib/components/Breadcrumbs.svelte';
+	import Notice from '$lib/components/Notice.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
+	import Tabs from '$lib/components/Tabs.svelte';
 	import { METRIC_REFRESH_MS } from '$lib/host-view';
 	import OverviewTab from './OverviewTab.svelte';
 	import ProcessesTab from './ProcessesTab.svelte';
@@ -24,6 +26,12 @@
 					{ label: 'Host' }
 				]
 	);
+
+	const tabs = $derived([
+		{ key: 'overview', label: 'Overview', href: `?tab=overview&range=${data.range}` },
+		{ key: 'services', label: 'Services', href: '?tab=services' },
+		{ key: 'processes', label: 'Processes', href: `?tab=processes&sort=${data.processSort}` }
+	]);
 
 	$effect(() => {
 		if (!browser || data.tab !== 'overview' || !data.host) return;
@@ -55,35 +63,20 @@
 	<title>{data.host ? data.host.name : 'Host'} · deploybot</title>
 </svelte:head>
 
-<Breadcrumbs items={crumbs} />
+<PageHeader title={data.host ? data.host.name : 'Host'} breadcrumbs={crumbs} />
 {#if !data.host}
-	<h1>Host</h1>
-	<p class="error" role="alert">{data.message ?? 'This host is not available.'}</p>
+	<Notice kind="error">{data.message ?? 'This host is not available.'}</Notice>
 {:else}
-	<h1>{data.host.name}</h1>
 	{#if data.message || form?.message}
-		<p class="error" role="alert">{form?.message ?? data.message}</p>
+		<Notice kind="error">{form?.message ?? data.message}</Notice>
 	{/if}
-	<nav class="nav tabs" aria-label="Host sections">
-		<a href="?tab=overview&range={data.range}" aria-current={data.tab === 'overview' ? 'page' : undefined}>Overview</a>
-		<a href="?tab=services" aria-current={data.tab === 'services' ? 'page' : undefined}>Services</a>
-		<a
-			href="?tab=processes&sort={data.processSort}"
-			aria-current={data.tab === 'processes' ? 'page' : undefined}
-		>Processes</a>
-	</nav>
+	<Tabs label="Host sections" current={data.tab} items={tabs} />
 
 	{#if data.tab === 'overview'}
 		<OverviewTab host={data.host} range={data.range} metrics={data.metrics} snapshot={form?.snapshot ?? null} />
 	{:else if data.tab === 'services'}
-		<ServicesTab services={data.services} omitted={data.omitted} probe={form?.probe ?? null} range={data.range} />
+		<ServicesTab services={data.services} omitted={data.omitted} probe={form?.probe ?? null} />
 	{:else}
-		<ProcessesTab
-			hostId={data.host.id}
-			range={data.range}
-			sort={data.processSort}
-			processes={data.processes}
-			message={data.processesMessage}
-		/>
+		<ProcessesTab sort={data.processSort} processes={data.processes} message={data.processesMessage} />
 	{/if}
 {/if}

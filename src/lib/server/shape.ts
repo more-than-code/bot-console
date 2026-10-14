@@ -189,7 +189,9 @@ export function parseService(value: unknown): ServiceSummary | null {
 	if (!id || !isUuid(id) || !name || health === undefined || !ports) return null;
 	if (value.source !== 'discovered' && value.source !== 'declared' && value.source !== 'owned') return null;
 	if (value.kind !== 'container' && value.kind !== 'systemd' && value.kind !== 'process') return null;
-	return { id, name, source: value.source, kind: value.kind, ports, health };
+	const last_seen_at = optionalText(value.last_seen_at, 64);
+	if (last_seen_at === undefined) return null;
+	return { id, name, source: value.source, kind: value.kind, ports, health, last_seen_at };
 }
 
 export function parseHealthChecks(value: unknown): HealthCheck[] | null {

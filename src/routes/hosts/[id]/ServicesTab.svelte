@@ -1,21 +1,21 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import StatusText from '$lib/components/StatusText.svelte';
+	import { page } from '$app/state';
+	import DataTable from '$lib/components/DataTable.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { ProbeView, ServiceRow } from '$lib/api-types';
 	import { formatLatency, formatWhen } from '$lib/format';
-	import { hostFormAction, serviceDomId } from '$lib/host-view';
-	import type { RangeKey } from '$lib/ranges';
+	import { SERVICE_COLUMNS, SERVICE_DEFAULT_DIR, SERVICE_DEFAULT_SORT, serviceDomId } from '$lib/host-view';
+	import { actionUrlFrom } from '$lib/url';
 
 	let {
 		services,
 		omitted,
-		probe,
-		range
+		probe
 	}: {
 		services: ServiceRow[];
 		omitted: number;
 		probe: ProbeView | null;
-		range: RangeKey;
 	} = $props();
 
 	function ports(values: number[]): string {
@@ -41,48 +41,40 @@
 {#if omitted > 0}
 	<p class="sub">{omitted} more {omitted === 1 ? 'row' : 'rows'} left out.</p>
 {/if}
-{#if services.length === 0}
-	<p class="empty">No services reported.</p>
-{:else}
-	<div class="table-wrap">
-		<table class="data" aria-labelledby="services-heading">
-			<thead>
-				<tr>
-					<th>Name</th>
-					<th>Source</th>
-					<th>Kind</th>
-					<th>Ports</th>
-					<th>Health</th>
-					<th>Checks</th>
-				</tr>
-			</thead>
-			<tbody>
-				{#each services as service (service.id)}
-					<tr id={serviceDomId(service.id)}>
-						<td>{service.name}</td>
-						<td>{service.source}</td>
-						<td>{service.kind}</td>
-						<td>{ports(service.ports)}</td>
-						<td><StatusText status={service.health?.status ?? 'unknown'} /></td>
-						<td class="wrap">
-							{#if service.checksMessage}
-								<span class="sub">{service.checksMessage}</span>
-							{:else if service.checks.length === 0}
-								<span class="sub">No health checks.</span>
-							{:else}
-								{#each service.checks as check (check.id)}
-									<form method="POST" action={hostFormAction('probe', { tab: 'services', range })} class="actions" use:enhance>
-										<input type="hidden" name="service_id" value={service.id} />
-										<input type="hidden" name="check_id" value={check.id} />
-										<span>{check.protocol} {check.port}{check.path ?? ''}{check.enabled ? '' : ' (disabled)'}</span>
-										<button type="submit" aria-label="Probe {service.name} {check.protocol} {check.port}">Probe</button>
-									</form>
-								{/each}
-							{/if}
-						</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</div>
-{/if}
+<DataTable
+	rows={services}
+	columns={SERVICE_COLUMNS}
+	id="services"
+	labelledBy="services-heading"
+	empty="No services reported."
+	rowKey={(service) => service.id}
+	defaultSort={SERVICE_DEFAULT_SORT}
+	defaultDir={SERVICE_DEFAULT_DIR}
+>
+	{#snippet row(service)}
+		<tr id={serviceDomId(service.id)}>
+			<td>{service.name}</td>
+			<td>{service.source}</td>
+			<td>{service.kind}</td>
+			<td>{ports(service.ports)}</td>
+			<td><StatusBadge status={service.health?.status ?? 'unknown'} /></td>
+			<td>{formatWhen(service.last_seen_at)}</td>
+			<td class="wrap">
+				{#if service.checksMessage}
+					<span class="sub">{service.checksMessage}</span>
+				{:else if service.checks.length === 0}
+					<span class="sub">No health checks.</span>
+				{:else}
+					{#each service.checks as check (check.id)}
+						<form method="POST" action={actionUrlFrom(page.url, 'probe')} class="actions" use:enhance>
+							<input type="hidden" name="service_id" value={service.id} />
+							<input type="hidden" name="check_id" value={check.id} />
+							<span>{check.protocol} {check.port}{check.path ?? ''}{check.enabled ? '' : ' (disabled)'}</span>
+							<button type="submit" aria-label="Probe {service.name} {check.protocol} {check.port}">Probe</button>
+						</form>
+					{/each}
+				{/if}
+			</td>
+		</tr>
+	{/snippet}
+</DataTable>

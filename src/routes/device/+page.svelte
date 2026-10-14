@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import Notice from '$lib/components/Notice.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { formatWhen } from '$lib/format';
+	import { actionUrl } from '$lib/url';
 
 	let { data, form } = $props();
 
@@ -16,9 +19,9 @@
 	<title>Device · deploybot</title>
 </svelte:head>
 
-<h1>Device approval</h1>
+<PageHeader title="Device approval" />
 {#if form?.message || data.message}
-	<p class="error" role="alert">{form?.message ?? data.message}</p>
+	<Notice kind="error">{form?.message ?? data.message}</Notice>
 {/if}
 
 {#if data.device}
@@ -29,11 +32,11 @@
 	<p class="sub">{statusText[data.device.status] ?? 'This code cannot be used.'}</p>
 	{#if data.device.status === 'pending'}
 		<div class="actions">
-			<form method="POST" action="?/approve" use:enhance>
+			<form method="POST" action={actionUrl('approve', { code: data.code || undefined })} use:enhance>
 				<input type="hidden" name="code" value={data.code} />
 				<button type="submit">Approve</button>
 			</form>
-			<form method="POST" action="?/deny" use:enhance>
+			<form method="POST" action={actionUrl('deny', { code: data.code || undefined })} use:enhance>
 				<input type="hidden" name="code" value={data.code} />
 				<button type="submit" class="danger">Deny</button>
 			</form>

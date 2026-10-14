@@ -1,48 +1,21 @@
 <script lang="ts">
-	import { page } from '$app/state';
 	import DataTable from '$lib/components/DataTable.svelte';
-	import SearchField from '$lib/components/SearchField.svelte';
+	import Notice from '$lib/components/Notice.svelte';
 	import type { ProcessSample } from '$lib/api-types';
 	import { formatBytes, formatPercent, formatWhen } from '$lib/format';
-	import { filterProcesses, hasProcessSample, serviceTabHref, type ProcessSort } from '$lib/host-view';
-	import { parseSearch } from '$lib/table-query';
-	import { withQuery } from '$lib/table-href';
+	import { hasProcessSample, PROCESS_COLUMNS, serviceTabHref, type ProcessSort } from '$lib/host-view';
 
 	let {
-		hostId,
-		range,
 		sort,
 		processes,
 		message
 	}: {
-		hostId: string;
-		range: string;
 		sort: ProcessSort;
 		processes: ProcessSample | null;
 		message: string | null;
 	} = $props();
 
-	const parsedQuery = $derived(parseSearch(page.url.searchParams.get('q')));
-	const q = $derived(parsedQuery.ok ? parsedQuery.q : null);
-	const searchMessage = $derived(parsedQuery.ok ? null : parsedQuery.message);
 	const sample = $derived(hasProcessSample(processes) ? processes : null);
-	const rows = $derived(sample ? filterProcesses(sample.items, q) : []);
-
-	function hrefFor(next: string | null): string {
-		return withQuery(`/hosts/${hostId}`, { tab: 'processes', sort, range, q: next });
-	}
-
-	const columns = $derived([
-		{ key: 'pid', label: 'PID', numeric: true },
-		{ key: 'process', label: 'Process' },
-		{ key: 'user', label: 'User' },
-		{ key: 'command', label: 'Command' },
-		{ key: 'cpu', label: 'CPU %', numeric: true, href: withQuery(`/hosts/${hostId}`, { tab: 'processes', sort: 'cpu', range, q }) },
-		{ key: 'rss', label: 'RSS', numeric: true },
-		{ key: 'memory', label: 'Mem %', numeric: true, href: withQuery(`/hosts/${hostId}`, { tab: 'processes', sort: 'memory', range, q }) },
-		{ key: 'threads', label: 'Threads', numeric: true },
-		{ key: 'started', label: 'Started' }
-	]);
 
 	function count(value: number | null): string {
 		if (value == null || !Number.isFinite(value)) return 'n/a';
@@ -53,7 +26,7 @@
 <h2 id="processes-heading">Processes</h2>
 <p class="sub">CPU % is irix mode: 100 means one core. RSS is resident memory.</p>
 {#if message}
-	<p class="error" role="alert">{message}</p>
+	<Notice kind="error">{message}</Notice>
 {:else if !sample}
 	<p class="empty">No process sample yet</p>
 {:else}
@@ -61,25 +34,19 @@
 	{#if sample.skipped > 0}
 		<p class="sub">{sample.skipped} rows skipped</p>
 	{/if}
-	{#if searchMessage}
-		<p class="error" role="alert">{searchMessage}</p>
-	{/if}
-	<SearchField
-		{q}
-		label="Search pid, process, user, or command"
-		action="/hosts/{hostId}"
-		hidden={[
-			{ name: 'tab', value: 'processes' },
-			{ name: 'sort', value: sort },
-			{ name: 'range', value: range }
-		]}
-		{hrefFor}
-	/>
-	{#if rows.length === 0 && sample.items.length > 0}
-		<p class="empty">No matching processes.</p>
-	{:else if rows.length > 0}
-		<DataTable {columns} {sort} labelledBy="processes-heading">
-			{#each rows as row (`${row.pid}-${row.started_at ?? ''}`)}
+	{#if sample.items.length > 0}
+		<DataTable
+			rows={sample.items}
+			columns={PROCESS_COLUMNS}
+			id="processes"
+			labelledBy="processes-heading"
+			empty="No matching processes."
+			rowKey={(row) => `${row.pid}-${row.started_at ?? ''}`}
+			defaultSort={sort}
+			defaultDir="desc"
+			searchLabel="Search pid, process, user, or command"
+		>
+			{#snippet row(row)}
 				<tr>
 					<td class="num">{row.pid}</td>
 					<td>
@@ -97,7 +64,7 @@
 					<td class="num">{count(row.num_threads)}</td>
 					<td>{formatWhen(row.started_at)}</td>
 				</tr>
-			{/each}
+			{/snippet}
 		</DataTable>
 	{/if}
 {/if}

@@ -1,33 +1,39 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
-	import StatusText from '$lib/components/StatusText.svelte';
+	import { page } from '$app/state';
+	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+	import DataTable from '$lib/components/DataTable.svelte';
+	import Notice from '$lib/components/Notice.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { Host } from '$lib/api-types';
 	import { formatWhen } from '$lib/format';
-	import { hostFormAction } from '$lib/host-view';
+	import type { Column } from '$lib/table';
+	import { actionUrlFrom } from '$lib/url';
 
 	let {
-		projectId,
 		hosts,
 		omitted,
 		truncated,
 		canAdmin,
-		confirmHostId,
 		message
 	}: {
-		projectId: string;
 		hosts: Host[];
 		omitted: number;
 		truncated: boolean;
 		canAdmin: boolean;
-		confirmHostId: string | null;
 		message: string | null;
 	} = $props();
 
-	const pending = $derived(hosts.find((host) => host.id === confirmHostId) ?? null);
+	const columns = $derived<Column<Host>[]>([
+		{ key: 'name', label: 'Name' },
+		{ key: 'status', label: 'Status' },
+		{ key: 'seen', label: 'Last seen' },
+		{ key: 'version', label: 'Version' },
+		...(canAdmin ? [{ key: 'credential', label: 'Credential' }] : [])
+	]);
 </script>
 
 {#if message}
-	<p class="error" role="alert">{message}</p>
+	<Notice kind="error">{message}</Notice>
 {/if}
 {#if omitted > 0}
 	<p class="sub">{omitted} more {omitted === 1 ? 'row' : 'rows'} left out.</p>
@@ -35,54 +41,26 @@
 {#if truncated}
 	<p class="sub">More items not shown</p>
 {/if}
-{#if confirmHostId}
-	<form method="POST" action={hostFormAction('revokeCredential', { tab: 'hosts' })} class="panel" use:enhance>
-		<p>Revoke the credential for {pending?.name ?? 'this host'}? The agent connection closes.</p>
-		<input type="hidden" name="host_id" value={confirmHostId} />
-		<div class="actions">
-			<button type="submit" class="danger">Revoke credential</button>
-			<a href="/projects/{projectId}?tab=hosts">Cancel</a>
-		</div>
-	</form>
-{/if}
-{#if hosts.length === 0}
-	<p class="empty">No hosts enrolled.</p>
-{:else}
-	<div class="table-wrap">
-		<table class="data">
-			<thead>
-				<tr>
-					<th>Name</th>
-					<th>Status</th>
-					<th>Last seen</th>
-					<th>Version</th>
-					{#if canAdmin}
-						<th>Credential</th>
-					{/if}
-				</tr>
-			</thead>
-			<tbody>
-				{#each hosts as host (host.id)}
-					<tr>
-						<td><a href="/hosts/{host.id}">{host.name}</a></td>
-						<td><StatusText status={host.status} /></td>
-						<td>{formatWhen(host.last_seen_at)}</td>
-						<td>{host.agent_version ?? 'n/a'}</td>
-						{#if canAdmin}
-							<td>
-								{#if host.id !== confirmHostId}
-									<form method="POST" action={hostFormAction('askRevoke', { tab: 'hosts' })} use:enhance>
-										<input type="hidden" name="host_id" value={host.id} />
-										<button type="submit" class="danger" aria-label="Revoke credential for {host.name}">
-											Revoke credential
-										</button>
-									</form>
-								{/if}
-							</td>
-						{/if}
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</div>
-{/if}
+<h2 id="hosts-heading" class="sr">Hosts</h2>
+<DataTable rows={hosts} {columns} id="hosts" labelledBy="hosts-heading" empty="No hosts enrolled." rowKey={(host) => host.id}>
+	{#snippet row(host)}
+		<tr>
+			<td><a href="/hosts/{host.id}">{host.name}</a></td>
+			<td><StatusBadge status={host.status} /></td>
+			<td>{formatWhen(host.last_seen_at)}</td>
+			<td>{host.agent_version ?? 'n/a'}</td>
+			{#if canAdmin}
+				<td>
+					<ConfirmAction
+						id="revoke-host-{host.id}"
+						action={actionUrlFrom(page.url, 'revokeCredential')}
+						label="Revoke credential"
+						confirmLabel="Revoke credential"
+						message="Revoke the credential for {host.name}? The agent connection closes."
+						hidden={[{ name: 'host_id', value: host.id }]}
+					/>
+				</td>
+			{/if}
+		</tr>
+	{/snippet}
+</DataTable>

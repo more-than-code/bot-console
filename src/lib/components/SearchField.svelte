@@ -8,13 +8,15 @@
 		label,
 		action,
 		hidden,
-		hrefFor
+		hrefFor,
+		name = 'q'
 	}: {
 		q: string | null;
 		label: string;
 		action: string;
 		hidden: Array<{ name: string; value: string }>;
 		hrefFor: (q: string | null) => string;
+		name?: string;
 	} = $props();
 
 	let draft = $state(untrack(() => q ?? ''));
@@ -62,7 +64,7 @@
 		<span class="sr">{label}</span>
 		<input
 			type="search"
-			name="q"
+			name={name}
 			maxlength={SEARCH_MAX}
 			placeholder={label}
 			value={draft}

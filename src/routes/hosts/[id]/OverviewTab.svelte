@@ -1,10 +1,15 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { page } from '$app/state';
+	import DataTable from '$lib/components/DataTable.svelte';
 	import LineChart from '$lib/components/LineChart.svelte';
-	import StatusText from '$lib/components/StatusText.svelte';
+	import Notice from '$lib/components/Notice.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { Host, SnapshotView } from '$lib/api-types';
 	import { formatBytes, formatCapacity, formatLoad, formatPercent, formatRate, formatTemp, formatUptime, formatWhen } from '$lib/format';
-	import { alignSeries, hostFormAction, METRIC_SPECS, type MetricChart, type MetricFormat } from '$lib/host-view';
+	import { alignSeries, METRIC_SPECS, type MetricChart, type MetricFormat } from '$lib/host-view';
+	import type { Column } from '$lib/table';
+	import { actionUrlFrom } from '$lib/url';
 	import { RANGES, type RangeKey } from '$lib/ranges';
 
 	let {
@@ -43,6 +48,19 @@
 	);
 
 	const rangeKeys = Object.keys(RANGES) as RangeKey[];
+	type Disk = SnapshotView['disks'][number];
+	type Top = SnapshotView['top'][number];
+	const diskColumns: Column<Disk>[] = [
+		{ key: 'path', label: 'Disk' },
+		{ key: 'used', label: 'Used' }
+	];
+	const topColumns: Column<Top>[] = [
+		{ key: 'pid', label: 'PID' },
+		{ key: 'process', label: 'Process' },
+		{ key: 'user', label: 'User' },
+		{ key: 'cpu', label: 'CPU' },
+		{ key: 'rss', label: 'RSS' }
+	];
 
 	function rawNumber(value: number | null): string {
 		if (value == null || !Number.isFinite(value)) return 'n/a';
@@ -51,7 +69,7 @@
 </script>
 
 <dl class="facts">
-	<div><dt>Status</dt><dd><StatusText status={host.status} /></dd></div>
+	<div><dt>Status</dt><dd><StatusBadge status={host.status} /></dd></div>
 	<div><dt>Last seen</dt><dd>{formatWhen(host.last_seen_at)}</dd></div>
 	<div><dt>Agent</dt><dd>{host.agent_version ?? 'n/a'}</dd></div>
 	<div><dt>System</dt><dd>{host.os}/{host.arch}</dd></div>
@@ -64,7 +82,7 @@
 	{/each}
 </nav>
 
-<form method="POST" action={hostFormAction('snapshot', { tab: 'overview', range })} use:enhance>
+<form method="POST" action={actionUrlFrom(page.url, 'snapshot')} use:enhance>
 	<button type="submit">Snapshot</button>
 </form>
 
@@ -94,47 +112,43 @@
 			<div><dt>Uptime</dt><dd>{formatUptime(snapshot.uptime_sec)}</dd></div>
 		</dl>
 		{#if snapshot.disks.length > 0}
-			<div class="table-wrap">
-				<table class="data">
-					<thead>
-						<tr><th>Disk</th><th>Used</th></tr>
-					</thead>
-					<tbody>
-						{#each snapshot.disks as disk (disk.path)}
-							<tr>
-								<td>{disk.path}</td>
-								<td>{formatCapacity(disk.used, disk.total, disk.used_percent)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
+			<span id="snapshot-disks" class="sr">Disks</span>
+			<DataTable
+				rows={snapshot.disks}
+				columns={diskColumns}
+				id="snapshot-disks"
+				labelledBy="snapshot-disks"
+				empty="No disks."
+				rowKey={(disk) => disk.path}
+			>
+				{#snippet row(disk)}
+					<tr>
+						<td>{disk.path}</td>
+						<td>{formatCapacity(disk.used, disk.total, disk.used_percent)}</td>
+					</tr>
+				{/snippet}
+			</DataTable>
 		{/if}
 		{#if snapshot.top.length > 0}
-			<div class="table-wrap">
-				<table class="data">
-					<thead>
-						<tr>
-							<th>PID</th>
-							<th>Process</th>
-							<th>User</th>
-							<th>CPU</th>
-							<th>RSS</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each snapshot.top as row (row.pid)}
-							<tr>
-								<td>{row.pid}</td>
-								<td class="wrap">{row.cmdline || row.process_name || 'n/a'}</td>
-								<td>{row.user || 'n/a'}</td>
-								<td>{rawNumber(row.cpu_usage)}</td>
-								<td>{formatBytes(row.memory_rss)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
+			<span id="snapshot-top" class="sr">Top processes</span>
+			<DataTable
+				rows={snapshot.top}
+				columns={topColumns}
+				id="snapshot-top"
+				labelledBy="snapshot-top"
+				empty="No processes."
+				rowKey={(row) => row.pid}
+			>
+				{#snippet row(row)}
+					<tr>
+						<td>{row.pid}</td>
+						<td class="wrap">{row.cmdline || row.process_name || 'n/a'}</td>
+						<td>{row.user || 'n/a'}</td>
+						<td>{rawNumber(row.cpu_usage)}</td>
+						<td>{formatBytes(row.memory_rss)}</td>
+					</tr>
+				{/snippet}
+			</DataTable>
 		{/if}
 	</div>
 {/if}
@@ -146,7 +160,7 @@
 		{#if item.chart?.message}
 			<figure class="chart">
 				<h2>{item.spec.title}</h2>
-				<p class="error" role="status">{item.chart.message}</p>
+				<Notice kind="error">{item.chart.message}</Notice>
 			</figure>
 		{:else}
 			<LineChart

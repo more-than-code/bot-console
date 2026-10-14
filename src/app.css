@@ -517,7 +517,8 @@ table.data th[aria-sort='other'] a.sort {
 	color: var(--muted);
 }
 
-button {
+button,
+a.button {
 	font: inherit;
 	color: var(--text);
 	background: var(--card);
@@ -525,11 +526,21 @@ button {
 	border-radius: 999px;
 	padding: 0.35rem 0.75rem;
 	cursor: pointer;
+	text-decoration: none;
 }
 
-button.danger {
+a.button {
+	display: inline-block;
+}
+
+button.danger,
+a.button.danger {
 	color: var(--stale);
 	border-color: var(--stale);
+}
+
+table.data a.button:hover {
+	text-decoration: none;
 }
 
 button:disabled {
@@ -604,8 +615,15 @@ table.data td.wrap {
 }
 
 .notice {
-	color: var(--ok);
 	margin: 0.6rem 0 0;
+}
+
+.notice.info {
+	color: var(--muted);
+}
+
+.notice.success {
+	color: var(--ok);
 }
 
 .tabs {
