@@ -36,6 +36,10 @@ export type JoinToken = {
 
 export type HostStatus = 'online' | 'offline' | 'asleep' | 'revoked';
 
+export type HostRelation = 'owner' | 'shared';
+
+export type ShareLevel = 'metrics' | 'deploy';
+
 export type Host = {
 	id: string;
 	project_id: string;
@@ -49,6 +53,10 @@ export type Host = {
 	last_seen_at: string | null;
 	enrolled_at: string;
 	revoked_at: string | null;
+	/** Owner when the caller is in the owning project. Shared otherwise. */
+	relation: HostRelation;
+	/** Null when `relation` is owner. */
+	share_level: ShareLevel | null;
 };
 
 export type HealthStatus = 'up' | 'down' | 'unknown';
@@ -76,9 +84,30 @@ export type ServiceSummary = {
 	health: Health | null;
 	/** From the service payload already returned by the list. Missing becomes null. */
 	last_seen_at: string | null;
+	/** Person-set name. Missing or blank becomes null. */
+	display_name: string | null;
+	/** Account that owns the listening socket. Missing becomes null. */
+	owner_user: string | null;
+	/** Service's project. Missing becomes null; a bad id fails the row. */
+	project_id: string | null;
+	/** Host that runs the service. Missing becomes null; a bad id fails the row. */
+	host_id: string | null;
 };
 
 export type ServiceRow = ServiceSummary & {
+	checks: HealthCheck[];
+	checksMessage: string | null;
+};
+
+/** One row of `GET /v1/projects/{id}/services`, plus the checks the console loaded. */
+export type ProjectService = ServiceSummary & {
+	host_id: string;
+	host_name: string;
+	host_status: HostStatus;
+	project_name: string;
+};
+
+export type ProjectServiceRow = ProjectService & {
 	checks: HealthCheck[];
 	checksMessage: string | null;
 };

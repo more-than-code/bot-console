@@ -1,10 +1,11 @@
-import type { Host, ProcessItem, ProcessSample, ServiceRow } from './api-types';
+import type { Host, ProcessItem, ProcessSample, ProjectServiceRow } from './api-types';
 import { parseRange, type RangeKey } from './ranges';
+import { serviceLabel } from './service-label';
 import type { Column, SortDir } from './table';
 
 export const METRIC_REFRESH_MS = 30_000;
 
-export const HOST_TABS = ['overview', 'services', 'processes'] as const;
+export const HOST_TABS = ['overview', 'processes'] as const;
 export type HostTab = (typeof HOST_TABS)[number];
 
 export type ProcessSort = 'cpu' | 'memory';
@@ -101,6 +102,12 @@ export type MetricChart = {
 	series: Array<{ name: string; points: MetricPoint[] }>;
 };
 
+/** Label and optional project Services link for one process row. */
+export type ServiceLink = {
+	label: string;
+	href: string | null;
+};
+
 export type HostPage = {
 	host: Host | null;
 	projectName: string | null;
@@ -108,15 +115,14 @@ export type HostPage = {
 	range: RangeKey;
 	processSort: ProcessSort;
 	message: string | null;
-	services: ServiceRow[];
-	omitted: number;
+	serviceLinks: Record<string, ServiceLink>;
 	metrics: MetricChart[];
 	processes: ProcessSample | null;
 	processesMessage: string | null;
 };
 
 export function parseHostTab(value: string | null): HostTab {
-	if (value === 'services' || value === 'processes') return value;
+	if (value === 'processes') return value;
 	return 'overview';
 }
 
@@ -148,13 +154,29 @@ export function serviceDomId(serviceId: string): string {
 	return `service-${serviceId}`;
 }
 
-export function serviceTabHref(serviceId: string): string {
-	return `?tab=services#${serviceDomId(serviceId)}`;
+/** The Project column is only there when a row belongs to some other project. */
+export function showProjectColumn(projectName: string, rows: readonly { project_name: string }[]): boolean {
+	return rows.some((row) => row.project_name !== projectName);
 }
 
 /** A sample the processes table can show. Null `sampled_at` and no rows is "no sample yet". */
 export function hasProcessSample(sample: ProcessSample | null): sample is ProcessSample & { sampled_at: string } {
 	return sample != null && sample.sampled_at != null && (sample.items.length > 0 || sample.skipped > 0);
+}
+
+/** Services list rows: every service on an owned host, or this project's services on a deploy share. */
+export function serviceHostReachable(host: Pick<Host, 'relation' | 'share_level'>): boolean {
+	if (host.relation === 'owner') return true;
+	return host.relation === 'shared' && host.share_level === 'deploy';
+}
+
+/** Label shown in the Service column. Empty when the process has no service. */
+export function processServiceText(
+	row: { service_id: string | null },
+	links: Readonly<Record<string, { label: string }>>
+): string {
+	if (!row.service_id) return '';
+	return links[row.service_id]?.label ?? 'service';
 }
 
 /** Smallest port, or null when the list is empty. Null sorts last. */
@@ -170,32 +192,41 @@ export function smallestPort(ports: readonly number[]): number | null {
 export const SERVICE_DEFAULT_SORT = 'name';
 export const SERVICE_DEFAULT_DIR: SortDir = 'asc';
 
-export const SERVICE_COLUMNS: Column<ServiceRow>[] = [
-	{ key: 'name', label: 'Name', sortable: true, searchable: true, value: (row) => row.name },
-	{ key: 'source', label: 'Source', value: (row) => row.source },
-	{ key: 'kind', label: 'Kind', sortable: true, searchable: true, value: (row) => row.kind },
-	{
-		key: 'ports',
-		label: 'Ports',
-		numeric: true,
-		sortable: true,
-		searchable: true,
-		value: (row) => smallestPort(row.ports),
-		searchValue: (row) => (row.ports.length ? row.ports.join(', ') : null)
-	},
-	{
-		key: 'status',
-		label: 'Health',
-		sortable: true,
-		value: (row) => row.health?.status ?? 'unknown'
-	},
-	{ key: 'lastSeen', label: 'Last seen', sortable: true, value: (row) => row.last_seen_at },
+export const PROJECT_COLUMN: Column<ProjectServiceRow> = {
+	key: 'project',
+	label: 'Project',
+	value: (row) => row.project_name
+};
+
+/** Server-sorted project services. Ports has no API sort. `last_seen` opens descending. */
+export const SERVICE_COLUMNS: Column<ProjectServiceRow>[] = [
+	{ key: 'name', label: 'Name', sortable: true, value: (row) => serviceLabel(row) },
+	{ key: 'host', label: 'Host', sortable: true, value: (row) => row.host_name },
+	{ key: 'kind', label: 'Kind', sortable: true, value: (row) => row.kind },
+	{ key: 'ports', label: 'Ports', numeric: true, value: (row) => smallestPort(row.ports) },
+	{ key: 'status', label: 'Status', sortable: true, value: (row) => row.health?.status ?? 'unknown' },
+	{ key: 'last_seen', label: 'Last seen', sortable: true, firstDir: 'desc', value: (row) => row.last_seen_at },
 	{ key: 'checks', label: 'Checks' }
 ];
+
+export function serviceColumns(showProject: boolean): Column<ProjectServiceRow>[] {
+	if (!showProject) return [...SERVICE_COLUMNS];
+	const columns = [...SERVICE_COLUMNS];
+	const hostIndex = columns.findIndex((column) => column.key === 'host');
+	columns.splice(hostIndex + 1, 0, PROJECT_COLUMN);
+	return columns;
+}
 
 export const PROCESS_COLUMNS: Column<ProcessItem>[] = [
 	{ key: 'pid', label: 'PID', numeric: true, sortable: true, searchable: true, value: (row) => row.pid },
 	{ key: 'process', label: 'Process', sortable: true, searchable: true, value: (row) => row.process_name },
+	{
+		key: 'service',
+		label: 'Service',
+		sortable: true,
+		searchable: true,
+		value: (row) => (row.service_id ? 'service' : '')
+	},
 	{ key: 'user', label: 'User', sortable: true, searchable: true, value: (row) => row.user },
 	{ key: 'command', label: 'Command', sortable: true, searchable: true, value: (row) => row.cmdline ?? '' },
 	{ key: 'cpu', label: 'CPU %', numeric: true, sortable: true, firstDir: 'desc', value: (row) => row.cpu_usage },
@@ -204,6 +235,13 @@ export const PROCESS_COLUMNS: Column<ProcessItem>[] = [
 	{ key: 'threads', label: 'Threads', numeric: true, sortable: true, firstDir: 'desc', value: (row) => row.num_threads },
 	{ key: 'started', label: 'Started', sortable: true, value: (row) => row.started_at }
 ];
+
+/** Process columns with the Service search and sort value taken from the label map. */
+export function processColumns(links: Readonly<Record<string, { label: string }>>): Column<ProcessItem>[] {
+	return PROCESS_COLUMNS.map((column) =>
+		column.key === 'service' ? { ...column, value: (row) => processServiceText(row, links) } : column
+	);
+}
 
 /** One time axis. A series missing a timestamp, or a null value, is a gap. */
 export function alignSeries(series: ReadonlyArray<{ points: readonly MetricPoint[] }>): {

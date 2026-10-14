@@ -42,6 +42,13 @@ export function cleanName(value: string): string | null {
 	return name;
 }
 
+/** Person-set service name. 1–64 printable characters after trim. */
+export function cleanDisplayName(value: string): string | null {
+	const name = value.trim();
+	if (name.length < 1 || name.length > 64 || CONTROL.test(name)) return null;
+	return name;
+}
+
 export function cleanEmail(value: string): string | null {
 	const email = value.trim();
 	if (email.length < 3 || email.length > 254 || CONTROL.test(email)) return null;

@@ -1,6 +1,6 @@
 # bot-console
 
-SvelteKit console for deploybot. It is a BFF in front of bot-api-server: the browser never calls the API, and this app has no database login. Sign in with Google, then open a project and a host. A host has Overview, Services, and Processes tabs.
+SvelteKit console for deploybot. It is a BFF in front of bot-api-server: the browser never calls the API, and this app has no database login. Sign in with Google, then open a project and a host. A project has a Services tab. A host has Overview and Processes tabs.
 
 ## Setup
 
@@ -51,11 +51,11 @@ PORT=5180 HOST=0.0.0.0 node build
 | `/` | 303 redirect to `/projects`. |
 | `/signin` | Google sign-in. |
 | `/projects` | List and create projects. |
-| `/projects/[id]` | Hosts (default), members, join tokens, and owner settings. Each host links to `/hosts/[id]`. Breadcrumb: Projects › {project}. |
-| `/hosts/[id]` | Tabs `?tab=overview\|services\|processes` (default overview). Breadcrumb: Projects › {project} › {host}. |
+| `/projects/[id]` | Hosts (default), Services, members, join tokens, and owner settings. Each host links to `/hosts/[id]`. Breadcrumb: Projects › {project}. |
+| `/hosts/[id]` | Tabs `?tab=overview\|processes` (default overview). `?tab=services` redirects to the project Services tab for this host when the caller is a member of the owning project, or of one of the first 20 session projects that list the host. Breadcrumb: Projects › {project} › {host}. |
 | `/device` | Approve or deny a device code for the signed-in user. |
 
-Overview (`?range=1h|6h|24h|7d`, default `1h`) shows status, a snapshot action, and charts from `GET /v1/hosts/{id}/metrics`. One failed metric stays on that chart; the others still render. Charts refresh every 30 seconds while the tab is visible. Services lists health checks and probes them. Processes loads `GET /v1/hosts/{id}/processes?sort=cpu|memory&limit=200`. Search filters the returned rows in the browser. A row with `service_id` links to the services tab.
+Overview (`?range=1h|6h|24h|7d`, default `1h`) shows status, a snapshot action, and charts from `GET /v1/hosts/{id}/metrics`. One failed metric stays on that chart; the others still render. Charts refresh every 30 seconds while the tab is visible. Project Services (`?tab=services`) loads `GET /v1/projects/{id}/services` with server search, a host filter, sort, and cursor paging (`limit=25`). Admin+ can rename a service and probe a health check there. Processes loads `GET /v1/hosts/{id}/processes?sort=cpu|memory&limit=200`. Search filters the returned process rows in the browser. The Process cell shows the process name. A Service cell shows the service label and links to that service's project Services tab when the caller is a member of it. The host filter on project Services lists owned hosts and deploy shares. A search longer than 100 characters, a search containing NUL, or a host filter that is not a reachable host is not sent and shows a Notice.
 
 The dashboard is meant for the home LAN and Tailscale. Do not publish the port.
 

@@ -1,13 +1,25 @@
-import { error, fail, redirect } from '@sveltejs/kit';
-import type { Host, JoinToken, Member } from '$lib/api-types';
+import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
+import type { Host, JoinToken, Member, ProjectService, ProjectServiceRow } from '$lib/api-types';
+import { SERVICE_DEFAULT_DIR, SERVICE_DEFAULT_SORT, serviceColumns, serviceHostReachable } from '$lib/host-view';
 import type { ProjectScope } from '$lib/project-action';
-import { actionFailure, apiFetch, apiList, loadFailure } from '$lib/server/api';
+import { ApiError, actionFailure, apiFetch, apiList, loadFailure } from '$lib/server/api';
 import { formText } from '$lib/server/form';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
 import { roleAtLeast, uiRole } from '$lib/server/roles';
-import { parseHost, parseJoinToken, parseMember, parseCreatedJoin, parseProject } from '$lib/server/shape';
-import { cleanEmail, cleanExpiry, cleanHint, cleanName, cleanRole, isUuid } from '$lib/server/validate';
+import {
+	parseCreatedJoin,
+	parseHost,
+	parseJoinToken,
+	parseMember,
+	parseProbe,
+	parseProject,
+	parseProjectService,
+	parseServicePage
+} from '$lib/server/shape';
+import { withChecks } from '$lib/server/service-checks';
+import { cleanDisplayName, cleanEmail, cleanExpiry, cleanHint, cleanName, cleanRole, isUuid } from '$lib/server/validate';
+import { readServerTableQuery, serverApiParams } from '$lib/table';
 import { backTo } from '$lib/url';
 import type { Actions, PageServerLoad, RequestEvent } from './$types';
 
@@ -24,7 +36,73 @@ function tabOf(value: string | null, canAdmin: boolean, canOwner: boolean): Proj
 	if (value === 'settings') return canOwner ? 'settings' : 'hosts';
 	if (value === 'tokens') return canAdmin ? 'tokens' : 'hosts';
 	if (value === 'members') return 'members';
+	if (value === 'services') return 'services';
 	return 'hosts';
+}
+
+const SERVICES_LIMIT = 25;
+const HOST_UNREACHABLE = 'That host is not available for this project.';
+const CURSOR_DROPPED = 'That page link is not valid.';
+
+type ServicesLoad = {
+	services: ProjectServiceRow[];
+	servicesTotal: number;
+	servicesPrev: string | null;
+	servicesNext: string | null;
+	servicesOmitted: number;
+	servicesMessage: string | null;
+};
+
+const noServices: ServicesLoad = {
+	services: [],
+	servicesTotal: 0,
+	servicesPrev: null,
+	servicesNext: null,
+	servicesOmitted: 0,
+	servicesMessage: null
+};
+
+async function loadProjectServices(
+	event: RequestEvent,
+	projectId: string,
+	reachableHostIds: ReadonlySet<string>
+): Promise<ServicesLoad> {
+	const query = readServerTableQuery(event.url.searchParams, 'services', serviceColumns(false), {
+		sort: SERVICE_DEFAULT_SORT,
+		dir: SERVICE_DEFAULT_DIR
+	});
+	if (query.qTooLong) {
+		return { ...noServices, servicesMessage: 'Search must be at most 100 characters.' };
+	}
+	const hostUnreachable = query.hostRejected || (query.host != null && !reachableHostIds.has(query.host));
+	const apiQuery = hostUnreachable ? { ...query, host: null } : query;
+	const notices: string[] = [];
+	if (hostUnreachable) notices.push(HOST_UNREACHABLE);
+	if (query.cursorDropped) notices.push(CURSOR_DROPPED);
+	try {
+		const params = serverApiParams(apiQuery, SERVICES_LIMIT);
+		const payload = await apiFetch(event, `/v1/projects/${projectId}/services?${params.toString()}`);
+		const page = parseServicePage(payload);
+		if (!page) return { ...noServices, servicesMessage: 'The API returned an unexpected response.' };
+		let omitted = 0;
+		const summaries: ProjectService[] = [];
+		for (const item of page.raw) {
+			const row = parseProjectService(item);
+			if (row) summaries.push(row);
+			else omitted += 1;
+		}
+		const services = await withChecks(event, summaries);
+		return {
+			services,
+			servicesTotal: page.total,
+			servicesPrev: page.prevCursor,
+			servicesNext: page.nextCursor,
+			servicesOmitted: omitted,
+			servicesMessage: notices.length > 0 ? notices.join(' ') : null
+		};
+	} catch (err) {
+		return { ...noServices, servicesMessage: loadFailure(err).message };
+	}
 }
 
 const empty = {
@@ -44,7 +122,8 @@ const empty = {
 	tokens: [],
 	tokensOmitted: 0,
 	tokensTruncated: false,
-	tokensMessage: null as string | null
+	tokensMessage: null as string | null,
+	...noServices
 };
 
 export const load: PageServerLoad = async (event) => {
@@ -106,6 +185,9 @@ export const load: PageServerLoad = async (event) => {
 		}
 	}
 
+	const reachableHostIds = new Set(hosts.filter(serviceHostReachable).map((host) => host.id));
+	const services = tab === 'services' ? await loadProjectServices(event, id, reachableHostIds) : noServices;
+
 	return present(event, {
 		project,
 		userId,
@@ -124,9 +206,41 @@ export const load: PageServerLoad = async (event) => {
 		tokens,
 		tokensOmitted,
 		tokensTruncated,
-		tokensMessage
+		tokensMessage,
+		...services
 	});
 };
+
+function keptName(event: RequestEvent, serviceId: string, typed: string, status: number, message: string) {
+	return fail(status, present(event, { scope: 'services', message, renameServiceId: serviceId, displayName: typed }));
+}
+
+async function renameService(event: RequestEvent, serviceId: string, form: FormData) {
+	if (!isUuid(serviceId)) return invalid(event, 'services', 'That service is not valid.');
+	const typed = formText(form, 'display_name');
+	const clearing = formText(form, 'clear') === '1';
+	let body: { display_name: string | null };
+	if (clearing) {
+		body = { display_name: null };
+	} else {
+		const name = cleanDisplayName(typed);
+		if (!name) return keptName(event, serviceId, typed, 400, 'Enter a display name (1–64 characters).');
+		body = { display_name: name };
+	}
+	try {
+		await apiFetch(event, `/v1/services/${serviceId}`, { method: 'PATCH', body: JSON.stringify(body) });
+		const dest = new URL(backTo(event.url), event.url.origin);
+		dest.searchParams.delete('services.edit');
+		const qs = dest.searchParams.toString();
+		redirect(303, qs ? `${dest.pathname}?${qs}` : dest.pathname);
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		if (err instanceof ApiError && (err.code === 'conflict' || err.code === 'bad_request' || err.code === 'forbidden')) {
+			return keptName(event, serviceId, typed, err.status, err.msg);
+		}
+		return actionFailure(event, err, 'services');
+	}
+}
 
 export const actions: Actions = {
 	askRevoke: async (event) => {
@@ -264,13 +378,39 @@ export const actions: Actions = {
 	rename: async (event) => {
 		requireUser(event);
 		const id = projectId(event.params);
-		const name = cleanName(formText(await event.request.formData(), 'name'));
+		const form = await event.request.formData();
+		const serviceId = formText(form, 'service_id');
+		if (serviceId !== '') return renameService(event, serviceId, form);
+		const name = cleanName(formText(form, 'name'));
 		if (!name) return invalid(event, 'settings', 'Enter a project name (1–80 characters).');
 		try {
 			await apiFetch(event, `/v1/projects/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
 			redirect(303, backTo(event.url));
 		} catch (err) {
 			return actionFailure(event, err, 'settings');
+		}
+	},
+
+	probe: async (event) => {
+		requireUser(event);
+		projectId(event.params);
+		const form = await event.request.formData();
+		const serviceId = formText(form, 'service_id');
+		const checkId = formText(form, 'check_id');
+		if (!isUuid(serviceId) || !isUuid(checkId)) {
+			return fail(400, present(event, { scope: 'services', message: 'That health check is not valid.' }));
+		}
+		try {
+			const probe = parseProbe(
+				await apiFetch(event, `/v1/services/${serviceId}/probe`, {
+					method: 'POST',
+					body: JSON.stringify({ check_id: checkId })
+				})
+			);
+			if (!probe) return fail(502, present(event, { scope: 'services', message: 'The API returned an unexpected response.' }));
+			return present(event, { scope: 'services' as const, probe, probeServiceId: serviceId });
+		} catch (err) {
+			return actionFailure(event, err, 'services');
 		}
 	},
 

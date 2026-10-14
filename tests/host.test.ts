@@ -1,19 +1,23 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import type { ProcessItem, ServiceRow } from '../src/lib/api-types.ts';
+import type { ProcessItem } from '../src/lib/api-types.ts';
 import {
 	alignSeries,
 	PROCESS_COLUMNS,
+	processColumns,
 	processRequestSort,
 	SERVICE_COLUMNS,
 	SERVICE_DEFAULT_DIR,
 	SERVICE_DEFAULT_SORT,
+	serviceColumns,
 	serviceDomId,
-	serviceTabHref
+	showProjectColumn,
+	smallestPort
 } from '../src/lib/host-view.ts';
+import { processServiceHref } from '../src/lib/service-label.ts';
 import { parseRange, rangeWindow, RANGES } from '../src/lib/ranges.ts';
-import { searchRows, sortRows } from '../src/lib/table.ts';
+import { searchRows } from '../src/lib/table.ts';
 
 const row = (overrides: Partial<ProcessItem>): ProcessItem => ({
 	pid: 1,
@@ -58,23 +62,26 @@ test('metric ranges default to 1h and map onto exact from/to windows', () => {
 	}
 });
 
-const service = (overrides: Partial<ServiceRow>): ServiceRow => ({
-	id: '00000000-0000-4000-8000-0000000000bb',
-	name: 'api',
-	source: 'discovered',
-	kind: 'container',
-	ports: [],
-	health: null,
-	last_seen_at: null,
-	checks: [],
-	checksMessage: null,
-	...overrides
-});
-
 test('process search matches pid, process, user, and command', () => {
 	assert.deepEqual(
 		PROCESS_COLUMNS.filter((column) => column.searchable).map((column) => column.key),
-		['pid', 'process', 'user', 'command']
+		['pid', 'process', 'service', 'user', 'command']
+	);
+	const linked = processColumns({
+		svc: { label: 'API' }
+	});
+	const withService = row({ pid: 3, process_name: 'alpha', service_id: 'svc' });
+	assert.equal(linked.find((column) => column.key === 'process')?.value?.(withService), 'alpha');
+	assert.equal(linked.find((column) => column.key === 'service')?.value?.(withService), 'API');
+	assert.equal(linked.find((column) => column.key === 'service')?.value?.(row({ service_id: 'missing' })), 'service');
+	assert.equal(linked.find((column) => column.key === 'service')?.value?.(row({ service_id: null })), '');
+	assert.deepEqual(
+		searchRows([withService], linked, 'API').map((item) => item.pid),
+		[3]
+	);
+	assert.deepEqual(
+		searchRows([withService], linked, 'alpha').map((item) => item.pid),
+		[3]
 	);
 	const items = [
 		row({ pid: 3, process_name: 'alpha', user: 'bot', cmdline: 'run-one' }),
@@ -104,55 +111,33 @@ test('process search matches pid, process, user, and command', () => {
 		['cpu', 'rss', 'memory', 'threads']
 	);
 	const processes = readFileSync(new URL('../src/routes/hosts/[id]/ProcessesTab.svelte', import.meta.url), 'utf8');
-	assert.match(processes, /columns=\{PROCESS_COLUMNS\}/);
+	assert.match(processes, /processColumns\(serviceLinks\)/);
 	assert.match(processes, /defaultDir="desc"/);
 });
 
-test('services columns sort ports by the smallest port and search the joined text', () => {
+test('project service columns are server-sorted and ports is not a sort', () => {
 	assert.deepEqual(
 		SERVICE_COLUMNS.filter((column) => column.sortable).map((column) => column.key),
-		['name', 'kind', 'ports', 'status', 'lastSeen']
+		['name', 'host', 'kind', 'status', 'last_seen']
 	);
-	assert.deepEqual(
-		SERVICE_COLUMNS.filter((column) => column.searchable).map((column) => column.key),
-		['name', 'kind', 'ports']
+	assert.equal(
+		SERVICE_COLUMNS.find((column) => column.key === 'ports')?.sortable,
+		undefined
 	);
+	assert.equal(SERVICE_COLUMNS.find((column) => column.key === 'last_seen')?.firstDir, 'desc');
 	assert.equal(SERVICE_DEFAULT_SORT, 'name');
 	assert.equal(SERVICE_DEFAULT_DIR, 'asc');
-	const wide = service({ id: 'wide', name: 'wide-api', kind: 'container', ports: [8080, 80] });
-	const web = service({ id: 'web', name: 'web', kind: 'systemd', ports: [443] });
-	const none = service({ id: 'none', name: 'none', kind: 'process', ports: [] });
-	const rows = [wide, web, none];
+	assert.equal(smallestPort([8080, 80]), 80);
+	assert.equal(smallestPort([]), null);
 	assert.deepEqual(
-		sortRows(rows, SERVICE_COLUMNS, 'ports', 'asc').map((item) => item.id),
-		['wide', 'web', 'none']
+		serviceColumns(true).map((column) => column.key),
+		['name', 'host', 'project', 'kind', 'ports', 'status', 'last_seen', 'checks']
 	);
-	assert.deepEqual(
-		sortRows(rows, SERVICE_COLUMNS, 'ports', 'desc').map((item) => item.id),
-		['web', 'wide', 'none']
-	);
-	assert.deepEqual(
-		searchRows(rows, SERVICE_COLUMNS, '8080').map((item) => item.id),
-		['wide']
-	);
-	assert.deepEqual(
-		searchRows(rows, SERVICE_COLUMNS, '80').map((item) => item.id),
-		['wide']
-	);
-	assert.deepEqual(
-		searchRows(rows, SERVICE_COLUMNS, '443').map((item) => item.id),
-		['web']
-	);
-	assert.deepEqual(
-		searchRows(rows, SERVICE_COLUMNS, 'wide-api').map((item) => item.id),
-		['wide']
-	);
-	assert.deepEqual(
-		searchRows(rows, SERVICE_COLUMNS, 'systemd').map((item) => item.id),
-		['web']
-	);
-	const services = readFileSync(new URL('../src/routes/hosts/[id]/ServicesTab.svelte', import.meta.url), 'utf8');
-	assert.match(services, /columns=\{SERVICE_COLUMNS\}/);
+	assert.equal(showProjectColumn('Lab', [{ project_name: 'Lab' }]), false);
+	assert.equal(showProjectColumn('Lab', [{ project_name: 'Lab' }, { project_name: 'Other' }]), true);
+	const services = readFileSync(new URL('../src/routes/projects/[id]/ServicesSection.svelte', import.meta.url), 'utf8');
+	assert.match(services, /serviceColumns\(showProject\)/);
+	assert.match(services, /server=\{\{ total/);
 	assert.match(services, /defaultSort=\{SERVICE_DEFAULT_SORT\}/);
 	assert.match(services, /defaultDir=\{SERVICE_DEFAULT_DIR\}/);
 });
@@ -166,10 +151,15 @@ test('process API sort follows the table column and falls back to cpu', () => {
 	assert.equal(processRequestSort(new URLSearchParams('')), 'cpu');
 });
 
-test('a process service link targets the services tab anchor', () => {
+test('a process service link targets the owning project services tab', () => {
 	const id = '00000000-0000-4000-8000-0000000000bb';
+	const project = '00000000-0000-4000-8000-000000000010';
+	const host = '00000000-0000-4000-8000-0000000000aa';
 	assert.equal(serviceDomId(id), `service-${id}`);
-	assert.equal(serviceTabHref(id), `?tab=services#service-${id}`);
+	assert.equal(
+		processServiceHref(project, host, 'api'),
+		`/projects/${project}?tab=services&services.host=${host}&services.q=api`
+	);
 });
 
 test('null metric points stay gaps when series are aligned', () => {

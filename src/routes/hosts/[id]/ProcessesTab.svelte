@@ -3,25 +3,38 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import type { ProcessSample } from '$lib/api-types';
 	import { formatBytes, formatPercent, formatWhen } from '$lib/format';
-	import { hasProcessSample, PROCESS_COLUMNS, serviceTabHref, type ProcessSort } from '$lib/host-view';
+	import { hasProcessSample, processColumns, processServiceText, type ProcessSort, type ServiceLink } from '$lib/host-view';
 
 	let {
 		sort,
 		processes,
-		message
+		message,
+		serviceLinks
 	}: {
 		sort: ProcessSort;
 		processes: ProcessSample | null;
 		message: string | null;
+		serviceLinks: Record<string, ServiceLink>;
 	} = $props();
 
 	const sample = $derived(hasProcessSample(processes) ? processes : null);
+	const columns = $derived(processColumns(serviceLinks));
 
 	function count(value: number | null): string {
 		if (value == null || !Number.isFinite(value)) return 'n/a';
 		return String(value);
 	}
 </script>
+
+{#snippet serviceCell(row: ProcessSample['items'][number])}
+	{@const text = processServiceText(row, serviceLinks)}
+	{@const href = row.service_id ? (serviceLinks[row.service_id]?.href ?? null) : null}
+	{#if href}
+		<a href={href}>{text}</a>
+	{:else}
+		{text}
+	{/if}
+{/snippet}
 
 <h2 id="processes-heading">Processes</h2>
 <p class="sub">CPU % is irix mode: 100 means one core. RSS is resident memory.</p>
@@ -37,25 +50,20 @@
 	{#if sample.items.length > 0}
 		<DataTable
 			rows={sample.items}
-			columns={PROCESS_COLUMNS}
+			{columns}
 			id="processes"
 			labelledBy="processes-heading"
 			empty="No matching processes."
 			rowKey={(row) => `${row.pid}-${row.started_at ?? ''}`}
 			defaultSort={sort}
 			defaultDir="desc"
-			searchLabel="Search pid, process, user, or command"
+			searchLabel="Search pid, process, service, user, or command"
 		>
 			{#snippet row(row)}
 				<tr>
 					<td class="num">{row.pid}</td>
-					<td>
-						{#if row.service_id}
-							<a href={serviceTabHref(row.service_id)}>{row.process_name || 'n/a'}</a>
-						{:else}
-							{row.process_name || 'n/a'}
-						{/if}
-					</td>
+					<td>{row.process_name || 'n/a'}</td>
+					<td>{@render serviceCell(row)}</td>
 					<td>{row.user || 'n/a'}</td>
 					<td class="wrap">{row.cmdline || 'n/a'}</td>
 					<td class="num">{formatPercent(row.cpu_usage)}</td>

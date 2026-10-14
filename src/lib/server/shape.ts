@@ -4,12 +4,14 @@ import type {
 	HealthCheck,
 	Host,
 	HostStatus,
+	ShareLevel,
 	JoinToken,
 	Member,
 	ProbeView,
 	ProcessItem,
 	ProcessSample,
 	Project,
+	ProjectService,
 	ServiceSummary,
 	SnapshotView,
 	User
@@ -125,6 +127,8 @@ export function parseHost(value: unknown): Host | null {
 	if (typeof value.always_on !== 'boolean') return null;
 	if (typeof value.status !== 'string' || !HOST_STATUS.has(value.status as HostStatus)) return null;
 	if (agent_version === undefined || last_seen_at === undefined || revoked_at === undefined) return null;
+	const share = parseHostShare(value);
+	if (!share) return null;
 	return {
 		id,
 		project_id,
@@ -137,8 +141,21 @@ export function parseHost(value: unknown): Host | null {
 		status: value.status as HostStatus,
 		last_seen_at,
 		enrolled_at,
-		revoked_at
+		revoked_at,
+		relation: share.relation,
+		share_level: share.share_level
 	};
+}
+
+/** Owner carries a null level. A share must name metrics or deploy. */
+function parseHostShare(value: Record<string, unknown>): { relation: 'owner' | 'shared'; share_level: ShareLevel | null } | null {
+	if (value.relation === 'owner') {
+		if (value.share_level != null) return null;
+		return { relation: 'owner', share_level: null };
+	}
+	if (value.relation !== 'shared') return null;
+	if (value.share_level !== 'metrics' && value.share_level !== 'deploy') return null;
+	return { relation: 'shared', share_level: value.share_level };
 }
 
 export function parseJoinToken(value: unknown): JoinToken | null {
@@ -180,6 +197,21 @@ function parsePorts(value: unknown): number[] | null {
 	return ports;
 }
 
+/** Keep a person-set or agent string. Control characters become U+FFFD. Blank becomes null. */
+function flexibleName(value: unknown, max: number): string | null | undefined {
+	if (value == null) return null;
+	if (typeof value !== 'string') return undefined;
+	const cleaned = displayText(value, max).trim();
+	return cleaned === '' ? null : cleaned;
+}
+
+function optionalUuid(value: unknown): string | null | undefined {
+	if (value == null) return null;
+	const id = text(value, 36);
+	if (id === null || !isUuid(id)) return undefined;
+	return id;
+}
+
 export function parseService(value: unknown): ServiceSummary | null {
 	if (!isRecord(value)) return null;
 	const id = text(value.id, 36);
@@ -190,8 +222,71 @@ export function parseService(value: unknown): ServiceSummary | null {
 	if (value.source !== 'discovered' && value.source !== 'declared' && value.source !== 'owned') return null;
 	if (value.kind !== 'container' && value.kind !== 'systemd' && value.kind !== 'process') return null;
 	const last_seen_at = optionalText(value.last_seen_at, 64);
-	if (last_seen_at === undefined) return null;
-	return { id, name, source: value.source, kind: value.kind, ports, health, last_seen_at };
+	const display_name = flexibleName(value.display_name, 64);
+	const owner_user = flexibleName(value.owner_user, 80);
+	const project_id = optionalUuid(value.project_id);
+	const host_id = optionalUuid(value.host_id);
+	if (last_seen_at === undefined || display_name === undefined || owner_user === undefined) return null;
+	if (project_id === undefined || host_id === undefined) return null;
+	return {
+		id,
+		name,
+		source: value.source,
+		kind: value.kind,
+		ports,
+		health,
+		last_seen_at,
+		display_name,
+		owner_user,
+		project_id,
+		host_id
+	};
+}
+
+const PAGE_CURSOR_MAX = 512;
+
+/** Opaque cursor. Empty is null. Too long or containing a control character is malformed. */
+function pageCursor(value: unknown): string | null | undefined {
+	if (value == null || value === '') return null;
+	if (typeof value !== 'string' || value.length > PAGE_CURSOR_MAX || CONTROL.test(value)) return undefined;
+	return value;
+}
+
+export type ServicePage = {
+	raw: unknown[];
+	total: number;
+	nextCursor: string | null;
+	prevCursor: string | null;
+};
+
+/** Project services envelope. A missing total, a bad cursor, or a non-array `items` fails closed. */
+export function parseServicePage(payload: unknown): ServicePage | null {
+	if (!isRecord(payload) || !Array.isArray(payload.items) || payload.items.length > 200) return null;
+	if (!Object.hasOwn(payload, 'total') || !Object.hasOwn(payload, 'next_cursor') || !Object.hasOwn(payload, 'prev_cursor')) {
+		return null;
+	}
+	const total = payload.total;
+	if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0) return null;
+	const nextCursor = pageCursor(payload.next_cursor);
+	const prevCursor = pageCursor(payload.prev_cursor);
+	if (nextCursor === undefined || prevCursor === undefined) return null;
+	return { raw: payload.items, total, nextCursor, prevCursor };
+}
+
+export function parseProjectService(value: unknown): ProjectService | null {
+	const service = parseService(value);
+	if (!service?.host_id || !isRecord(value)) return null;
+	const host_name = text(value.host_name, 80);
+	const project_name = text(value.project_name, 80);
+	if (!host_name || !project_name) return null;
+	if (typeof value.host_status !== 'string' || !HOST_STATUS.has(value.host_status as HostStatus)) return null;
+	return {
+		...service,
+		host_id: service.host_id,
+		host_name,
+		host_status: value.host_status as HostStatus,
+		project_name
+	};
 }
 
 export function parseHealthChecks(value: unknown): HealthCheck[] | null {

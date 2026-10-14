@@ -5,6 +5,7 @@
 	import type { ProjectActionData, ProjectScope } from '$lib/project-action';
 	import HostsSection from './HostsSection.svelte';
 	import MembersSection from './MembersSection.svelte';
+	import ServicesSection from './ServicesSection.svelte';
 	import SettingsSection from './SettingsSection.svelte';
 	import TokensSection from './TokensSection.svelte';
 
@@ -17,6 +18,7 @@
 		data.project
 			? [
 					{ key: 'hosts', label: 'Hosts', href: `/projects/${data.project.id}?tab=hosts` },
+					{ key: 'services', label: 'Services', href: `/projects/${data.project.id}?tab=services` },
 					{ key: 'members', label: 'Members', href: `/projects/${data.project.id}?tab=members` },
 					...(data.canAdmin
 						? [{ key: 'tokens', label: 'Join tokens', href: `/projects/${data.project.id}?tab=tokens` }]
@@ -51,6 +53,23 @@
 			truncated={data.hostsTruncated}
 			canAdmin={data.canAdmin}
 			message={sectionMessage ?? data.hostsMessage}
+		/>
+	{:else if scope === 'services'}
+		<ServicesSection
+			projectId={data.project.id}
+			projectName={data.project.name}
+			hosts={data.hosts}
+			canAdmin={data.canAdmin}
+			rows={data.services}
+			total={data.servicesTotal}
+			prevCursor={data.servicesPrev}
+			nextCursor={data.servicesNext}
+			omitted={data.servicesOmitted}
+			message={sectionMessage ?? data.servicesMessage}
+			probe={action?.scope === 'services' ? (action.probe ?? null) : null}
+			probeServiceId={action?.scope === 'services' ? (action.probeServiceId ?? null) : null}
+			renameServiceId={action?.scope === 'services' ? (action.renameServiceId ?? null) : null}
+			typedName={action?.scope === 'services' && action.displayName != null ? action.displayName : null}
 		/>
 	{:else if scope === 'members'}
 		<MembersSection

@@ -34,6 +34,12 @@ export async function resolve(specifier, context, nextResolve) {
 	if (specifier === '$app/forms') {
 		return { url: fileUrl(resolvePath(root, 'tests/stubs/app-forms.ts')), shortCircuit: true };
 	}
+	if (specifier === '$app/navigation') {
+		return { url: fileUrl(resolvePath(root, 'tests/stubs/app-navigation.ts')), shortCircuit: true };
+	}
+	if (specifier === '$app/environment') {
+		return { url: fileUrl(resolvePath(root, 'tests/stubs/app-environment.ts')), shortCircuit: true };
+	}
 	if (specifier.startsWith('$lib/')) {
 		const url = withExtension(resolvePath(root, 'src/lib', specifier.slice('$lib/'.length)));
 		if (!url) throw new Error(`Cannot resolve ${specifier}`);

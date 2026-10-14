@@ -7,7 +7,6 @@
 	import { METRIC_REFRESH_MS } from '$lib/host-view';
 	import OverviewTab from './OverviewTab.svelte';
 	import ProcessesTab from './ProcessesTab.svelte';
-	import ServicesTab from './ServicesTab.svelte';
 
 	let { data, form } = $props();
 
@@ -29,7 +28,6 @@
 
 	const tabs = $derived([
 		{ key: 'overview', label: 'Overview', href: `?tab=overview&range=${data.range}` },
-		{ key: 'services', label: 'Services', href: '?tab=services' },
 		{ key: 'processes', label: 'Processes', href: `?tab=processes&sort=${data.processSort}` }
 	]);
 
@@ -74,9 +72,12 @@
 
 	{#if data.tab === 'overview'}
 		<OverviewTab host={data.host} range={data.range} metrics={data.metrics} snapshot={form?.snapshot ?? null} />
-	{:else if data.tab === 'services'}
-		<ServicesTab services={data.services} omitted={data.omitted} probe={form?.probe ?? null} />
 	{:else}
-		<ProcessesTab sort={data.processSort} processes={data.processes} message={data.processesMessage} />
+		<ProcessesTab
+			sort={data.processSort}
+			processes={data.processes}
+			message={data.processesMessage}
+			serviceLinks={data.serviceLinks}
+		/>
 	{/if}
 {/if}

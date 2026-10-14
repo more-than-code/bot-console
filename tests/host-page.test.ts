@@ -1,13 +1,18 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
-import { isActionFailure } from '@sveltejs/kit';
+import { isActionFailure, isRedirect } from '@sveltejs/kit';
+import { render } from 'svelte/server';
+import { actions as projectActions } from '../src/routes/projects/[id]/+page.server.ts';
+import HostPage from '../src/routes/hosts/[id]/+page.svelte';
 import { actions as hostActions, load as hostLoad } from '../src/routes/hosts/[id]/+page.server.ts';
 import { METRIC_SPECS, type MetricChart } from '../src/lib/host-view.ts';
 import { actionUrlFrom } from '../src/lib/url.ts';
 import { RANGES, type RangeKey } from '../src/lib/ranges.ts';
 import { parseHealthChecks, parseProbe, parseProcessSample } from '../src/lib/server/shape.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER, type FetchCall } from './harness.ts';
+import { setPageUrl } from './stubs/app-state.ts';
+import type { Project } from '../src/lib/api-types.ts';
 
 const HOST_ID = '00000000-0000-4000-8000-0000000000aa';
 const SERVICE_ID = '00000000-0000-4000-8000-0000000000bb';
@@ -25,7 +30,9 @@ const HOST = {
 	status: 'online',
 	last_seen_at: '2026-10-14T00:00:00Z',
 	enrolled_at: '2026-10-13T00:00:00Z',
-	revoked_at: null
+	revoked_at: null,
+	relation: 'owner',
+	share_level: null
 };
 
 const SERIES_NAME: Record<string, string> = {
@@ -62,7 +69,7 @@ function pageData<T>(value: T): Exclude<T, void | undefined | null> {
 	return value as Exclude<T, void | undefined | null>;
 }
 
-async function loadHost(url: string, handler: (call: FetchCall) => Response) {
+async function loadHost(url: string, handler: (call: FetchCall) => Response, projects?: Project[]) {
 	const calls = installFetch(handler);
 	const data = pageData(
 		await hostLoad(
@@ -70,6 +77,7 @@ async function loadHost(url: string, handler: (call: FetchCall) => Response) {
 				url,
 				session: TOKEN,
 				user: USER,
+				projects,
 				params: { id: HOST_ID }
 			}).event as never
 		)
@@ -117,31 +125,31 @@ describe('host page', { concurrency: false }, () => {
 		assert.equal(overview.calls.some((call) => call.url.pathname.endsWith('/services')), false);
 		assert.equal(overview.calls.some((call) => call.url.pathname.endsWith('/processes')), false);
 
-		const services = await loadHost(`http://console.example/hosts/${HOST_ID}?tab=services`, (call) => {
+		const serviceCalls = installFetch((call) => {
 			if (call.url.pathname === `/v1/hosts/${HOST_ID}`) return envelope(HOST);
-			if (call.url.pathname === `/v1/projects/${PROJECT.id}`) return envelope(PROJECT);
-			if (call.url.pathname === `/v1/hosts/${HOST_ID}/services`) {
-				return envelope({
-					items: [
-						{
-							id: SERVICE_ID,
-							name: 'api',
-							source: 'discovered',
-							kind: 'process',
-							ports: [8080],
-							health: null
-						}
-					],
-					next_cursor: null
-				});
-			}
-			if (call.url.pathname === `/v1/services/${SERVICE_ID}`) return envelope({ health_checks: [] });
 			return envelope(null, 500, 'error', 'unexpected');
 		});
-		assert.equal(services.data.services[0]?.name, 'api');
-		assert.equal(services.calls.some((call) => call.url.pathname.endsWith('/metrics')), false);
-		assert.equal(services.calls.some((call) => call.url.pathname.endsWith('/processes')), false);
-		assert.equal(services.calls.some((call) => call.url.pathname === `/v1/services/${SERVICE_ID}`), true);
+		await assert.rejects(
+			async () => {
+				await hostLoad(
+					fakeEvent({
+						url: `http://console.example/hosts/${HOST_ID}?tab=services&range=6h`,
+						session: TOKEN,
+						user: USER,
+						projects: [PROJECT],
+						params: { id: HOST_ID }
+					}).event as never
+				);
+			},
+			(err: unknown) =>
+				isRedirect(err) &&
+				err.status === 303 &&
+				err.location === `/projects/${PROJECT.id}?tab=services&services.host=${HOST_ID}`
+		);
+		assert.equal(serviceCalls.some((call) => call.url.pathname.endsWith('/metrics')), false);
+		assert.equal(serviceCalls.some((call) => call.url.pathname.endsWith('/processes')), false);
+		assert.equal(serviceCalls.some((call) => call.url.pathname === `/v1/services/${SERVICE_ID}`), false);
+		assert.equal(serviceCalls.some((call) => call.url.pathname.includes('/projects/')), false);
 
 		const processes = await loadHost(
 			`http://console.example/hosts/${HOST_ID}?tab=processes&sort=memory&q=node`,
@@ -167,8 +175,25 @@ describe('host page', { concurrency: false }, () => {
 						]
 					});
 				}
+				if (call.url.pathname === `/v1/hosts/${HOST_ID}/services`) {
+					return envelope({
+						items: [
+							{
+								id: SERVICE_ID,
+								name: 'api',
+								source: 'discovered',
+								kind: 'process',
+								ports: [8080],
+								health: null,
+								project_id: PROJECT.id
+							}
+						],
+						next_cursor: null
+					});
+				}
 				return envelope(null, 500, 'error', 'unexpected');
-			}
+			},
+			[PROJECT]
 		);
 		const processCall = processes.calls.find((call) => call.url.pathname.endsWith('/processes'));
 		assert.ok(processCall);
@@ -177,7 +202,11 @@ describe('host page', { concurrency: false }, () => {
 		assert.equal(processCall?.url.searchParams.has('q'), false);
 		assert.equal(processes.data.processes?.items[0]?.service_id, SERVICE_ID);
 		assert.equal(processes.calls.some((call) => call.url.pathname.endsWith('/metrics')), false);
-		assert.equal(processes.calls.some((call) => call.url.pathname.endsWith('/services')), false);
+		assert.equal(processes.calls.some((call) => call.url.pathname.endsWith('/services')), true);
+		assert.equal(
+			processes.data.serviceLinks[SERVICE_ID]?.href,
+			`/projects/${PROJECT.id}?tab=services&services.host=${HOST_ID}&services.q=api`
+		);
 
 		const fallback = await loadHost(`http://console.example/hosts/${HOST_ID}?tab=processes&sort=nope`, (call) => {
 			if (call.url.pathname === `/v1/hosts/${HOST_ID}`) return envelope(HOST);
@@ -247,16 +276,18 @@ describe('host page', { concurrency: false }, () => {
 	test('breadcrumbs and the service anchor are wired to the project name and service id', () => {
 		const hostPage = readFileSync(new URL('../src/routes/hosts/[id]/+page.svelte', import.meta.url), 'utf8');
 		const projectPage = readFileSync(new URL('../src/routes/projects/[id]/+page.svelte', import.meta.url), 'utf8');
-		const services = readFileSync(new URL('../src/routes/hosts/[id]/ServicesTab.svelte', import.meta.url), 'utf8');
+		const services = readFileSync(new URL('../src/routes/projects/[id]/ServicesSection.svelte', import.meta.url), 'utf8');
 		const processes = readFileSync(new URL('../src/routes/hosts/[id]/ProcessesTab.svelte', import.meta.url), 'utf8');
 		assert.match(hostPage, /PageHeader|Breadcrumbs|aria-label="Breadcrumb"/);
 		assert.match(hostPage, /data\.projectName/);
 		assert.match(projectPage, /PageHeader|Breadcrumbs/);
 		assert.match(projectPage, /data\.project\.name/);
 		assert.match(services, /serviceDomId\(service\.id\)/);
-		assert.match(processes, /serviceTabHref\(row\.service_id\)/);
+		assert.match(processes, /serviceLinks\[row\.service_id\]\?\.href/);
+		assert.match(processes, /row\.process_name/);
+		assert.doesNotMatch(processes, /serviceTabHref/);
 		assert.match(processes, /DataTable/);
-		assert.match(processes, /searchLabel="Search pid, process, user, or command"/);
+		assert.match(processes, /searchLabel="Search pid, process, service, user, or command"/);
 		const server = readFileSync(new URL('../src/routes/hosts/[id]/+page.server.ts', import.meta.url), 'utf8');
 		assert.match(server, /depends\('host:metrics'\)/);
 		for (const key of ['1h', '6h', '24h', '7d'] as RangeKey[]) {
@@ -264,8 +295,9 @@ describe('host page', { concurrency: false }, () => {
 		}
 	});
 
-	test('a probe result stays on the services tab and a snapshot keeps range=7d', async () => {
-		const servicesTab = readFileSync(new URL('../src/routes/hosts/[id]/ServicesTab.svelte', import.meta.url), 'utf8');
+	test('a probe result stays on the project services tab and a snapshot keeps range=7d', async () => {
+		const servicesTab = readFileSync(new URL('../src/routes/projects/[id]/ServicesSection.svelte', import.meta.url), 'utf8');
+		const projectPage = readFileSync(new URL('../src/routes/projects/[id]/+page.svelte', import.meta.url), 'utf8');
 		const overviewTab = readFileSync(new URL('../src/routes/hosts/[id]/OverviewTab.svelte', import.meta.url), 'utf8');
 		const hostPage = readFileSync(new URL('../src/routes/hosts/[id]/+page.svelte', import.meta.url), 'utf8');
 		const hostsSection = readFileSync(new URL('../src/routes/projects/[id]/HostsSection.svelte', import.meta.url), 'utf8');
@@ -275,17 +307,18 @@ describe('host page', { concurrency: false }, () => {
 		assert.match(overviewTab, /\{#if snapshot\}/);
 		assert.match(hostsSection, /ConfirmAction/);
 		assert.match(hostsSection, /actionUrlFrom\(page\.url, 'revokeCredential'\)/);
-		assert.match(hostPage, /data\.tab === 'services'[\s\S]*probe=\{form\?\.probe/);
+		assert.match(projectPage, /scope === 'services'/);
 		assert.match(hostPage, /data\.tab === 'overview'[\s\S]*snapshot=\{form\?\.snapshot/);
+		assert.doesNotMatch(hostPage, /ServicesTab/);
 
 		const probeAction = actionUrlFrom(
-			new URL(`http://console.example/hosts/${HOST_ID}?tab=services&range=6h&services.q=api&services.page=2`),
+			new URL(`http://console.example/projects/${PROJECT.id}?tab=services&services.q=api&services.cursor=abc`),
 			'probe'
 		);
-		assert.equal(probeAction, '?tab=services&range=6h&services.q=api&services.page=2&/probe');
-		const probeUrl = new URL(`http://console.example/hosts/${HOST_ID}${probeAction}`);
+		assert.equal(probeAction, '?tab=services&services.q=api&services.cursor=abc&/probe');
+		const probeUrl = new URL(`http://console.example/projects/${PROJECT.id}${probeAction}`);
 		assert.equal(probeUrl.searchParams.get('tab'), 'services');
-		assert.equal(probeUrl.searchParams.get('range'), '6h');
+		assert.equal(probeUrl.searchParams.get('services.q'), 'api');
 		assert.equal(probeUrl.searchParams.has('/probe'), true);
 		installFetch((call) => {
 			if (call.url.pathname.endsWith('/probe')) {
@@ -293,27 +326,39 @@ describe('host page', { concurrency: false }, () => {
 			}
 			return envelope(null, 500, 'error', 'unexpected');
 		});
-		const probe = await hostActions.probe(
+		const probe = await projectActions.probe(
 			fakeEvent({
 				url: probeUrl.href,
 				session: TOKEN,
 				user: USER,
-				params: { id: HOST_ID },
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
 				form: { service_id: SERVICE_ID, check_id: CHECK_ID }
 			}).event as never
 		);
 		assert.equal(isActionFailure(probe), false);
 		if (!probe || isActionFailure(probe)) assert.fail('expected a probe result');
 		assert.equal(probe.probe?.result, 'success');
-		const services = await loadHost(probeUrl.href, (call) => {
+		assert.equal(probe.scope, 'services');
+		const moved = installFetch((call) => {
 			if (call.url.pathname === `/v1/hosts/${HOST_ID}`) return envelope(HOST);
-			if (call.url.pathname === `/v1/projects/${PROJECT.id}`) return envelope(PROJECT);
-			if (call.url.pathname === `/v1/hosts/${HOST_ID}/services`) return envelope({ items: [], next_cursor: null });
 			return envelope(null, 500, 'error', 'unexpected');
 		});
-		assert.equal(services.data.tab, 'services');
-		assert.equal(services.data.range, '6h');
-		assert.equal(services.data.message, null);
+		await assert.rejects(
+			async () => {
+				await hostLoad(
+					fakeEvent({
+						url: `http://console.example/hosts/${HOST_ID}?tab=services&range=6h`,
+						session: TOKEN,
+						user: USER,
+						projects: [PROJECT],
+						params: { id: HOST_ID }
+					}).event as never
+				);
+			},
+			(err: unknown) => isRedirect(err) && err.status === 303 && !err.location.includes('range=')
+		);
+		assert.equal(moved.some((call) => call.url.pathname.endsWith('/services')), false);
 
 		const snapshotAction = actionUrlFrom(
 			new URL(`http://console.example/hosts/${HOST_ID}?tab=overview&range=7d`),
@@ -432,5 +477,33 @@ describe('host page', { concurrency: false }, () => {
 		assert.equal(new TextEncoder().encode(tooLong).byteLength, 513);
 		assert.equal(parseHealthChecks([{ ...check, path: tooLong }]), null);
 		assert.equal(parseProbe({ protocol: 'http', result: 'success', path: tooLong })?.path, null);
+	});
+
+	test('the host page tabs are Overview and Processes', () => {
+		setPageUrl(`http://console.example/hosts/${HOST_ID}?tab=processes`);
+		const html = render(HostPage, {
+			props: {
+				data: {
+					host: HOST,
+					projectName: 'Lab',
+					range: '1h',
+					processSort: 'cpu',
+					tab: 'processes',
+					message: null,
+					processes: null,
+					processesMessage: null,
+					serviceLinks: {},
+					metrics: []
+				} as never,
+				form: null
+			}
+		}).body.replaceAll('&amp;', '&');
+		const navStart = html.indexOf('aria-label="Host sections"');
+		const nav = html.slice(navStart, html.indexOf('</nav>', navStart));
+		assert.match(nav, />Overview</);
+		assert.match(nav, />Processes</);
+		assert.equal(nav.includes('Services'), false);
+		assert.equal(html.includes('tab=services'), false);
+		assert.equal(html.includes('>Services<'), false);
 	});
 });

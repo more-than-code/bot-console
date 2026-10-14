@@ -1,19 +1,16 @@
-import { error, fail, isHttpError, isRedirect } from '@sveltejs/kit';
-import type { Host, ProcessSample, ServiceRow, ServiceSummary } from '$lib/api-types';
-import type { HostPage, MetricChart, ProcessSort } from '$lib/host-view';
+import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
+import type { Host, ProcessSample } from '$lib/api-types';
+import type { HostPage, MetricChart, ProcessSort, ServiceLink } from '$lib/host-view';
 import { hostQuery, METRIC_SPECS } from '$lib/host-view';
 import { rangeWindow, type RangeKey } from '$lib/ranges';
-import { ApiError, actionFailure, apiFetch, loadFailure } from '$lib/server/api';
-import { formText } from '$lib/server/form';
+import { processServiceHref, serviceLabel } from '$lib/service-label';
+import { actionFailure, apiFetch, loadFailure } from '$lib/server/api';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
 import {
-	isRecord,
-	parseHealthChecks,
 	parseHost,
 	parseListPayload,
 	parseMetricPayload,
-	parseProbe,
 	parseProcessSample,
 	parseProject,
 	parseService,
@@ -29,46 +26,6 @@ function hostId(params: { id?: string }): string {
 	return params.id;
 }
 
-const CHECK_LIMIT = 50;
-const CHECK_CONCURRENCY = 6;
-const CHECK_DEADLINE_MS = 10_000;
-
-async function loadChecks(event: RequestEvent, service: ServiceSummary, signal: AbortSignal): Promise<ServiceRow> {
-	try {
-		const payload = await apiFetch(event, `/v1/services/${service.id}`, { signal });
-		const checks = isRecord(payload) ? parseHealthChecks(payload.health_checks) : null;
-		if (!checks) return { ...service, checks: [], checksMessage: 'Health checks could not be read.' };
-		return { ...service, checks, checksMessage: null };
-	} catch (err) {
-		return { ...service, checks: [], checksMessage: loadFailure(err).message };
-	}
-}
-
-/** The service list has no health_checks. Detail reads stay inside one shared deadline. */
-async function withChecks(event: RequestEvent, services: ServiceSummary[]): Promise<ServiceRow[]> {
-	const pending = services.slice(0, CHECK_LIMIT);
-	const skipped: ServiceRow[] = services.slice(CHECK_LIMIT).map((service) => ({
-		...service,
-		checks: [],
-		checksMessage: 'checks not loaded'
-	}));
-	const rows: ServiceRow[] = new Array(pending.length);
-	const deadline = AbortSignal.timeout(CHECK_DEADLINE_MS);
-	let cursor = 0;
-	async function worker() {
-		for (;;) {
-			const index = cursor;
-			cursor += 1;
-			if (index >= pending.length) return;
-			const service = pending[index];
-			if (!service) continue;
-			rows[index] = await loadChecks(event, service, deadline);
-		}
-	}
-	await Promise.all(Array.from({ length: Math.min(CHECK_CONCURRENCY, pending.length) }, () => worker()));
-	return [...rows, ...skipped];
-}
-
 function blank(tab: HostPage['tab'], range: RangeKey, processSort: ProcessSort, message: string): HostPage {
 	return {
 		host: null,
@@ -77,8 +34,7 @@ function blank(tab: HostPage['tab'], range: RangeKey, processSort: ProcessSort, 
 		range,
 		processSort,
 		message,
-		services: [],
-		omitted: 0,
+		serviceLinks: {},
 		metrics: [],
 		processes: null,
 		processesMessage: null
@@ -121,42 +77,59 @@ async function loadOverview(event: LoadEvent, host: Host, range: RangeKey, proce
 		range,
 		processSort,
 		message: null,
-		services: [],
-		omitted: 0,
+		serviceLinks: {},
 		metrics,
 		processes: null,
 		processesMessage: null
 	};
 }
 
-async function loadServices(event: RequestEvent, host: Host, range: RangeKey, processSort: ProcessSort): Promise<HostPage> {
-	const parsed = parseListPayload(await apiFetch(event, `/v1/hosts/${host.id}/services`));
-	if (!parsed) throw new ApiError(502, 'error', 'The API returned an unexpected response.');
-	const raw = parsed.raw.length > 500 ? parsed.raw.slice(0, 500) : parsed.raw;
-	let omitted = parsed.raw.length - raw.length;
-	const summaries: ServiceSummary[] = [];
-	for (const item of raw) {
-		const service = parseService(item);
-		if (service) summaries.push(service);
-		else omitted += 1;
+/** One host-list page per project. Further pages are not followed. */
+const SHARE_SCAN_PROJECTS = 20;
+
+/**
+ * Owning project when the caller is a member of `host.project_id`.
+ * Otherwise the first of at most 20 session projects whose first host page lists the host.
+ */
+async function projectForServices(event: LoadEvent, host: Host): Promise<string | null> {
+	const projects = event.locals.projects;
+	if (projects.some((project) => project.id === host.project_id)) return host.project_id;
+	for (const project of projects.slice(0, SHARE_SCAN_PROJECTS)) {
+		try {
+			const payload = await apiFetch(event, `/v1/projects/${project.id}/hosts?limit=200`);
+			const parsed = parseListPayload(payload);
+			if (!parsed) continue;
+			for (const raw of parsed.raw) {
+				const item = parseHost(raw);
+				if (item?.id === host.id) return project.id;
+			}
+		} catch (err) {
+			if (isRedirect(err) || isHttpError(err)) throw err;
+		}
 	}
-	const [projectName, services] = await Promise.all([
-		loadProjectName(event, host.project_id),
-		withChecks(event, summaries)
-	]);
-	return {
-		host,
-		projectName,
-		tab: 'services',
-		range,
-		processSort,
-		message: null,
-		services,
-		omitted,
-		metrics: [],
-		processes: null,
-		processesMessage: null
-	};
+	return null;
+}
+
+async function readServiceLinks(event: RequestEvent, hostId: string): Promise<Record<string, ServiceLink>> {
+	try {
+		const parsed = parseListPayload(await apiFetch(event, `/v1/hosts/${hostId}/services`));
+		if (!parsed) return {};
+		const members = new Set(event.locals.projects.map((project) => project.id));
+		const links: Record<string, ServiceLink> = {};
+		for (const item of parsed.raw.slice(0, 500)) {
+			const service = parseService(item);
+			if (!service) continue;
+			const href =
+				service.project_id && members.has(service.project_id)
+					? processServiceHref(service.project_id, hostId, service.name)
+					: null;
+			links[service.id] = { label: serviceLabel(service), href };
+		}
+		return links;
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return {};
+	}
 }
 
 async function readProcesses(event: RequestEvent, id: string, sort: ProcessSort): Promise<{ sample: ProcessSample | null; message: string | null }> {
@@ -171,9 +144,10 @@ async function readProcesses(event: RequestEvent, id: string, sort: ProcessSort)
 }
 
 async function loadProcesses(event: RequestEvent, host: Host, range: RangeKey, processSort: ProcessSort): Promise<HostPage> {
-	const [projectName, processes] = await Promise.all([
+	const [projectName, processes, serviceLinks] = await Promise.all([
 		loadProjectName(event, host.project_id),
-		readProcesses(event, host.id, processSort)
+		readProcesses(event, host.id, processSort),
+		readServiceLinks(event, host.id)
 	]);
 	return {
 		host,
@@ -182,8 +156,7 @@ async function loadProcesses(event: RequestEvent, host: Host, range: RangeKey, p
 		range,
 		processSort,
 		message: null,
-		services: [],
-		omitted: 0,
+		serviceLinks,
 		metrics: [],
 		processes: processes.sample,
 		processesMessage: processes.message
@@ -197,7 +170,10 @@ export const load: PageServerLoad = async (event) => {
 	try {
 		const host = parseHost(await apiFetch(event, `/v1/hosts/${id}`));
 		if (!host) return present(event, blank(query.tab, query.range, query.processSort, 'The API returned an unexpected response.'));
-		if (query.tab === 'services') return present(event, await loadServices(event, host, query.range, query.processSort));
+		if (event.url.searchParams.get('tab') === 'services') {
+			const project = await projectForServices(event, host);
+			if (project) redirect(303, `/projects/${project}?tab=services&services.host=${host.id}`);
+		}
 		if (query.tab === 'processes') return present(event, await loadProcesses(event, host, query.range, query.processSort));
 		return present(event, await loadOverview(event, host, query.range, query.processSort));
 	} catch (err) {
@@ -214,29 +190,6 @@ export const actions: Actions = {
 			const snapshot = parseSnapshot(await apiFetch(event, `/v1/hosts/${id}/snapshot`, { method: 'POST' }));
 			if (!snapshot) return fail(502, present(event, { message: 'The API returned an unexpected response.' }));
 			return present(event, { snapshot });
-		} catch (err) {
-			return actionFailure(event, err);
-		}
-	},
-
-	probe: async (event) => {
-		requireUser(event);
-		hostId(event.params);
-		const form = await event.request.formData();
-		const serviceId = formText(form, 'service_id');
-		const checkId = formText(form, 'check_id');
-		if (!isUuid(serviceId) || !isUuid(checkId)) {
-			return fail(400, present(event, { message: 'That health check is not valid.' }));
-		}
-		try {
-			const probe = parseProbe(
-				await apiFetch(event, `/v1/services/${serviceId}/probe`, {
-					method: 'POST',
-					body: JSON.stringify({ check_id: checkId })
-				})
-			);
-			if (!probe) return fail(502, present(event, { message: 'The API returned an unexpected response.' }));
-			return present(event, { probe, serviceId, checkId });
 		} catch (err) {
 			return actionFailure(event, err);
 		}
