@@ -125,7 +125,6 @@ export function fakeEvent(input: {
 		request,
 		params: input.params ?? {},
 		locals: {
-			authEnabled: true,
 			user: input.user ?? null,
 			projects: input.projects ?? [],
 			sessionUnavailable: false
@@ -152,6 +151,7 @@ export function fakeEvent(input: {
 		fetch: globalThis.fetch,
 		getClientAddress: () => '127.0.0.1',
 		setHeaders() {},
+		depends() {},
 		isDataRequest: false,
 		isSubRequest: false,
 		route: { id: null },

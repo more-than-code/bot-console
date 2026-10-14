@@ -3,6 +3,7 @@
 	import StatusText from '$lib/components/StatusText.svelte';
 	import type { Host } from '$lib/api-types';
 	import { formatWhen } from '$lib/format';
+	import { hostFormAction } from '$lib/host-view';
 
 	let {
 		projectId,
@@ -35,7 +36,7 @@
 	<p class="sub">More items not shown</p>
 {/if}
 {#if confirmHostId}
-	<form method="POST" action="?/revokeCredential" class="panel" use:enhance>
+	<form method="POST" action={hostFormAction('revokeCredential', { tab: 'hosts' })} class="panel" use:enhance>
 		<p>Revoke the credential for {pending?.name ?? 'this host'}? The agent connection closes.</p>
 		<input type="hidden" name="host_id" value={confirmHostId} />
 		<div class="actions">
@@ -70,7 +71,7 @@
 						{#if canAdmin}
 							<td>
 								{#if host.id !== confirmHostId}
-									<form method="POST" action="?/askRevoke" use:enhance>
+									<form method="POST" action={hostFormAction('askRevoke', { tab: 'hosts' })} use:enhance>
 										<input type="hidden" name="host_id" value={host.id} />
 										<button type="submit" class="danger" aria-label="Revoke credential for {host.name}">
 											Revoke credential

@@ -1,53 +1,29 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import type { SortDir } from '$lib/table-query';
 
 	type Column = {
 		key: string;
 		label: string;
 		numeric?: boolean;
-		/** Direction used the first time this column is chosen. */
-		defaultDir?: SortDir;
+		/** Set on columns the API can sort. Others render as plain headers. */
+		href?: string | null;
 	};
 
 	let {
 		columns,
 		sort,
-		dir,
-		page,
-		pageSize,
-		total,
 		labelledBy,
-		sortHref,
-		pageHref,
-		body
+		children
 	}: {
 		columns: Column[];
-		sort: string;
-		dir: SortDir;
-		page: number;
-		pageSize: number;
-		total: number;
+		sort: string | null;
 		labelledBy: string;
-		sortHref: (key: string, dir: SortDir) => string;
-		pageHref: (page: number) => string;
-		body: Snippet;
+		children: Snippet;
 	} = $props();
 
-	const from = $derived(total === 0 || (page - 1) * pageSize >= total ? 0 : (page - 1) * pageSize + 1);
-	const to = $derived(from === 0 ? 0 : Math.min(page * pageSize, total));
-	const pages = $derived(Math.max(1, Math.ceil(total / pageSize)));
-
-	function nextDir(column: Column): SortDir {
-		if (sort !== column.key) return column.defaultDir ?? 'asc';
-		return dir === 'asc' ? 'desc' : 'asc';
-	}
-
-	function sortName(column: Column, next: SortDir): string {
-		const direction = next === 'asc' ? 'ascending' : 'descending';
-		if (sort !== column.key) return `Sort by ${column.label}, ${direction}`;
-		const current = dir === 'asc' ? 'ascending' : 'descending';
-		return `Sort by ${column.label}, ${current}. Activate to sort ${direction}.`;
+	function sortName(column: Column): string {
+		if (sort === column.key) return `Sorted by ${column.label}`;
+		return `Sort by ${column.label}`;
 	}
 </script>
 
@@ -56,37 +32,22 @@
 		<thead>
 			<tr>
 				{#each columns as column (column.key)}
-					{@const next = nextDir(column)}
 					<th
 						scope="col"
 						class:num={column.numeric}
-						aria-sort={sort === column.key ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+						aria-sort={column.href ? (sort === column.key ? 'other' : 'none') : undefined}
 					>
-						<a class="sort" href={sortHref(column.key, next)} aria-label={sortName(column, next)}>
+						{#if column.href}
+							<a class="sort" href={column.href} aria-label={sortName(column)}>{column.label}</a>
+						{:else}
 							{column.label}
-							{#if sort === column.key}
-								<span aria-hidden="true">{dir === 'asc' ? '▲' : '▼'}</span>
-							{/if}
-						</a>
+						{/if}
 					</th>
 				{/each}
 			</tr>
 		</thead>
 		<tbody>
-			{@render body()}
+			{@render children()}
 		</tbody>
 	</table>
 </div>
-<nav class="pager" aria-label="Pagination">
-	{#if page > 1}
-		<a href={pageHref(page - 1)}>Previous</a>
-	{:else}
-		<span class="pager-muted">Previous</span>
-	{/if}
-	<span>Showing {from}–{to} of {total}</span>
-	{#if page < pages}
-		<a href={pageHref(page + 1)}>Next</a>
-	{:else}
-		<span class="pager-muted">Next</span>
-	{/if}
-</nav>

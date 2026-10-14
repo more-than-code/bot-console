@@ -1,4 +1,15 @@
-import type { SeriesPoint } from './types';
+export type SeriesPoint = {
+	t: string;
+	cpu: number | null;
+	memory: number | null;
+	disk: number | null;
+	temp: number | null;
+	load1: number | null;
+	netRx: number | null;
+	netTx: number | null;
+	diskRead: number | null;
+	diskWrite: number | null;
+};
 
 export type GaugePoint = { t: string; value: number | null };
 export type NetPoint = { t: string; rx: number | null; tx: number | null };

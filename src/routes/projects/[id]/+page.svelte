@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Breadcrumbs from '$lib/components/Breadcrumbs.svelte';
 	import type { ProjectActionData, ProjectScope } from '$lib/project-action';
 	import HostsSection from './HostsSection.svelte';
 	import MembersSection from './MembersSection.svelte';
@@ -15,11 +16,12 @@
 	<title>{data.project ? data.project.name : 'Project'} · deploybot</title>
 </svelte:head>
 
-<p><a class="back" href="/projects">Projects</a></p>
 {#if !data.project}
+	<Breadcrumbs items={[{ label: 'Projects', href: '/projects' }, { label: 'Project' }]} />
 	<h1>Project</h1>
 	<p class="error" role="alert">{data.message ?? 'This project is not available.'}</p>
 {:else}
+	<Breadcrumbs items={[{ label: 'Projects', href: '/projects' }, { label: data.project.name }]} />
 	<h1>{data.project.name}</h1>
 	<p class="sub">{data.project.slug} · your role {data.project.role}</p>
 	<nav class="nav tabs" aria-label="Project sections">

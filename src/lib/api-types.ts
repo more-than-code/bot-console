@@ -126,3 +126,24 @@ export type CreatedJoin = {
 	token: string;
 	install_command: string | null;
 };
+
+/** One row of `GET /v1/hosts/{id}/processes`. */
+export type ProcessItem = {
+	pid: number;
+	process_name: string;
+	user: string;
+	cmdline: string | null;
+	service_id: string | null;
+	cpu_usage: number | null;
+	memory_rss: number | null;
+	memory_usage: number | null;
+	num_threads: number | null;
+	started_at: string | null;
+};
+
+export type ProcessSample = {
+	sampled_at: string | null;
+	items: ProcessItem[];
+	/** Rows dropped because pid was missing or a field had the wrong type. */
+	skipped: number;
+};

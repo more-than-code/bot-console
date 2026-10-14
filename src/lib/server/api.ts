@@ -61,12 +61,10 @@ export function readPrivate(name: string): string {
 	return process.env[name]?.trim() ?? '';
 }
 
+export const NOT_CONFIGURED_MESSAGE = 'Console is not configured (BOT_API_URL)';
+
 export function configuredApiUrl(): string {
 	return readPrivate('BOT_API_URL');
-}
-
-export function authEnabled(): boolean {
-	return configuredApiUrl().length > 0;
 }
 
 function isLoopbackHost(hostname: string): boolean {

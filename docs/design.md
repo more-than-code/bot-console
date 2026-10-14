@@ -9,14 +9,14 @@ bot-console stops reading Postgres directly and becomes a BFF client of bot-api-
 
 ## Transition
 
-| Step | Pages | Data source |
-|---|---|---|
-| Today | Overview, per-host, Services, Processes | `cluster_metrics` on pi4 via `src/lib/server/db.ts` (read-only login) |
-| v2 step 1 | Sign-in, projects, members, hosts, join tokens (new) | bot-api-server |
-| v2 step 2 | Overview, per-host, Services, Processes, page by page | bot-api-server `/v1/.../metrics` and `/health`, after bot-agent data is in `deploybot.metrics` |
-| v2 step 3 | Remove `src/lib/server/db.ts` and the `cluster_metrics` login from `.env` | — |
+| Step | Pages | Data source | Status |
+|---|---|---|---|
+| Today | Overview, per-host, Services, Processes | `cluster_metrics` on pi4 via `src/lib/server/db.ts` (read-only login) | Superseded |
+| v2 step 1 | Sign-in, projects, members, hosts, join tokens (new) | bot-api-server | Done |
+| v2 step 2 | Overview, per-host, Services, Processes, page by page | bot-api-server `/v1/.../metrics` and `/health`, after bot-agent data is in `deploybot.metrics` | Done 2026-10-14 (Joe: old pages deleted) |
+| v2 step 3 | Remove `src/lib/server/db.ts` and the `cluster_metrics` login from `.env` | — | Done 2026-10-14 (Joe: old pages deleted) |
 
-The existing pages and `docs/api-contract.md` stay valid until step 2 replaces each page. Step 2 should keep each page's current behavior (stale after 2 min, unknown versus down, process shortening). Only the source changes.
+Steps 2 and 3 landed together. The console no longer reads Postgres. Host overview, services, and processes are tabs on `/hosts/[id]`, fed only by bot-api-server. `BOT_API_URL` is required.
 
 ## Auth (BFF)
 
@@ -37,7 +37,7 @@ The existing pages and `docs/api-contract.md` stay valid until step 2 replaces e
 
 ## Env
 
-`.env` gains `BOT_API_URL`. It loses the Postgres URL and password at step 3. No OAuth secrets (they live on bot-api-server).
+`BOT_API_URL` is required. There is no Postgres URL or password. No OAuth secrets (they live on bot-api-server). An unset or invalid `BOT_API_URL` makes every route except static assets return 503.
 
 ## Tests (when implemented)
 

@@ -328,7 +328,7 @@ describe('auth routes', { concurrency: false }, () => {
 		});
 		const host = pageData(await hostLoad(
 			fakeEvent({
-				url: `http://console.example/hosts/${HOST_ID}`,
+				url: `http://console.example/hosts/${HOST_ID}?tab=services`,
 				session: TOKEN,
 				user: USER,
 				params: { id: HOST_ID }
@@ -432,36 +432,20 @@ describe('auth routes', { concurrency: false }, () => {
 		assert.equal(containsToken(snapshot), false);
 	});
 
-	test('switch off makes a new page 404 without calling the API', async () => {
-		useApi(null);
-		let called = false;
-		globalThis.fetch = (() => {
-			called = true;
-			throw new Error('api called');
-		}) as typeof fetch;
-		await assert.rejects(
-			async () => {
-				await projectsLoad(fakeEvent({ url: 'http://console.example/projects', user: USER }).event as never);
-			},
-			(err: unknown) => isHttpError(err) && err.status === 404
-		);
-		assert.equal(called, false);
-	});
-
-	test('switch off layout reports auth disabled and no user', async () => {
-		useApi(null);
-		let called = false;
-		globalThis.fetch = (() => {
-			called = true;
-			throw new Error('api called');
-		}) as typeof fetch;
-		const { event } = fakeEvent({ url: 'http://pi.local/services', user: USER });
-		event.locals.authEnabled = false;
-		event.locals.user = null;
-		const data = pageData(await layoutLoad(event as never));
-		assert.equal(data.authEnabled, false);
-		assert.equal(data.user, null);
-		assert.equal(called, false);
+	test('layout returns the signed-in name and the primary nav is Projects plus the user menu', async () => {
+		useApi('https://api.test');
+		const data = pageData(await layoutLoad(fakeEvent({ url: 'http://pi.local/projects', user: USER }).event as never));
+		assert.equal(data.user?.name, 'Ada');
+		assert.equal(Object.hasOwn(data, 'authEnabled'), false);
+		const layout = readFileSync(new URL('../src/routes/+layout.svelte', import.meta.url), 'utf8');
+		const navStart = layout.indexOf('aria-label="Primary"');
+		const navEnd = layout.indexOf('</nav>');
+		assert.ok(navStart >= 0 && navEnd > navStart);
+		const nav = layout.slice(navStart, navEnd);
+		assert.match(nav, />Projects</);
+		assert.equal(/\b(Overview|Services|Processes|Databases|Ops)\b/.test(nav), false);
+		assert.match(layout, /Sign out/);
+		assert.match(layout, /data\.user\.name/);
 	});
 
 	test('sign-in start sends redirect_uri and sets a 600 second Secure cookie on https', async () => {
@@ -780,7 +764,7 @@ describe('auth routes', { concurrency: false }, () => {
 		});
 		const host = pageData(await hostLoad(
 			fakeEvent({
-				url: `http://console.example/hosts/${HOST_ID}`,
+				url: `http://console.example/hosts/${HOST_ID}?tab=services`,
 				session: TOKEN,
 				user: USER,
 				params: { id: HOST_ID }
@@ -850,7 +834,7 @@ describe('auth routes', { concurrency: false }, () => {
 		const started = Date.now();
 		const host = pageData(await hostLoad(
 			fakeEvent({
-				url: `http://console.example/hosts/${HOST_ID}`,
+				url: `http://console.example/hosts/${HOST_ID}?tab=services`,
 				session: TOKEN,
 				user: USER,
 				params: { id: HOST_ID }

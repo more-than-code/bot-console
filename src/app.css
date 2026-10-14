@@ -9,6 +9,13 @@
 	--ok: #3dd68c;
 	--stale: #ff8b8b;
 	--stale-bg: #2a161b;
+	--chart-1: #7aa2f7;
+	--chart-2: #bb9af7;
+	--chart-3: #e0af68;
+	--chart-4: #f7768e;
+	--chart-5: #9ece6a;
+	--chart-6: #7dcfff;
+	--chart-7: #ff9e64;
 	font-family: system-ui, 'Segoe UI', sans-serif;
 	line-height: 1.45;
 }
@@ -194,6 +201,10 @@ dl div {
 	grid-template-columns: 5.6rem 1fr;
 	gap: 0.5rem;
 	align-items: center;
+}
+
+dl.facts div {
+	grid-template-columns: 7.5rem 1fr;
 }
 
 dt {
@@ -433,7 +444,8 @@ table.data th a.sort {
 }
 
 table.data th[aria-sort='ascending'] a.sort,
-table.data th[aria-sort='descending'] a.sort {
+table.data th[aria-sort='descending'] a.sort,
+table.data th[aria-sort='other'] a.sort {
 	color: var(--text);
 }
 
@@ -598,4 +610,28 @@ table.data td.wrap {
 
 .tabs {
 	margin-top: 0.9rem;
+}
+
+.crumbs {
+	margin: 0 0 0.85rem;
+}
+
+.crumbs ol {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem 0.55rem;
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.crumbs li {
+	display: flex;
+	gap: 0.55rem;
+	align-items: center;
+	color: var(--muted);
+}
+
+.crumbs [aria-current='page'] {
+	color: var(--text);
 }

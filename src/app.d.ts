@@ -4,7 +4,6 @@ declare global {
 	namespace App {
 		// interface Error {}
 		interface Locals {
-			authEnabled: boolean;
 			user: User | null;
 			projects: Project[];
 			sessionUnavailable: boolean;

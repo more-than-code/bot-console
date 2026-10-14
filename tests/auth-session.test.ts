@@ -83,43 +83,60 @@ describe('auth session', { concurrency: false }, () => {
 		assert.equal(isPublicPath('/projects/__data.json'), false);
 		assert.equal(isPublicPath('/projects'), false);
 		assert.equal(isPublicPath('/api/overview'), false);
-		assert.equal(needsNoStore('/services', false), true);
-		assert.equal(needsNoStore('/', false), true);
-		assert.equal(needsNoStore('/projects', false), false);
-		assert.equal(needsNoStore('/projects', true), true);
+		assert.equal(isPublicPath('/favicon.svg'), true);
+		assert.equal(needsNoStore('/projects'), true);
+		assert.equal(needsNoStore('/'), true);
+		assert.equal(needsNoStore('/favicon.svg'), false);
+		assert.equal(needsNoStore('/_app/immutable/chunk.js'), false);
 	});
 
-	test('switch off does not call the API and leaves an existing page alone', async () => {
+	test('unset BOT_API_URL returns 503 and static assets still load', async () => {
 		useApi(null);
 		let called = false;
 		globalThis.fetch = (() => {
 			called = true;
 			throw new Error('api called');
 		}) as typeof fetch;
-		const { event } = fakeEvent({ url: 'http://pi.local/services', session: TOKEN });
-		let body = '';
+		const { event } = fakeEvent({ url: 'http://pi.local/projects', session: TOKEN });
 		const response = await handle({
 			event,
-			resolve: async () => {
-				body = 'services-page';
-				return new Response(body, { status: 200, headers: { 'content-type': 'text/html' } });
-			}
+			resolve: async () => new Response('should-not-run')
 		} as Parameters<Handle>[0]);
 		assert.equal(called, false);
-		assert.equal(await response.text(), 'services-page');
-		assert.equal(event.locals.authEnabled, false);
-		assert.equal(event.locals.user, null);
+		assert.equal(response.status, 503);
+		assert.match(await response.text(), /Console is not configured \(BOT_API_URL\)/);
 		assert.equal(response.headers.get('cache-control'), 'no-store');
+
+		const asset = await handle({
+			event: fakeEvent({ url: 'http://pi.local/favicon.svg' }).event,
+			resolve: async () => new Response('icon', { status: 200, headers: { 'content-type': 'image/svg+xml' } })
+		} as Parameters<Handle>[0]);
+		assert.equal(asset.status, 200);
+		assert.equal(await asset.text(), 'icon');
+		assert.equal(called, false);
 	});
 
-	test('switch off does not mark new routes no-store', async () => {
-		useApi(null);
-		const { event } = fakeEvent({ url: 'http://pi.local/projects' });
-		const response = await handle({
-			event,
-			resolve: async () => new Response('missing', { status: 404 })
-		} as Parameters<Handle>[0]);
-		assert.equal(response.headers.get('cache-control'), null);
+	test('a configured / redirects to /projects before the session check', async () => {
+		useApi('https://api.test');
+		let called = false;
+		globalThis.fetch = (() => {
+			called = true;
+			throw new Error('api called');
+		}) as typeof fetch;
+		const { event } = fakeEvent({ url: 'http://pi.local/' });
+		await assert.rejects(
+			async () => {
+				await handle({ event, resolve: async () => new Response('no') } as Parameters<Handle>[0]);
+			},
+			(err: unknown) => {
+				assert.equal(isRedirect(err), true);
+				if (!isRedirect(err)) return false;
+				assert.equal(err.status, 303);
+				assert.equal(err.location, '/projects');
+				return true;
+			}
+		);
+		assert.equal(called, false);
 	});
 
 	test('a page without a session redirects to a safe next path', async () => {
@@ -198,7 +215,7 @@ describe('auth session', { concurrency: false }, () => {
 				]
 			});
 		});
-		const { event } = fakeEvent({ url: 'http://pi.local/', session: TOKEN });
+		const { event } = fakeEvent({ url: 'http://pi.local/projects', session: TOKEN });
 		const response = await handle({
 			event,
 			resolve: async () => new Response('overview')
@@ -380,6 +397,7 @@ describe('auth session', { concurrency: false }, () => {
 		assert.equal(response.status, 503);
 		assert.equal(called, false);
 		assert.equal(apiBaseUrl(), null);
+		assert.match(await response.text(), /Console is not configured \(BOT_API_URL\)/);
 	});
 
 	test('source does not store tokens in the browser', () => {

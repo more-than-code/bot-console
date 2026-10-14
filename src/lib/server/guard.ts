@@ -1,10 +1,10 @@
 import { error, redirect, type RequestEvent } from '@sveltejs/kit';
 import type { User } from '../api-types';
-import { authEnabled } from './api';
+import { apiBaseUrl, NOT_CONFIGURED_MESSAGE } from './api';
 import { signinLocation } from './session';
 
 export function requireApi(): void {
-	if (!authEnabled()) error(404, 'Not found');
+	if (!apiBaseUrl()) error(503, NOT_CONFIGURED_MESSAGE);
 }
 
 export function requireUser(event: RequestEvent): User {

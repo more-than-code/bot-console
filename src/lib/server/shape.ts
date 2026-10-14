@@ -7,6 +7,8 @@ import type {
 	JoinToken,
 	Member,
 	ProbeView,
+	ProcessItem,
+	ProcessSample,
 	Project,
 	ServiceSummary,
 	SnapshotView,
@@ -16,6 +18,8 @@ import { isRole } from './roles';
 import { acceptedInstallCommand, isJoinToken, isUuid } from './validate';
 
 const CONTROL = /[\u0000-\u001F\u007F]/;
+const PATH_MAX_BYTES = 512;
+const utf8 = new TextEncoder();
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -30,6 +34,21 @@ function optionalText(value: unknown, max: number): string | null | undefined {
 	if (value == null) return null;
 	const parsed = text(value, max);
 	return parsed === null ? undefined : parsed;
+}
+
+/** Health-check and probe paths are capped at 512 bytes (api-v1 v1.0.1 §7). */
+function optionalPath(value: unknown): string | null | undefined {
+	if (value == null) return null;
+	if (typeof value !== 'string' || CONTROL.test(value) || utf8.encode(value).byteLength > PATH_MAX_BYTES) return undefined;
+	return value;
+}
+
+/** Keep the text. Control characters become U+FFFD. Over the cap, end with an ellipsis inside the cap. */
+function displayText(value: string, max: number): string {
+	const cleaned = value.replace(CONTROL, '\uFFFD');
+	if (cleaned.length <= max) return cleaned;
+	if (max <= 1) return '\u2026'.slice(0, max);
+	return `${cleaned.slice(0, max - 1)}\u2026`;
 }
 
 function optionalNumber(value: unknown): number | null | undefined {
@@ -183,7 +202,7 @@ export function parseHealthChecks(value: unknown): HealthCheck[] | null {
 		if (item.protocol !== 'http' && item.protocol !== 'tcp') return null;
 		if (typeof item.port !== 'number' || !Number.isInteger(item.port) || item.port < 1 || item.port > 65535) return null;
 		if (typeof item.enabled !== 'boolean') return null;
-		const path = optionalText(item.path, 200);
+		const path = optionalPath(item.path);
 		if (path === undefined) return null;
 		if (item.protocol === 'http' && (!path || !path.startsWith('/'))) return null;
 		if (item.protocol === 'tcp' && path !== null) return null;
@@ -282,6 +301,103 @@ export function parseSnapshot(value: unknown): SnapshotView | null {
 	};
 }
 
+export type ParsedMetric = {
+	step: number | null;
+	series: Array<{ name: string; points: Array<{ t: string; value: number | null }> }>;
+};
+
+function parseStep(value: unknown): number | null {
+	if (typeof value !== 'number' || !Number.isInteger(value) || value < 10 || value > 3600) return null;
+	return value;
+}
+
+function parsePoint(value: unknown): { t: string; value: number | null } | null {
+	if (!Array.isArray(value) || value.length !== 2) return null;
+	const t = text(value[0], 64);
+	if (!t || !Number.isFinite(Date.parse(t))) return null;
+	if (value[1] == null) return { t, value: null };
+	if (typeof value[1] !== 'number' || !Number.isFinite(value[1])) return null;
+	return { t, value: value[1] };
+}
+
+/**
+ * Metric payload for one `m`. Series not in `names` are dropped.
+ * A malformed point or series fails the whole payload so the chart shows an error.
+ */
+export function parseMetricPayload(value: unknown, m: string, names: readonly string[]): ParsedMetric | null {
+	if (!isRecord(value) || value.m !== m) return null;
+	if (!Array.isArray(value.series) || value.series.length > 20) return null;
+	const parsed: Array<{ name: string; points: Array<{ t: string; value: number | null }> }> = [];
+	for (const item of value.series) {
+		if (!isRecord(item)) return null;
+		const name = text(item.name, 64);
+		if (!name) return null;
+		if (!Array.isArray(item.points) || item.points.length > 2000) return null;
+		const points: Array<{ t: string; value: number | null }> = [];
+		for (const raw of item.points.slice(0, 500)) {
+			const point = parsePoint(raw);
+			if (!point) return null;
+			points.push(point);
+		}
+		parsed.push({ name, points });
+	}
+	const series = names
+		.map((name) => parsed.find((item) => item.name === name))
+		.filter((item): item is { name: string; points: Array<{ t: string; value: number | null }> } => item != null);
+	return { step: parseStep(value.step), series };
+}
+
+function parseProcessItem(value: unknown): ProcessItem | null {
+	if (!isRecord(value)) return null;
+	const pid = value.pid;
+	if (typeof pid !== 'number' || !Number.isInteger(pid) || pid < 0 || pid > 2_147_483_647) return null;
+	if (typeof value.process_name !== 'string' || typeof value.user !== 'string') return null;
+	if (value.cmdline != null && typeof value.cmdline !== 'string') return null;
+	const process_name = displayText(value.process_name, 200);
+	const user = displayText(value.user, 80);
+	const cmdline = value.cmdline == null ? null : displayText(value.cmdline, 8192);
+	const started_at = optionalText(value.started_at, 64);
+	const serviceRaw = optionalText(value.service_id, 36);
+	if (started_at === undefined || serviceRaw === undefined) return null;
+	if (serviceRaw !== null && !isUuid(serviceRaw)) return null;
+	const cpu_usage = optionalNumber(value.cpu_usage);
+	const memory_rss = optionalNumber(value.memory_rss);
+	const memory_usage = optionalNumber(value.memory_usage);
+	const threads = optionalNumber(value.num_threads);
+	if (cpu_usage === undefined || memory_rss === undefined || memory_usage === undefined || threads === undefined) return null;
+	if (threads != null && (!Number.isInteger(threads) || threads < 0)) return null;
+	return {
+		pid,
+		process_name,
+		user,
+		cmdline,
+		service_id: serviceRaw,
+		cpu_usage,
+		memory_rss,
+		memory_usage,
+		num_threads: threads,
+		started_at
+	};
+}
+
+/** `sampled_at` may be null. A row with a missing pid or a wrong field type is counted in `skipped`. */
+export function parseProcessSample(value: unknown): ProcessSample | null {
+	if (!isRecord(value) || !Array.isArray(value.items) || value.items.length > 200) return null;
+	const sampled_at = optionalText(value.sampled_at, 64);
+	if (sampled_at === undefined) return null;
+	const items: ProcessItem[] = [];
+	let skipped = 0;
+	for (const raw of value.items) {
+		const item = parseProcessItem(raw);
+		if (!item) {
+			skipped += 1;
+			continue;
+		}
+		items.push(item);
+	}
+	return { sampled_at, items, skipped };
+}
+
 export function parseProbe(value: unknown): ProbeView | null {
 	if (!isRecord(value)) return null;
 	const protocol = text(value.protocol, 32);
@@ -290,7 +406,7 @@ export function parseProbe(value: unknown): ProbeView | null {
 		service: text(value.service, 200),
 		protocol: protocol && /^[a-z0-9_-]+$/i.test(protocol) ? protocol : null,
 		port: nullableNumber(value.port),
-		path: optionalText(value.path, 200) ?? null,
+		path: optionalPath(value.path) ?? null,
 		result: result && /^[a-z0-9_-]+$/i.test(result) ? result : null,
 		http_status: nullableNumber(value.http_status),
 		latency_ms: nullableNumber(value.latency_ms),

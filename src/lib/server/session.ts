@@ -6,8 +6,6 @@ export const OAUTH_COOKIE = 'bot_oauth';
 export const SESSION_MAX_AGE = 604800;
 export const OAUTH_MAX_AGE = 600;
 
-const PRIVATE_PAGES = new Set(['/', '/services', '/processes', '/databases', '/ops']);
-
 export type SessionCookieOptions = {
 	httpOnly: true;
 	sameSite: 'lax';
@@ -49,22 +47,22 @@ export function isApiPath(pathname: string): boolean {
 	return path === '/api' || path.startsWith('/api/');
 }
 
-export function isPublicPath(pathname: string): boolean {
+/** Built assets and root files. App routes, including sign-in, are not static. */
+export function isStaticAsset(pathname: string): boolean {
 	const path = logicalPath(pathname);
-	if (path === '/signin' || path.startsWith('/signin/')) return true;
-	if (path === '/auth/google/callback') return true;
 	if (path.startsWith('/_app/') || path.startsWith('/.well-known/')) return true;
 	return /^\/[^/]+\.(svg|png|ico|webp|txt|webmanifest|gif|jpe?g)$/i.test(path);
 }
 
-export function needsNoStore(pathname: string, auth: boolean): boolean {
+export function isPublicPath(pathname: string): boolean {
 	const path = logicalPath(pathname);
-	if (PRIVATE_PAGES.has(path) || path.startsWith('/pi/') || path.startsWith('/api/')) return true;
-	if (!auth) return false;
-	if (path === '/signin' || path === '/signout' || path === '/device') return true;
-	if (path === '/projects' || path.startsWith('/projects/')) return true;
-	if (path === '/hosts' || path.startsWith('/hosts/')) return true;
-	return path.startsWith('/auth/');
+	if (path === '/signin' || path.startsWith('/signin/')) return true;
+	if (path === '/auth/google/callback') return true;
+	return isStaticAsset(path);
+}
+
+export function needsNoStore(pathname: string): boolean {
+	return !isStaticAsset(pathname);
 }
 
 /**

@@ -1,10 +1,10 @@
 # bot-console
 
-Design v2 (2026-10-13): `docs/design.md` covers OAuth sign-in and moving reads to bot-api-server. Wave 1 of the console (sign-in, projects, hosts, join tokens, device approval) is implemented and stays off unless `BOT_API_URL` is set. Cross-repo design: umbrella `docs/design-bot-agent-deploy.md`.
+Design v2 (2026-10-13): `docs/design.md`. The console is a BFF for bot-api-server. `BOT_API_URL` is required. There is no Postgres login. Cross-repo design: umbrella `docs/design-bot-agent-deploy.md`. The frozen HTTP contract is `docs/contracts/api-v1.md` (do not edit the copy).
 
-SvelteKit dashboard for deploybot. Reads `cluster_metrics.metrics` with the read-only login in `.env`. Umbrella: `/home/joe/workspace/deploybot`.
+SvelteKit dashboard for deploybot. Umbrella: `/home/joe/workspace/deploybot`.
 
-Overview, per-host charts, and Services are built. Databases and ops are still coming-soon routes. Do not build them unless asked. Do not apply SQL, install or reload Telegraf, restart systemd units, or change pi4 from an agent session. Do not print `.env`.
+Do not apply SQL, install or reload Telegraf, restart systemd units, or change pi4 from an agent session. Do not print `.env`.
 
 ## Commands
 
@@ -26,46 +26,31 @@ SvelteKit 2 (not 3): config stays in `svelte.config.js`, imports use `$lib`, and
 ## Layout
 
 ```
-src/hooks.server.ts          security headers, no-store, and the BOT_API_URL session gate
+src/hooks.server.ts          security headers, no-store, required BOT_API_URL, session gate, / → /projects
 src/lib/server/api.ts        bot-api-server client (Bearer, envelope, 35s timeout)
 src/lib/server/session.ts    bot_session cookie, safe next path, public routes
-src/lib/server/db.ts         postgres.js pool, .env fallback, read-only session
-src/lib/server/metrics.ts    overview and series SQL
-src/lib/server/services.ts   services registry, procstat, unit, and HTTP reads
-src/lib/server/errors.ts     log a redacted line, return 503
+src/lib/server/guard.ts      503 when BOT_API_URL is missing or invalid; require a user
+src/lib/host-view.ts         host tabs, metric series names, process search, chart alignment
+src/lib/ranges.ts            1h / 6h / 24h / 7d → from/to
 src/lib/format.ts            Pacific/Auckland and number formatting
-src/lib/ranges.ts            1h / 1d / 1w windows and time_bucket widths
-src/lib/series.ts            merge bucketed series
-src/lib/host.ts              host-name shape, not a node list
-src/lib/services-query.ts    /services and /api/services query allowlist
-src/lib/service-view.ts      health, dedupe, cap, and sort (no database)
-src/lib/snapshot.ts          merge registry rows and metric samples
-src/lib/pg-error.ts          missing table or column (42P01, 42703)
-src/lib/disk.ts              whole-disk name pattern
-src/params/host.ts           route matcher
-src/routes/+page.*           cluster cards
-src/routes/pi/[host=host]/   charts
-src/routes/services/         service health and per-host processes
-src/routes/api/              JSON polled by the metric pages
-src/routes/signin/           Google sign-in, only when BOT_API_URL is set
-src/routes/projects/         projects, members, join tokens, settings
-src/routes/hosts/            host services, snapshot, and probe
+src/lib/series.ts            merge helper kept for the old chart shape (not on the request path)
+src/routes/+page.*           redirect / to /projects
+src/routes/signin/           Google sign-in
+src/routes/projects/         projects, hosts, members, join tokens, settings
+src/routes/hosts/[id]/       overview, services, and processes tabs
+src/routes/device/           device-code approval
 tests/                       node:test, import paths end in .ts
 ```
 
 ## Conventions
 
 - Svelte 5 runes. No new UI library. Charts are SVG in `LineChart.svelte`.
-- Database access stays in `src/lib/server/`. The client polls same-origin `/api` routes.
-- Queries are parameterized. `isHostName` checks shape only. A host is known when it is in `metrics.hosts` or in `cpu`, `mem`, `disk`, `temp`, `system`, `net`, or `diskio` within `RECENT_HOST_WINDOW` (7 days). `/pi/[host]` is 404 otherwise. Range is `1h`, `1d`, or `1w`.
-- `/services` reads `metrics.services`, `metrics.procstat`, and optionally `metrics.systemd_units` and `metrics.http_response` (`to_regclass`). A missing relation (`42P01`, or `to_regclass` null) is remembered for 60 seconds (`MISSING_RELATION_TTL_MS`), then checked again. A missing column (`42703`) is logged and returned empty for that request and is not cached, so an `ADD COLUMN` shows up on the next poll. `host`, `sort` (`cpu` or `memory`), and `service` are allowlisted. An unknown host is an empty selection, not 404. The page does not call `listHosts()`. Service SQL uses `SERVICE_LOOKBACK` (10 minutes), not the 7-day overview window. User-scope health is HTTP plus process presence. A unit or HTTP sample older than `STALE_AFTER_MS` (2 minutes) is `unknown`.
-- Overview and per-host queries in `metrics.ts` are separate. Each metric query is isolated. `42P01` or `42703` blanks that metric and is remembered until that process restarts. Empty rows stay `null` (`n/a` on a card, `No data` on a chart) and do not drop the host.
-- Latest memory and disk bytes are their own queries (`latest.memory.bytes`, `latest.disk.bytes`), same 7-day `DISTINCT ON` window as the gauges. Disk path is `/`. API fields: `memoryUsedBytes`, `memoryTotalBytes`, `memoryAvailableBytes`, `diskUsedBytes`, `diskTotalBytes`, `diskFreeBytes` (`number | null`). A missing byte column blanks only those fields.
-- A host is stale when it has no cpu, memory, disk, temperature, load, or uptime timestamp in the last 2 minutes (`STALE_AFTER` / `STALE_AFTER_MS`). A registry row with no metric rows is stale, and its card is red. Pages poll every 15 seconds (`POLL_MS`).
-- `metrics.time` is timestamp without time zone holding UTC. Compare with `now() AT TIME ZONE 'UTC'`. Send `value AT TIME ZONE 'UTC'` to Node so it is a real instant. Session `TimeZone` is UTC.
+- The browser never calls bot-api-server. Server loads and form actions do.
+- `BOT_API_URL` must be an origin with no path, query, or userinfo. `https`, or `http` for loopback, or `http` elsewhere only when `BOT_API_ALLOW_INSECURE_HTTP=1`. Anything else is 503 `Console is not configured (BOT_API_URL)` on every route except static assets.
+- Host ids are UUIDs. `/hosts/[id]?tab=overview|services|processes` (default overview) and `?range=1h|6h|24h|7d` (default 1h). Unknown tab or range falls back to those defaults. Range becomes `from`/`to`. `step` is omitted.
+- Overview metrics are seven parallel `GET /v1/hosts/{id}/metrics` calls (`cpu`, `mem`, `disk`, `net`, `diskio`, `system`, `temp`). A failed call sets that chart's message. The page still renders. Null points are gaps. The tab depends on `host:metrics` and invalidates it every 30 seconds while visible.
+- Services keeps the health-check fan-out: at most 50 detail reads, concurrency 6, 10 second deadline. Rows carry `id="service-{id}"`.
+- Processes calls `GET /v1/hosts/{id}/processes?sort=cpu|memory&limit=200`. Search filters pid, process, user, and cmdline in the page. It is not sent to the API. `service_id` links to `?tab=services#service-{id}`.
 - `node --test` loads TypeScript directly. A value import from a module under test needs the `.ts` extension (`allowImportingTsExtensions`). Type-only imports are erased and can stay extensionless.
-- Gauge charts use `time_bucket`: 30 seconds, 5 minutes, 30 minutes.
-- Net and diskio are counters. Rate is a positive per-series delta over elapsed seconds, averaged in the bucket, then summed. Drop negative deltas. Skip interface `lo`. Disk names must match `WHOLE_DISK_PATTERN`.
-- System load and uptime are separate rows. Read the latest non-null row of each.
-- Do not print, log, or commit `.env` or `PGPASSWORD`. Log only a short redacted error line.
+- Do not print, log, or commit `.env`. Log only a short redacted error line.
 - Do not commit unless the user asks. Do not push or add a remote.
