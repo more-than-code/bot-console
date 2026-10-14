@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import DataTable from '$lib/components/DataTable.svelte';
 	import Notice from '$lib/components/Notice.svelte';
@@ -8,10 +7,7 @@
 	import { formatWhen } from '$lib/format';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
+	import NewProject from './NewProject.svelte';
 
 	let { data, form } = $props();
 
@@ -27,27 +23,15 @@
 	<title>Projects · deploybot</title>
 </svelte:head>
 
-<PageHeader title="Projects" headingId="projects-heading" />
-{#if form?.message || data.message}
-	<Notice kind="error">{form?.message ?? data.message}</Notice>
+<PageHeader title="Projects" headingId="projects-heading">
+	{#snippet actions()}
+		<NewProject action={actionUrlFrom(page.url, 'create')} failed={Boolean(form?.message)} message={form?.message ?? null} />
+	{/snippet}
+</PageHeader>
+{#if data.message}
+	<Notice kind="error">{data.message}</Notice>
 {/if}
 
-<Card.Root class="mb-6">
-	<Card.Header>
-		<Card.Title>New project</Card.Title>
-	</Card.Header>
-	<Card.Content>
-		<form method="POST" action={actionUrlFrom(page.url, 'create')} class="grid gap-3" use:enhance>
-			<Label class="grid gap-1.5" for="project-name">
-				New project name
-				<Input id="project-name" name="name" required maxlength={80} autocomplete="off" />
-			</Label>
-			<div>
-				<Button type="submit">Create project</Button>
-			</div>
-		</form>
-	</Card.Content>
-</Card.Root>
 
 {#if data.omitted > 0}
 	<p class="text-muted-foreground mb-2 text-sm">{data.omitted} more {data.omitted === 1 ? 'row' : 'rows'} left out.</p>
