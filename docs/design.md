@@ -20,7 +20,7 @@ Steps 2 and 3 landed together. The console no longer reads Postgres. Host overvi
 
 ## Auth (BFF)
 
-- New routes: `/signin` (Google only for now; GitHub later), `/auth/google/callback`, `/signout`, and `/device` (the device-code approval page for MCP clients: sign in, enter the code, approve; umbrella §7).
+- New routes: `/signin` (Google only for now; GitHub later), `/auth/google/callback`, `/signout`, `/device` (the device-code approval page for MCP clients: sign in, enter the code, approve; umbrella §7), `/oauth/consent` (MCP browser consent: client name marked unverified, full redirect host, Allow or Deny), and `/account/apps` (Connected apps, linked from the header account menu, with a revoke action).
 - Sign-in: a server route calls bot-api-server `GET /v1/auth/google/start`, then redirects. The callback route posts `code` and `state` to `POST /v1/auth/google/callback` and receives the session token once.
 - Cookie `bot_session`: `HttpOnly`, `SameSite=Lax`, `Path=/`, `Max-Age=604800`, and `Secure` when the origin is HTTPS (the dev `:5180` is HTTP over the tailnet, so no `Secure` there).
 - `hooks.server.ts`: read the cookie, call `GET /v1/me` (cached for each request), and put the user in `event.locals`. Unauthenticated page requests redirect to `/signin`. `/api/*` returns 401.
@@ -61,7 +61,7 @@ Project services (`/projects/[id]?tab=services`, every member) call `GET /v1/pro
 
 ## Theme
 
-Cookie `bot_theme` is `system` (the default), `light`, or `dark`. Any other value counts as `system` and is never written back raw. `POST /theme` is public. It sets the cookie (`HttpOnly`, `SameSite=Lax`, `Path=/`, max-age one year, `Secure` only when the request is https) and redirects to a safe `next`, or to `/` when `next` is unsafe. The server writes `class="dark"` for dark, nothing for light, and `data-theme="system"` for system. An inline script in `src/app.html` (`nonce="%sveltekit.nonce%"`) adds `.dark` before paint when the choice is system and the OS prefers dark, and it follows later OS changes only while that attribute is still `system`. `ThemeSwitch` sets the class immediately, then posts `/theme` (`name="theme"`, hidden `next`) with `use:enhance` and does not reload the page. At 640 px and below the three choices are icons only. The signed-in menu stays on the first header line, and the switch wraps to a second line.
+Cookie `bot_theme` is `system` (the default), `light`, or `dark`. Any other value counts as `system` and is never written back raw. `POST /theme` is public. It sets the cookie (`HttpOnly`, `SameSite=Lax`, `Path=/`, max-age one year, `Secure` only when the request is https) and redirects to a safe `next`, or to `/` when `next` is unsafe. The server writes `class="dark"` for dark, nothing for light, and `data-theme="system"` for system. An inline script in `src/app.html` (`nonce="%sveltekit.nonce%"`) adds `.dark` before paint when the choice is system and the OS prefers dark, and it follows later OS changes only while that attribute is still `system`. `ThemeSwitch` sets the class immediately, then posts `/theme` (`name="theme"`, hidden `next`) with `use:enhance` and does not reload the page. At 640 px and below the three choices are icons only, and the switch sits on the next header line. The signed-in row wraps, and a long account name truncates.
 
 ## Tests (when implemented)
 

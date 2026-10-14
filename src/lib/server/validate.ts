@@ -99,6 +99,36 @@ export function isJoinToken(value: string): boolean {
 	return JOIN_TOKEN.test(value);
 }
 
+/** Opaque consent id. At least 128 bits, and safe to place in one path segment. */
+const OAUTH_REQUEST_ID = /^[A-Za-z0-9_-]{16,256}$/;
+
+export function isOauthRequestId(value: unknown): value is string {
+	return typeof value === 'string' && OAUTH_REQUEST_ID.test(value);
+}
+
+function isLoopbackHost(hostname: string): boolean {
+	return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
+}
+
+/**
+ * OAuth `redirect_to` from the API. https, or http only for a loopback host
+ * (RFC 8252). Returns the parsed URL, or null for javascript:, data:, a
+ * non-loopback http URL, userinfo, or a value that does not parse.
+ */
+export function consentRedirect(value: unknown): string | null {
+	if (typeof value !== 'string' || value.length < 8 || value.length > 4096 || CONTROL.test(value)) return null;
+	if (value !== value.trim()) return null;
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return null;
+	}
+	if (url.username || url.password || url.hostname.length === 0) return null;
+	if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopbackHost(url.hostname))) return null;
+	return url.href;
+}
+
 /** The init command is shown only when it matches the fixed form and embeds this token. */
 export function acceptedInstallCommand(command: string, token: string): string | null {
 	// The server capture would otherwise allow `$(...)` inside the quotes.

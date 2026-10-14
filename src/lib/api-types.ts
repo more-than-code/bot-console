@@ -178,3 +178,28 @@ export type ProcessSample = {
 	/** Rows dropped because pid was missing or a field had the wrong type. */
 	skipped: number;
 };
+
+/** `GET /v1/oauth/requests/{id}` (oauth-v1 §3.1). */
+export type OauthRequest = {
+	id: string;
+	client: {
+		id: string;
+		name: string;
+		verified: boolean;
+	};
+	redirect_host: string;
+	resource: string;
+	remembered: boolean;
+	projects_count: number;
+	expires_at: string;
+};
+
+/** One active row of `GET /v1/me/grants` (oauth-v1 §11). */
+export type Grant = {
+	id: string;
+	client_name: string;
+	redirect_host: string;
+	created_at: string;
+	last_used_at: string | null;
+	kind: 'oauth' | 'device';
+};

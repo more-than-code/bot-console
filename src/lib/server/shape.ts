@@ -1,5 +1,6 @@
 import type {
 	DeviceView,
+	Grant,
 	Health,
 	HealthCheck,
 	Host,
@@ -13,11 +14,12 @@ import type {
 	Project,
 	ProjectService,
 	ServiceSummary,
+	OauthRequest,
 	SnapshotView,
 	User
 } from '../api-types';
 import { isRole } from './roles';
-import { acceptedInstallCommand, isJoinToken, isUuid } from './validate';
+import { acceptedInstallCommand, consentRedirect, isJoinToken, isOauthRequestId, isUuid } from './validate';
 
 const CONTROL = /[\u0000-\u001F\u007F]/;
 const PATH_MAX_BYTES = 512;
@@ -306,6 +308,77 @@ export function parseHealthChecks(value: unknown): HealthCheck[] | null {
 		checks.push({ id, protocol: item.protocol, port: item.port, path, enabled: item.enabled });
 	}
 	return checks;
+}
+
+const CLIENT_NAME_MAX = 64;
+const REDIRECT_HOST_MAX = 300;
+const RESOURCE_MAX = 2048;
+const GRANT_CAP = 500;
+
+export function parseOauthRequest(value: unknown): OauthRequest | null {
+	if (!isRecord(value) || !isRecord(value.client)) return null;
+	const id = text(value.id, 256);
+	const clientId = text(value.client.id, 128);
+	const name = text(value.client.name, CLIENT_NAME_MAX);
+	const redirect_host = text(value.redirect_host, REDIRECT_HOST_MAX);
+	const resource = text(value.resource, RESOURCE_MAX);
+	const expires_at = timestamp(value.expires_at);
+	if (!id || !isOauthRequestId(id) || !clientId || !name || !redirect_host || !resource || !expires_at) return null;
+	if (redirect_host.trim() === '' || resource.trim() === '') return null;
+	const projects_count = value.projects_count;
+	if (typeof value.client.verified !== 'boolean' || typeof value.remembered !== 'boolean') return null;
+	if (typeof projects_count !== 'number' || !Number.isInteger(projects_count) || projects_count < 0 || projects_count > 1_000_000) {
+		return null;
+	}
+	return {
+		id,
+		client: { id: clientId, name, verified: value.client.verified },
+		redirect_host,
+		resource,
+		remembered: value.remembered,
+		projects_count,
+		expires_at
+	};
+}
+
+/** Approve and deny. A string `redirect_to` that fails the scheme check is `refused`. */
+export function parseOauthRedirect(payload: unknown): { ok: true; redirect_to: string } | { ok: false; reason: 'malformed' | 'refused' } {
+	if (!isRecord(payload) || typeof payload.redirect_to !== 'string') return { ok: false, reason: 'malformed' };
+	const redirect_to = consentRedirect(payload.redirect_to);
+	if (!redirect_to) return { ok: false, reason: 'refused' };
+	return { ok: true, redirect_to };
+}
+
+function parseGrant(value: unknown): Grant | null {
+	if (!isRecord(value)) return null;
+	const id = text(value.id, 36);
+	const client_name = text(value.client_name, CLIENT_NAME_MAX);
+	const redirect_host = text(value.redirect_host, REDIRECT_HOST_MAX);
+	const created_at = timestamp(value.created_at);
+	if (!id || !isUuid(id) || !client_name || !redirect_host || redirect_host.trim() === '' || !created_at) return null;
+	if (!Object.hasOwn(value, 'last_used_at')) return null;
+	let last_used_at: string | null = null;
+	if (value.last_used_at != null) {
+		const parsed = timestamp(value.last_used_at);
+		if (!parsed) return null;
+		last_used_at = parsed;
+	}
+	if (value.kind !== 'oauth' && value.kind !== 'device') return null;
+	return { id, client_name, redirect_host, created_at, last_used_at, kind: value.kind };
+}
+
+/** The whole list fails closed. One bad row is not dropped. */
+export function parseGrants(payload: unknown): Grant[] | null {
+	if (!isRecord(payload) || !Array.isArray(payload.items) || payload.items.length > GRANT_CAP) return null;
+	const items: Grant[] = [];
+	const seen = new Set<string>();
+	for (const item of payload.items) {
+		const grant = parseGrant(item);
+		if (!grant || seen.has(grant.id)) return null;
+		seen.add(grant.id);
+		items.push(grant);
+	}
+	return items;
 }
 
 export function parseDevice(value: unknown): DeviceView | null {

@@ -11,6 +11,8 @@ import { actions as deviceActions, load as deviceLoad } from '../src/routes/devi
 import { load as projectsLoad } from '../src/routes/projects/+page.server.ts';
 import { actions as projectActions, load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
 import { checkDeadline } from '../src/lib/server/service-checks.ts';
+import { buttonVariants } from '../src/lib/components/ui/button/index.ts';
+import { cn } from '../src/lib/utils.ts';
 import { actions as hostActions } from '../src/routes/hosts/[id]/+page.server.ts';
 import {
 	containsToken,
@@ -504,6 +506,33 @@ describe('auth routes', { concurrency: false }, () => {
 		assert.equal(/\b(Overview|Services|Processes|Databases|Ops)\b/.test(nav), false);
 		assert.match(layout, /Sign out/);
 		assert.match(layout, /data\.user\.name/);
+	});
+
+	test('the signed-in header wraps and the account name can shrink', () => {
+		const layout = readFileSync(new URL('../src/routes/+layout.svelte', import.meta.url), 'utf8');
+		const row = layout.match(/<div class="([^"]*sm:contents[^"]*)">/);
+		assert.ok(row, 'signed-in header row');
+		assert.match(row[1], /\bflex-wrap\b/);
+		assert.match(row[1], /\bmin-w-0\b/);
+		const account = layout.match(/<div class="([^"]*ml-auto[^"]*)">/);
+		assert.ok(account, 'account cluster');
+		assert.match(account[1], /\bmin-w-0\b/);
+		assert.match(account[1], /\bmax-w-full\b/);
+		const trigger = layout.match(
+			/class=\{cn\(\s*buttonVariants\(\{ variant: 'ghost', size: 'sm' \}\),\s*'([^']+)'\s*\)\}/
+		);
+		assert.ok(trigger, 'account trigger overrides button shrink-0');
+		assert.match(trigger[1], /\bshrink\b/);
+		assert.equal(trigger[1].includes('shrink-0'), false);
+		assert.match(trigger[1], /\bmin-w-0\b/);
+		assert.match(trigger[1], /\bmax-w-full\b/);
+		assert.match(trigger[1], /\boverflow-hidden\b/);
+		assert.match(layout, /<span class="min-w-0 truncate">\{data\.user\.name \|\| 'Account'\}<\/span>/);
+		const merged = cn(buttonVariants({ variant: 'ghost', size: 'sm' }), trigger[1]).split(/\s+/);
+		assert.equal(merged.includes('shrink'), true);
+		assert.equal(merged.includes('shrink-0'), false);
+		assert.equal(merged.includes('overflow-hidden'), true);
+		assert.equal(merged.includes('min-w-0'), true);
 	});
 
 	test('sign-in start sends redirect_uri and sets a 600 second Secure cookie on https', async () => {

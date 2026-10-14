@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
+	import AppWindow from '@lucide/svelte/icons/app-window';
 	import FolderKanban from '@lucide/svelte/icons/folder-kanban';
 	import LogOut from '@lucide/svelte/icons/log-out';
-	import { Button } from '$lib/components/ui/button';
+	import { Button, buttonVariants } from '$lib/components/ui/button';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import ThemeSwitch from '$lib/components/ThemeSwitch.svelte';
+	import { cn } from '$lib/utils';
 	import '../app.css';
 
 	let { children, data } = $props();
@@ -21,7 +24,7 @@
 >
 <div class="mx-auto w-full min-w-0 max-w-6xl px-4">
 	<header class="flex flex-col gap-y-2 py-3 sm:flex-row sm:items-center sm:gap-x-3">
-		<div class="flex min-w-0 items-center gap-x-3 sm:contents">
+		<div class="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 sm:contents">
 			<a class="shrink-0 text-sm font-semibold" href="/projects">deploybot</a>
 			<nav class="flex shrink-0 items-center" aria-label="Primary">
 				<a
@@ -33,8 +36,24 @@
 				>
 			</nav>
 			{#if data.user}
-				<div class="ml-auto flex min-w-0 items-center gap-2 sm:order-2 sm:ml-0">
-					<span class="min-w-0 max-w-28 truncate text-sm sm:max-w-none">{data.user.name || 'Account'}</span>
+				<div class="ml-auto flex min-w-0 max-w-full items-center gap-2 sm:order-2 sm:ml-0">
+					<DropdownMenu.Root>
+						<DropdownMenu.Trigger
+							class={cn(
+								buttonVariants({ variant: 'ghost', size: 'sm' }),
+								'max-w-full min-w-0 shrink overflow-hidden'
+							)}
+						>
+							<span class="min-w-0 truncate">{data.user.name || 'Account'}</span>
+						</DropdownMenu.Trigger>
+						<DropdownMenu.Content align="end">
+							<DropdownMenu.Item>
+								{#snippet child({ props })}
+									<a href="/account/apps" {...props}><AppWindow class="size-4" />Connected apps</a>
+								{/snippet}
+							</DropdownMenu.Item>
+						</DropdownMenu.Content>
+					</DropdownMenu.Root>
 					<form class="shrink-0" method="POST" action="/signout" use:enhance>
 						<Button type="submit" variant="outline" size="sm"><LogOut class="size-4" />Sign out</Button>
 					</form>

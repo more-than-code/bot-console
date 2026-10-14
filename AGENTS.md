@@ -45,6 +45,8 @@ src/routes/signin/           Google sign-in
 src/routes/projects/         projects, hosts, services, members, join tokens, settings
 src/routes/hosts/[id]/       overview and processes tabs
 src/routes/device/           device-code approval
+src/routes/oauth/consent/    MCP consent (Allow / Deny)
+src/routes/account/apps/     Connected apps and revoke
 src/routes/theme/            public POST /theme sets bot_theme
 tests/                       node:test, import paths end in .ts
 ```
@@ -68,7 +70,7 @@ tests/                       node:test, import paths end in .ts
 
 Route pages use the shared pieces below and the primitives in `src/lib/components/ui/`. Do not reimplement them under `src/routes/`. `tests/components-reuse.test.ts` fails if a route adds a `<table>`, a tab strip (`role="tablist"` or `class="nav tabs"`), `role="alert"`, `confirm(`, a `StatusText` import, or an `<h1` (the heading comes from `PageHeader`). It also fails on a colour literal or an inline colour style outside `src/lib/components/ui/**`, on `forceMount` or `portalProps` outside that folder, on a text-labelled button inside a DataTable `{#snippet row}`, and on a raw `<button` or `<input` outside `src/lib/components/ui/**` and `src/lib/components/*.svelte`.
 
-The app shell header is the product name, the Projects link, `ThemeSwitch`, and (when signed in) the user's name and Sign out. At 640 px and below the theme switch is icons only (each item has an `aria-label` and a tooltip) and the user menu stays on the first line; the switch wraps to a second line. Wide tables scroll inside the table container. Dialogs use the generated portal and mount only while open.
+The app shell header is the product name, the Projects link, `ThemeSwitch`, and (when signed in) the user's name (an account menu linking to Connected apps at `/account/apps`) and Sign out. The signed-in row wraps, and the account trigger shrinks so a long name truncates instead of widening the page. At 640 px and below the theme switch is icons only (each item has an `aria-label` and a tooltip) and sits on the next header line. Wide tables scroll inside the table container. Dialogs use the generated portal and mount only while open.
 
 - `DataTable` — every table, on the shadcn `table`. Sort headers and the pager are `button` links. Client sort, search, and paging are pure functions in `src/lib/table.ts`, driven by namespaced URL params (`<id>.q`, `<id>.sort`, `<id>.dir`, `<id>.page`). Server mode uses the same names plus `<id>.host` and `<id>.cursor`, and does not sort or page the rows in the browser. A column's `firstDir` is the direction used the first time that column is chosen (`asc` when omitted). Clicking the active column still toggles. Process CPU, RSS, memory, and threads open descending. Service `last_seen` opens descending. The processes table default is `defaultDir="desc"`.
 - `Tabs` — host and project link strips (`aria-current="page"`), with a Lucide icon beside the label. Not a `tablist`.

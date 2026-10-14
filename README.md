@@ -56,6 +56,8 @@ PORT=5180 HOST=0.0.0.0 node build
 | `/projects/[id]` | Hosts (default), Services, members, join tokens, and owner settings. Each host links to `/hosts/[id]`. Breadcrumb: Projects › {project}. |
 | `/hosts/[id]` | Tabs `?tab=overview\|processes` (default overview). `?tab=services` redirects to the project Services tab for this host when the caller is a member of the owning project, or of one of the first 20 session projects that list the host. Breadcrumb: Projects › {project} › {host}. |
 | `/device` | Approve or deny a device code for the signed-in user. |
+| `/oauth/consent` | Allow or deny an MCP sign-in request. Signed out, redirects to `/signin?next=` this URL. |
+| `/account/apps` | Connected apps for the signed-in user. Revoke ends that grant. |
 | `/theme` | Public. `POST` sets the `bot_theme` cookie and redirects to a safe `next`. An unsafe `next` becomes `/`. |
 
 Overview (`?range=1h|6h|24h|7d`, default `1h`) shows status, a snapshot action, and charts from `GET /v1/hosts/{id}/metrics`. One failed metric stays on that chart; the others still render. Charts refresh every 30 seconds while the tab is visible. Project Services (`?tab=services`) loads `GET /v1/projects/{id}/services` with server search, a host filter, sort, and cursor paging (`limit=25`). Admin+ renames a service from an icon button on that row (the dialog posts `display_name`, at most 64 characters) and probes a health check from an icon button there. Processes loads `GET /v1/hosts/{id}/processes?sort=cpu|memory&limit=200`. Search filters the returned process rows in the browser. The Process cell shows the process name. A Service cell shows the service label and links to that service's project Services tab when the caller is a member of it. The host filter on project Services lists owned hosts and deploy shares. A search longer than 100 characters, a search containing NUL, or a host filter that is not a reachable host is not sent and shows a Notice.
@@ -72,6 +74,6 @@ Sign-in is one "Sign in with Google" button. The server asks bot-api-server for 
 
 A join token is shown once, on the create result, and is not written to browser storage. The install command is shown with it only when it matches the command the API just issued. Otherwise the page says `Install command not shown: unexpected format` and the copy button is for the token only. Buttons follow the caller's project role. The API still enforces that role. `forbidden` and `not_found` are messages on the page. Lists that stop at the page or item cap, or that see a repeated cursor, say `More items not shown`.
 
-The header shows the product name, a Projects link, the theme switch (System, Light, Dark), and, when signed in, the user's name and Sign out.
+The header shows the product name, a Projects link, the theme switch (System, Light, Dark), and, when signed in, the user's name, a menu linking to Connected apps, and Sign out.
 
 This console has not been run against bot-api-server or Google from the unit tests. They mock `fetch`.
