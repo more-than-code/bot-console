@@ -19,6 +19,7 @@
 		type ImageDraft,
 		type KnownSet
 	} from '$lib/image-spec';
+	import { formDialogOutcome, type DialogOutcome } from '$lib/dialog-open';
 	import type { ImageEditorState } from '$lib/project-action';
 
 	let {
@@ -30,6 +31,7 @@
 		setsStatus = 'loading',
 		retrySets,
 		editor = null,
+		onSettled,
 		cancel
 	}: {
 		mode: 'create' | 'edit';
@@ -40,6 +42,7 @@
 		setsStatus?: 'loading' | 'ready' | 'error';
 		retrySets?: () => void;
 		editor?: ImageEditorState | null;
+		onSettled?: (outcome: DialogOutcome) => void | Promise<void>;
 		cancel?: Snippet;
 	} = $props();
 
@@ -187,8 +190,9 @@
 		}
 		clientField = null;
 		clientMessage = null;
-		return async ({ update }) => {
+		return async ({ result, update }) => {
 			await update({ reset: false });
+			await onSettled?.(formDialogOutcome(result.type));
 		};
 	}}
 >

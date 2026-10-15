@@ -72,7 +72,7 @@
 	const hostLabel = $derived(selectedHost?.name ?? '');
 	const containerBlocked = $derived(selectedHost != null && imageHostBlockReason(selectedHost) != null);
 	const notice = $derived(historyNotice({ hostCount: eligible.length, pending: historyPending, ready: historyReady, count: history.length }));
-	const targets = $derived(rollbackDigests(history));
+	const targets = $derived(entry.spec.kind === 'job' ? [] : rollbackDigests(history));
 	const digest = $derived(shortDigest(result?.outcome?.digest ?? result?.status?.digest));
 
 	$effect(() => {

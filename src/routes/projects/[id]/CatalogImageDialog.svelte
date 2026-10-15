@@ -8,6 +8,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import type { ImageEntry } from '$lib/api-types';
+	import { imageEditorDialog, type DialogOutcome } from '$lib/dialog-open';
 	import type { KnownSet } from '$lib/image-spec';
 	import type { ImageEditorState } from '$lib/project-action';
 	import CatalogImageForm from './CatalogImageForm.svelte';
@@ -29,7 +30,7 @@
 	} = $props();
 
 	let open = $state(untrack(() => revealed));
-	let sawReveal = $state(untrack(() => revealed));
+	let sawFailure = $state(untrack(() => revealed));
 	let sets = $state<KnownSet[]>([]);
 	let setsMessage = $state<string | null>(null);
 	let setsStatus = $state<'loading' | 'ready' | 'error'>('loading');
@@ -37,9 +38,16 @@
 	let setsForm = $state<HTMLFormElement | null>(null);
 
 	$effect(() => {
-		if (revealed && !untrack(() => sawReveal)) open = true;
-		sawReveal = revealed;
+		const next = imageEditorDialog(untrack(() => ({ open, sawFailure })), revealed ? 'failure' : '');
+		open = next.open;
+		sawFailure = next.sawFailure;
 	});
+
+	function settle(outcome: DialogOutcome) {
+		const next = imageEditorDialog({ open, sawFailure }, outcome);
+		open = next.open;
+		sawFailure = next.sawFailure;
+	}
 
 	// Names and key names only. This post does not replace the page form, so a later save keeps the list.
 	$effect(() => {
@@ -106,7 +114,7 @@
 					};
 				}}
 			></form>
-			<CatalogImageForm {mode} {entry} {saveAction} {sets} {setsMessage} {setsStatus} {retrySets} {editor}>
+			<CatalogImageForm {mode} {entry} {saveAction} {sets} {setsMessage} {setsStatus} {retrySets} {editor} onSettled={settle}>
 				{#snippet cancel()}
 					<Dialog.Close type="button">Cancel</Dialog.Close>
 				{/snippet}

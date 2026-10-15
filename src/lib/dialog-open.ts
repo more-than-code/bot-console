@@ -32,6 +32,11 @@ export function formDialogOutcome(resultType: string): DialogOutcome {
 	return 'idle';
 }
 
+/** Image create and edit. A save redirect closes the dialog. A failure keeps it open. */
+export function imageEditorDialog(state: DialogState, resultType: string): DialogView {
+	return nextFormDialog(state, formDialogOutcome(resultType));
+}
+
 export type InviteSecretState = {
 	open: boolean;
 	sawFailure: boolean;

@@ -337,8 +337,10 @@ export function shortDigest(digest: string | null | undefined): string | null {
 }
 
 /**
- * Digests the Roll back button may target: older succeeded or unchanged digests,
- * at most three distinct, newest first. The current success is not a target.
+ * Digests a service Roll back button may target.
+ * The newest succeeded or unchanged digest is the one already current, including
+ * when a later row failed with that same digest, so it is not a target.
+ * At most three distinct succeeded or unchanged digests are considered, newest first.
  */
 export function rollbackDigests(items: readonly { outcome: string; digest: string | null }[]): string[] {
 	const distinct: string[] = [];
@@ -348,8 +350,7 @@ export function rollbackDigests(items: readonly { outcome: string; digest: strin
 		distinct.push(item.digest);
 		if (distinct.length === 3) break;
 	}
-	const newest = items[0];
-	const current = newest && ROLLBACK.has(newest.outcome as ImageOutcome) ? newest.digest : null;
+	const current = distinct[0] ?? null;
 	return distinct.filter((digest) => digest !== current);
 }
 

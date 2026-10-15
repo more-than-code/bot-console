@@ -35,6 +35,7 @@ import ProjectPage from '../src/routes/projects/[id]/+page.svelte';
 import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import SettingsSection from '../src/routes/projects/[id]/SettingsSection.svelte';
 import { actions as projectActions, load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
+import { imageEditorDialog } from '../src/lib/dialog-open.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 
@@ -462,7 +463,7 @@ describe('catalog images', { concurrency: false }, () => {
 			deployRow('00000000-0000-4000-8000-0000000000e4', 'unchanged', digest('c')),
 			deployRow('00000000-0000-4000-8000-0000000000e5', 'succeeded', digest('d'))
 		];
-		assert.deepEqual(rollbackDigests(history), [digest('a'), digest('b'), digest('c')]);
+		assert.deepEqual(rollbackDigests(history), [digest('b'), digest('c')]);
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 		const html = render(CatalogDeployForm, {
 			props: {
@@ -489,13 +490,17 @@ describe('catalog images', { concurrency: false }, () => {
 				}
 			}
 		}).body;
-		assert.equal(html.split('Roll back').length - 1, 3);
-		assert.equal(html.includes(`Roll back to ${shortDigest(digest('a'))}`), true);
+		assert.equal(html.split('Roll back').length - 1, 2);
+		assert.equal(html.includes(`Roll back to ${shortDigest(digest('a'))}`), false);
+		assert.equal(html.includes(`Roll back to ${shortDigest(digest('b'))}`), true);
+		assert.equal(html.includes(`Roll back to ${shortDigest(digest('c'))}`), true);
 		assert.equal(html.includes('succeeded'), true);
 		assert.equal(html.includes('exit 0'), true);
 		assert.equal(html.includes(shortDigest(digest('a')) ?? ''), true);
 		assert.equal(html.includes('ready'), true);
-		assert.equal(html.includes(`value="${digest('a')}"`), true);
+		assert.equal(html.includes(`value="${digest('a')}"`), false);
+		assert.equal(html.includes(`value="${digest('b')}"`), true);
+		assert.equal(html.includes(`value="${digest('c')}"`), true);
 		assert.equal(html.includes(`value="${digest('d')}"`), false);
 		assert.equal(html.includes(`value="${digest('e')}"`), false);
 		assert.equal(html.includes('>pi1<'), true);
@@ -531,6 +536,83 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(currentHtml.split('Roll back').length - 1, 1);
 		assert.equal(currentHtml.includes(shortDigest(digest('b')) ?? ''), true);
 		assert.equal(currentHtml.includes(`value="${digest('a')}"`), false);
+
+		const sameDigest = [
+			deployRow('00000000-0000-4000-8000-0000000000e6', 'failed', digest('a')),
+			deployRow('00000000-0000-4000-8000-0000000000e7', 'succeeded', digest('a'))
+		];
+		assert.deepEqual(rollbackDigests(sameDigest), []);
+		const sameHtml = render(CatalogDeployForm, {
+			props: {
+				entry: imageEntry(['deploy']),
+				hosts: [host()],
+				deployAction: '?/catalogDeploy',
+				rollbackAction: '?/catalogRollback',
+				removeAction: '?/catalogRemove',
+				confirmAction: '?/catalogConfirm',
+				historyAction: '?/catalogDeploys',
+				result: {
+					name: 'web',
+					resultId: '00000000-0000-4000-8000-0000000000eb',
+					hostId: HOST_ID,
+					workload: 'service',
+					waitSec: 30,
+					outcome: sameDigest[0] ?? null,
+					status: null,
+					lines: [],
+					history: sameDigest,
+					confirmation: null,
+					confirmKind: null,
+					message: null
+				}
+			}
+		}).body;
+		assert.equal(sameHtml.split('Roll back').length - 1, 0);
+		assert.equal(sameHtml.includes(shortDigest(digest('a')) ?? ''), true);
+		assert.equal(sameHtml.includes(`value="${digest('a')}"`), false);
+
+		const jobHistory = [
+			deployRow('00000000-0000-4000-8000-0000000000e8', 'failed', digest('a')),
+			deployRow('00000000-0000-4000-8000-0000000000e9', 'succeeded', digest('a')),
+			deployRow('00000000-0000-4000-8000-0000000000ea', 'succeeded', digest('b'))
+		];
+		const jobHtml = render(CatalogDeployForm, {
+			props: {
+				entry: { ...imageEntry(['deploy']), spec: imageSpec('job') },
+				hosts: [host()],
+				deployAction: '?/catalogDeploy',
+				rollbackAction: '?/catalogRollback',
+				removeAction: '?/catalogRemove',
+				confirmAction: '?/catalogConfirm',
+				historyAction: '?/catalogDeploys',
+				result: {
+					name: 'web',
+					resultId: '00000000-0000-4000-8000-0000000000ec',
+					hostId: HOST_ID,
+					workload: 'job',
+					waitSec: 600,
+					outcome: jobHistory[1] ?? null,
+					status: null,
+					lines: [],
+					history: jobHistory,
+					confirmation: null,
+					confirmKind: null,
+					message: null
+				}
+			}
+		}).body;
+		assert.equal(jobHtml.split('Roll back').length - 1, 0);
+		assert.equal(jobHtml.includes(`value="${digest('b')}"`), false);
+		assert.equal(jobHtml.includes('Run job'), true);
+	});
+
+	test('a successful image edit closes the dialog', () => {
+		const editing = { open: true, sawFailure: false };
+		assert.equal(imageEditorDialog(editing, 'redirect').open, false);
+		assert.equal(imageEditorDialog(editing, 'success').open, false);
+		assert.equal(imageEditorDialog(editing, 'failure').open, true);
+		assert.equal(imageEditorDialog({ open: true, sawFailure: true }, 'redirect').open, false);
+		assert.equal(imageEditorDialog(editing, '').open, true);
 	});
 
 	test('the settings tab loads env sets and registries only while that tab is open', async () => {
