@@ -67,6 +67,7 @@ export type FetchCall = {
 	body: string | null;
 	signal: AbortSignal | null;
 	redirect: RequestInit['redirect'];
+	headers: Headers;
 };
 
 export function installFetch(handler: (call: FetchCall) => Response | Promise<Response>): FetchCall[] {
@@ -80,7 +81,8 @@ export function installFetch(handler: (call: FetchCall) => Response | Promise<Re
 			authorization: headers.get('authorization'),
 			body: typeof init?.body === 'string' ? init.body : null,
 			signal: init?.signal ?? null,
-			redirect: init?.redirect
+			redirect: init?.redirect,
+			headers
 		};
 		calls.push(call);
 		return handler(call);
@@ -104,6 +106,8 @@ export function fakeEvent(input: {
 	params?: Record<string, string>;
 	user?: User | null;
 	projects?: Project[];
+	clientAddress?: string | (() => string);
+	requestHeaders?: Record<string, string>;
 }): { event: RequestEvent; jar: Map<string, string>; sets: CookieOp[] } {
 	const jar = new Map<string, string>();
 	if (input.session) jar.set('bot_session', input.session);
@@ -114,6 +118,9 @@ export function fakeEvent(input: {
 	if (input.form) {
 		headers.set('content-type', 'application/x-www-form-urlencoded');
 		headers.set('origin', new URL(input.url).origin);
+	}
+	if (input.requestHeaders) {
+		for (const [name, value] of Object.entries(input.requestHeaders)) headers.set(name, value);
 	}
 	const request = new Request(input.url, {
 		method,
@@ -149,7 +156,8 @@ export function fakeEvent(input: {
 			}
 		},
 		fetch: globalThis.fetch,
-		getClientAddress: () => '127.0.0.1',
+		getClientAddress:
+			typeof input.clientAddress === 'function' ? input.clientAddress : () => input.clientAddress ?? '127.0.0.1',
 		setHeaders() {},
 		depends() {},
 		isDataRequest: false,

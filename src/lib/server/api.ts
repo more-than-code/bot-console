@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { env } from '$env/dynamic/private';
 import { fail, isHttpError, isRedirect, redirect, type RequestEvent } from '@sveltejs/kit';
 import type { User, Project } from '../api-types';
@@ -10,6 +11,21 @@ export const API_TIMEOUT_MS = 35_000;
 export const BODY_LIMIT = 2_000_000;
 const LIST_PAGE_CAP = 20;
 const LIST_ITEM_CAP = 4000;
+
+/** Client-address headers a caller might copy from the browser request. The API trusts only the address this process sets. */
+const CLIENT_ADDRESS_HEADERS = [
+	'x-forwarded-for',
+	'forwarded',
+	'x-real-ip',
+	'x-client-ip',
+	'client-ip',
+	'cf-connecting-ip',
+	'true-client-ip',
+	'fastly-client-ip',
+	'x-cluster-client-ip',
+	'forwarded-for',
+	'x-originating-ip'
+] as const;
 
 const CODE_STATUS: Record<string, number> = {
 	bad_request: 400,
@@ -178,6 +194,17 @@ export function loadFailure(err: unknown): { message: string } {
 	return { message: messageOf(err) };
 }
 
+/** One IP from adapter-node, or nothing. Prerender and some tests throw; a chain or hostname is not forwarded. */
+function clientAddress(event: RequestEvent): string | null {
+	try {
+		const value = event.getClientAddress();
+		if (typeof value !== 'string' || isIP(value) === 0) return null;
+		return value;
+	} catch {
+		return null;
+	}
+}
+
 function messageOf(err: unknown): string {
 	if (err instanceof ApiError) return err.msg;
 	console.error('bot api request failed');
@@ -190,9 +217,12 @@ async function callApi(event: RequestEvent, path: string, init: RequestInit | un
 	const headers = new Headers(init?.headers);
 	headers.delete('authorization');
 	headers.delete('cookie');
+	for (const name of CLIENT_ADDRESS_HEADERS) headers.delete(name);
 	if (options.bearer) headers.set('authorization', `Bearer ${options.bearer}`);
 	headers.set('accept', 'application/json');
 	if (init?.body != null && !headers.has('content-type')) headers.set('content-type', 'application/json');
+	const client = clientAddress(event);
+	if (client) headers.set('x-forwarded-for', client);
 
 	const timeout = AbortSignal.timeout(API_TIMEOUT_MS);
 	const signal = init?.signal ? AbortSignal.any([timeout, init.signal]) : timeout;

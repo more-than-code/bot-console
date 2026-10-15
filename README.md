@@ -37,14 +37,16 @@ Do not commit `.env`. `.env` is gitignored.
 | `pnpm check` | `svelte-check` |
 | `pnpm test` | Unit tests (`node --test`). They mock `fetch`. There is no API server in the tests. |
 
-Production:
+Production, behind the reverse proxy:
 
 ```bash
 export PATH="$HOME/.local/opt/node/bin:$PATH"
-PORT=5180 HOST=0.0.0.0 node build
+PORT=5180 HOST=127.0.0.1 ADDRESS_HEADER=X-Forwarded-For XFF_DEPTH=1 node build
 ```
 
-`PORT` defaults to 3000 and `HOST` to `0.0.0.0` in the Node adapter. In dev (umbrella decision D33) the console runs on Joe's Mac with `pnpm dev` on port 5180 against the local bot-api-server (`BOT_API_URL=http://127.0.0.1:8090`). The older pi2 user unit `bot-console.service` (also port 5180) predates the control plane and is not the current deployment.
+`PORT` defaults to 3000 and `HOST` to `0.0.0.0` in the Node adapter. Bind to loopback (`HOST=127.0.0.1`) when a reverse proxy is the only client. `ADDRESS_HEADER=X-Forwarded-For` and `XFF_DEPTH=1` make `event.getClientAddress()` the rightmost forwarded address, the one the closest proxy added. The console sets that address as `X-Forwarded-For` on every bot-api-server call. The API rate-limits Google sign-in start (20 per minute), invite redemption, and OAuth by client IP, and it uses the rightmost `X-Forwarded-For` address only when the TCP peer is `BOT_API_TRUSTED_PROXY` (`127.0.0.1` in production). Without the header, every console user shares that loopback bucket. A client who can reach the console directly can spoof `X-Forwarded-For`, which is why the process listens on loopback. `vite dev` ignores these two variables and uses the socket peer. If `getClientAddress()` throws, or returns an empty or non-IP value, the console sends no `X-Forwarded-For`.
+
+In dev (umbrella decision D33) the console runs on Joe's Mac with `pnpm dev` on port 5180 against the local bot-api-server (`BOT_API_URL=http://127.0.0.1:8090`). The older pi2 user unit `bot-console.service` (also port 5180) predates the control plane and is not the current deployment.
 
 ## Pages
 
