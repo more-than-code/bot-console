@@ -4,6 +4,7 @@
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { servicesRenameView, type ProjectActionData, type ProjectScope } from '$lib/project-action';
 	import CatalogEntryDialog from './CatalogEntryDialog.svelte';
+	import CatalogImageDialog from './CatalogImageDialog.svelte';
 	import CatalogSection from './CatalogSection.svelte';
 	import HostsSection from './HostsSection.svelte';
 	import { actionUrlFrom } from '$lib/url';
@@ -20,11 +21,13 @@
 	const rename = $derived(servicesRenameView(action));
 	const catalogEditor = $derived(action?.scope === 'catalog' ? (action.catalogEditor ?? null) : null);
 	const catalogRun = $derived(action?.scope === 'catalog' ? (action.catalogAction ?? null) : null);
+	const imageEditor = $derived(action?.scope === 'catalog' ? (action.imageEditor ?? null) : null);
+	const imageDeploy = $derived(action?.scope === 'catalog' ? (action.imageDeploy ?? null) : null);
 	const catalogPermissions = $derived(
 		action?.scope === 'catalog' && action.permissions ? action.permissions : (data.permissions ?? null)
 	);
 	const catalogMessage = $derived.by(() => {
-		if (catalogEditor || catalogRun || (action?.scope === 'catalog' && action.permissions)) return data.catalogMessage ?? null;
+		if (catalogEditor || imageEditor || imageDeploy || catalogRun || (action?.scope === 'catalog' && action.permissions)) return data.catalogMessage ?? null;
 		return sectionMessage ?? data.catalogMessage ?? null;
 	});
 
@@ -38,7 +41,7 @@
 					...(data.canAdmin
 						? [{ key: 'tokens', label: 'Join tokens', href: `/projects/${data.project.id}?tab=tokens` }]
 						: []),
-					...(data.canOwner
+					...(data.canAdmin
 						? [{ key: 'settings', label: 'Settings', href: `/projects/${data.project.id}?tab=settings` }]
 						: [])
 				]
@@ -68,6 +71,13 @@
 					parseAction={actionUrlFrom(page.url, 'catalogParse')}
 					revealed={catalogEditor?.mode === 'create'}
 					editor={catalogEditor?.mode === 'create' ? catalogEditor : null}
+				/>
+				<CatalogImageDialog
+					mode="create"
+					saveAction={actionUrlFrom(page.url, 'catalogCreate')}
+					setsAction={actionUrlFrom(page.url, 'catalogEnvSets')}
+					revealed={imageEditor?.mode === 'create'}
+					editor={imageEditor?.mode === 'create' ? imageEditor : null}
 				/>
 			{/if}
 		{/snippet}
@@ -111,6 +121,8 @@
 			editor={catalogEditor?.mode === 'edit' ? catalogEditor : null}
 			run={catalogRun}
 			permissions={catalogPermissions}
+			imageEditor={imageEditor?.mode === 'edit' ? imageEditor : null}
+			imageDeploy={imageDeploy}
 		/>
 	{:else if scope === 'members'}
 		<MembersSection
@@ -139,6 +151,16 @@
 			message={sectionMessage ?? data.tokensMessage}
 		/>
 	{:else if scope === 'settings'}
-		<SettingsSection project={data.project} canOwner={data.canOwner} message={sectionMessage} />
+		<SettingsSection
+			project={data.project}
+			canOwner={data.canOwner}
+			canAdmin={data.canAdmin}
+			message={sectionMessage}
+			settingsField={action?.scope === 'settings' ? (action.settingsField ?? null) : null}
+			envSets={data.envSets ?? []}
+			envSetsMessage={data.envSetsMessage ?? null}
+			registries={data.registries ?? []}
+			registriesMessage={data.registriesMessage ?? null}
+		/>
 	{/if}
 {/if}

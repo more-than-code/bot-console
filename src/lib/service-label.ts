@@ -10,16 +10,23 @@ function capServiceQuery(value: string): string {
 }
 
 /**
- * v1.2 label: `display_name`, otherwise the discovered `name`,
- * unless that name is `port-<n>`, in which case `port <n> · <owner_user>` (or `port <n>`).
+ * v1.2 label: `display_name`, otherwise a container's `container_name`,
+ * otherwise the discovered `name`, unless that name is `port-<n>`,
+ * in which case `port <n> · <owner_user>` (or `port <n>`).
  */
 export function serviceLabel(service: {
 	display_name?: string | null;
 	name: string;
 	owner_user?: string | null;
+	kind?: string | null;
+	container_name?: string | null;
 }): string {
 	const display = service.display_name?.trim() ?? '';
 	if (display) return display;
+	if (service.kind === 'container') {
+		const container = service.container_name?.trim() ?? '';
+		if (container) return container;
+	}
 	const port = PORT_NAME.exec(service.name);
 	if (!port) return service.name;
 	const owner = service.owner_user?.trim() ?? '';

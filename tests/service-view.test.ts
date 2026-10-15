@@ -60,7 +60,9 @@ function row(id: string, source: ProjectServiceRow['source'], goneAt: string | n
 		project_name: 'Lab',
 		checks: [],
 		checksMessage: null,
-		catalog_entry: null
+		catalog_entry: null,
+		container_name: null,
+		image_digest: null
 	};
 }
 

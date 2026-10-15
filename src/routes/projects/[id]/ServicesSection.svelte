@@ -17,6 +17,7 @@
 		serviceHostReachable,
 		showProjectColumn
 	} from '$lib/host-view';
+	import { shortDigest } from '$lib/image-spec';
 	import { canRenameService, serviceLabel } from '$lib/service-label';
 	import {
 		SERVICE_SHOW_LABEL,
@@ -207,6 +208,14 @@
 		<tr id={serviceDomId(service.id)}>
 			<td class="p-2 align-middle">
 				<span class="mr-2">{serviceLabel(service)}</span>
+				{#if service.source === 'owned' && service.kind === 'container'}
+					{#if service.container_name && service.container_name !== serviceLabel(service)}
+						<span class="text-muted-foreground mr-2 font-mono text-sm">{service.container_name}</span>
+					{/if}
+					{#if shortDigest(service.image_digest)}
+						<span class="text-muted-foreground mr-2 font-mono text-sm">{shortDigest(service.image_digest)}</span>
+					{/if}
+				{/if}
 				{#if service.catalog_entry}
 					<Badge variant="secondary">catalog</Badge>
 				{/if}

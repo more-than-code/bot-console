@@ -5,7 +5,7 @@
 	import { buttonVariants } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import RowAction from '$lib/components/RowAction.svelte';
-	import type { CatalogEntry, Host } from '$lib/api-types';
+	import type { Host, ProgramEntry } from '$lib/api-types';
 	import type { CatalogEditorState } from '$lib/project-action';
 	import CatalogEntryForm from './CatalogEntryForm.svelte';
 
@@ -19,7 +19,7 @@
 		editor = null
 	}: {
 		mode: 'create' | 'edit';
-		entry?: CatalogEntry | null;
+		entry?: ProgramEntry | null;
 		hosts: Host[];
 		saveAction: string;
 		parseAction: string;

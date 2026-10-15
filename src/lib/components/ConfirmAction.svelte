@@ -24,7 +24,8 @@
 		message,
 		hidden = [],
 		typeToConfirm = null,
-		rowLabel = null
+		rowLabel = null,
+		disabled = false
 	}: {
 		id: string;
 		action: string;
@@ -36,6 +37,8 @@
 		typeToConfirm?: TypeToConfirm | null;
 		/** Set on a table row. The trigger is then icon-only. */
 		rowLabel?: string | null;
+		/** The text trigger does not open. Row triggers ignore this. */
+		disabled?: boolean;
 	} = $props();
 
 	let open = $state(false);
@@ -71,7 +74,7 @@
 			{/snippet}
 		</RowAction>
 	{:else}
-		<AlertDialog.Trigger class={buttonVariants({ variant: destructive ? 'destructive' : 'outline', size: 'sm' })}>
+		<AlertDialog.Trigger class={buttonVariants({ variant: destructive ? 'destructive' : 'outline', size: 'sm' })} disabled={disabled}>
 			<Icon class="size-4" />
 			{label}
 		</AlertDialog.Trigger>

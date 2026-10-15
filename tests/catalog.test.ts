@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
 import { render } from 'svelte/server';
-import type { CatalogEntry, CatalogGrant, Host, Member, ProjectServiceRow } from '../src/lib/api-types.ts';
+import type { CatalogGrant, Host, Member, ProgramEntry, ProjectServiceRow } from '../src/lib/api-types.ts';
 import {
 	APPROVAL_WAIT,
 	hoistPreviewEnv,
@@ -46,7 +46,7 @@ const SERVICE_ID = '00000000-0000-4000-8000-0000000000bb';
 const HASH = 'ab'.repeat(32);
 const KEY = 'run-key-1';
 
-const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1' };
+const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: false };
 
 function host(overrides: Partial<Host> = {}): Host {
 	return {
@@ -69,7 +69,7 @@ function host(overrides: Partial<Host> = {}): Host {
 	};
 }
 
-function entry(my_actions: CatalogEntry['my_actions'], overrides: Partial<CatalogEntry> = {}): CatalogEntry {
+function entry(my_actions: ProgramEntry['my_actions'], overrides: Partial<ProgramEntry> = {}): ProgramEntry {
 	return {
 		id: ENTRY_ID,
 		project_id: PROJECT.id,
@@ -537,10 +537,12 @@ describe('catalog', { concurrency: false }, () => {
 			}
 		});
 		const parsed = parseCatalogEntry(tabbed);
-		assert.equal(parsed?.command_display, tabbed.command_display);
-		assert.equal(parsed?.spec.dir, '/srv/app\t');
-		assert.deepEqual(parsed?.spec.args, ['run\t', 'dev<']);
-		assert.equal(parsed?.spec.env.PORT, '30\t31\u0007');
+		assert.equal(parsed?.kind, 'program');
+		if (parsed?.kind !== 'program') return;
+		assert.equal(parsed.command_display, tabbed.command_display);
+		assert.equal(parsed.spec.dir, '/srv/app\t');
+		assert.deepEqual(parsed.spec.args, ['run\t', 'dev<']);
+		assert.equal(parsed.spec.env.PORT, '30\t31\u0007');
 		assert.equal(JSON.stringify(parsed).includes('\uFFFD'), false);
 		assert.equal(parseCatalogEntry({ ...entry(['logs']), command_display: 'npm\nrun' }), null);
 		assert.equal(parseCatalogEntry({ ...entry(['logs']), spec: { ...entry(['logs']).spec, dir: '/srv/app\n' } }), null);
@@ -757,7 +759,7 @@ describe('catalog', { concurrency: false }, () => {
 
 	test('over-long fields are rejected, and the API env refusal is shown', async () => {
 		const account = `a${'b'.repeat(31)}`;
-		const allowed = host({ programs: { enabled: true, allow_shell: true, run_as: [account, 'joe'], policy_hash: 'policy-1' } });
+		const allowed = host({ programs: { enabled: true, allow_shell: true, run_as: [account, 'joe'], policy_hash: 'policy-1', images: false, docker: false } });
 		async function post(form: Record<string, string>) {
 			const calls = installFetch((call) => {
 				if (call.url.pathname.endsWith('/hosts')) return envelope({ items: [allowed], next_cursor: null });
@@ -1003,7 +1005,9 @@ function serviceProps(catalogEntry: string | null) {
 		project_name: 'Lab',
 		catalog_entry: catalogEntry,
 		checks: [],
-		checksMessage: null
+		checksMessage: null,
+		container_name: null,
+		image_digest: null
 	};
 	return {
 		projectId: PROJECT.id,
@@ -1030,12 +1034,15 @@ function selectValueText(html: string): string[] {
 	);
 }
 
-test('the run dialog host select shows the host name, not its id', () => {
+test('the run dialog host control shows the host name, not its id', () => {
 	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 	const html = render(CatalogRunForm, {
 		props: { kind: 'stop', entryName: 'web', runAs: 'joe', shell: false, hosts: [host()], action: '?/catalogStop', result: null }
 	}).body;
-	assert.deepEqual(selectValueText(html), ['pi1']);
+	const radios = [...html.matchAll(/<button\b[^>]*>/g)].map((match) => match[0]).filter((tag) => tag.includes('role="radio"'));
+	assert.equal(radios.some((tag) => tag.includes('break-all') && tag.includes('whitespace-normal') && tag.includes('aria-checked="true"')), true);
+	assert.match(html, /role="radio"[^>]*>(?:<!---->)?pi1/);
+	assert.equal(html.includes(`>${HOST_ID}<`), false);
 	assert.match(html, new RegExp(`<input\\b(?=[^>]*name="host_id")(?=[^>]*value="${HOST_ID}")`));
 });
 

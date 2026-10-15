@@ -4,6 +4,9 @@ export const APPROVAL_WAIT = "waiting for the host owner's approval";
 
 export const GRANT_ACTIONS = ['run', 'stop', 'restart', 'logs'] as const;
 
+/** Image entries add deploy. Program grants stay on GRANT_ACTIONS. */
+export const IMAGE_GRANT_ACTIONS = [...GRANT_ACTIONS, 'deploy'] as const;
+
 export const CATALOG_NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
 
 export const RUN_AS = /^[a-z_][a-z0-9_-]{0,31}$/;
@@ -47,6 +50,12 @@ export function hostBlockReason(host: Pick<Host, 'programs'>, runAs: string, she
 	if (!host.programs.enabled) return 'Programs are disabled on this host.';
 	if (runAs !== '' && !host.programs.run_as.includes(runAs)) return `This host does not allow run as ${runAs}.`;
 	if (shell && !host.programs.allow_shell) return 'This host does not allow a shell.';
+	return null;
+}
+
+/** Why this host cannot run a container. Null means the host can be chosen. */
+export function imageHostBlockReason(host: Pick<Host, 'programs'>): string | null {
+	if (host.programs == null || !host.programs.images || !host.programs.docker) return 'This host does not run containers.';
 	return null;
 }
 
@@ -168,10 +177,10 @@ export function reuseIdempotencyKey(resultType: string): boolean {
 /** Owners edit the spec. Everyone else gets the catalog row without the values that will run. */
 export function catalogForCaller(entries: readonly CatalogEntry[], owner: boolean): CatalogEntry[] {
 	if (owner) return [...entries];
-	return entries.map((item) => ({
-		...item,
-		spec: { ...item.spec, exec: '', args: [], env: {} }
-	}));
+	return entries.map((item) => {
+		if (item.kind === 'image') return { ...item, spec: { ...item.spec, env: {} } };
+		return { ...item, spec: { ...item.spec, exec: '', args: [], env: {} } };
+	});
 }
 
 /** Identifies a parsed line, so the form does not ask the server to parse the same line twice. */

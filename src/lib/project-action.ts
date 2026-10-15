@@ -3,16 +3,22 @@ import type {
 	CatalogPreview,
 	CatalogRestart,
 	CreatedJoin,
+	ImageDeploy,
+	ImageLogs,
+	ImageStatus,
+	ImageWorkload,
 	InviteRole,
+	PendingConfirmation,
 	ProbeView,
 	ProgramLogs,
 	ProgramStatus
 } from '$lib/api-types';
 import { nextFormDialog, type DialogState } from '$lib/dialog-open';
+import type { ImageDraft, KnownSet } from '$lib/image-spec';
 
 export type ProjectScope = 'hosts' | 'services' | 'catalog' | 'members' | 'tokens' | 'settings';
 
-export type CatalogRunKind = 'run' | 'stop' | 'restart' | 'logs';
+export type CatalogRunKind = 'run' | 'stop' | 'restart' | 'logs' | 'status';
 
 export type CatalogDraft = {
 	name: string;
@@ -40,8 +46,35 @@ export type CatalogRunState = {
 	name: string;
 	kind: CatalogRunKind;
 	resultId: string;
-	status: ProgramStatus | null;
-	logs: ProgramLogs | null;
+	status: ProgramStatus | ImageStatus | null;
+	logs: ProgramLogs | ImageLogs | null;
+	message: string | null;
+};
+
+/** Create or edit dialog for a container entry, after a failed save. */
+export type ImageEditorState = {
+	mode: 'create' | 'edit';
+	name: string | null;
+	draft: ImageDraft;
+	message: string | null;
+	field: string | null;
+};
+
+/** Deploy dialog. A new `resultId` opens it again. History is the last deploys, newest first. */
+export type ImageDeployState = {
+	name: string;
+	resultId: string;
+	hostId: string;
+	workload: ImageWorkload;
+	waitSec: number;
+	outcome: ImageDeploy | null;
+	status: ImageStatus | null;
+	lines: string[];
+	/** Null means the action did not load history, so the dialog keeps the list it has. */
+	history: ImageDeploy[] | null;
+	confirmation: PendingConfirmation | null;
+	/** Which call the confirmation continues. Remove stays on the short timeout. */
+	confirmKind: 'deploy' | 'rollback' | 'remove' | null;
 	message: string | null;
 };
 
@@ -69,6 +102,13 @@ export type ProjectActionData = {
 	catalogEditor?: CatalogEditorState;
 	catalogAction?: CatalogRunState;
 	permissions?: CatalogPermissionsState;
+	imageEditor?: ImageEditorState;
+	imageDeploy?: ImageDeployState;
+	/** Names and key names only. Values are never included. */
+	catalogSets?: KnownSet[];
+	catalogSetsMessage?: string | null;
+	/** Which settings form failed. The secret field is cleared either way. */
+	settingsField?: 'dotenv' | 'token' | null;
 };
 
 export type RenameOpenState = DialogState;

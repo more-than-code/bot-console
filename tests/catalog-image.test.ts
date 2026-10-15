@@ -1,0 +1,1893 @@
+import assert from 'node:assert/strict';
+import { after, before, describe, test } from 'node:test';
+import { isActionFailure, isRedirect } from '@sveltejs/kit';
+import { render } from 'svelte/server';
+import type { CatalogEntry, EnvSet, Host, ImageDeploy, ImageEntry, ImageSpec, ProjectServiceRow, Registry } from '../src/lib/api-types.ts';
+import { API_TIMEOUT_MS } from '../src/lib/server/api.ts';
+import { clearSecretField } from '../src/lib/secret-field.ts';
+import {
+	acceptHostHistory,
+	applyHistoryResponse,
+	blankImageDraft,
+	dockerRunPreview,
+	historyAfterSwitch,
+	historyFetch,
+	historyNotice,
+	imageDraftFromForm,
+	imageRequestBody,
+	imageSpecFromDraft,
+	nextHistory,
+	nextIdempotencyKey,
+	nextRollbackKey,
+	parseDockerRun,
+	redactSubmitted,
+	rollbackDigests,
+	shortDigest,
+	switchedHistoryHost
+} from '../src/lib/image-spec.ts';
+import { parseCatalogEntry, parseCatalogList, parseDeployPayload, parseImageLogs, parseImageSpec, parseImageStatus, parseService } from '../src/lib/server/shape.ts';
+import CatalogDeployForm from '../src/routes/projects/[id]/CatalogDeployForm.svelte';
+import CatalogImageForm from '../src/routes/projects/[id]/CatalogImageForm.svelte';
+import CatalogRunForm from '../src/routes/projects/[id]/CatalogRunForm.svelte';
+import CatalogPermissionsForm from '../src/routes/projects/[id]/CatalogPermissionsForm.svelte';
+import CatalogSection from '../src/routes/projects/[id]/CatalogSection.svelte';
+import ProjectPage from '../src/routes/projects/[id]/+page.svelte';
+import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
+import SettingsSection from '../src/routes/projects/[id]/SettingsSection.svelte';
+import { actions as projectActions, load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
+import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
+import { setPageUrl } from './stubs/app-state.ts';
+
+const HOST_ID = '00000000-0000-4000-8000-0000000000aa';
+const ENTRY_ID = '00000000-0000-4000-8000-0000000000c1';
+const HASH = 'ab'.repeat(32);
+const KEY = 'image-key-1';
+const SECRET = 'super-secret-value-99';
+const PLAIN = 'visible-plain-value-99';
+const REGISTRY_TOKEN = 'registry-token-secret';
+
+function digest(ch: string): string {
+	return `sha256:${ch.repeat(64)}`;
+}
+
+function imageSpec(kind: ImageSpec['kind'] = 'service'): ImageSpec {
+	return {
+		kind,
+		image: 'ghcr.io/acme/web:1',
+		command: null,
+		entrypoint: null,
+		ports: [],
+		env: {},
+		env_sets: [],
+		secret_env: {},
+		volumes: [],
+		restart: kind === 'job' ? 'no' : 'unless-stopped',
+		user: '',
+		healthy_after_sec: 30,
+		memory_mb: null,
+		timeout_sec: 600
+	};
+}
+
+function imageEntry(my_actions: ImageEntry['my_actions']): ImageEntry {
+	return {
+		id: ENTRY_ID,
+		project_id: PROJECT.id,
+		name: 'web',
+		kind: 'image',
+		spec: imageSpec(),
+		spec_hash: HASH,
+		command_display: 'ghcr.io/acme/web:1',
+		created_by: USER.id,
+		created_at: '2026-10-14T00:00:00Z',
+		updated_at: '2026-10-14T00:00:00Z',
+		my_actions
+	};
+}
+
+function programEntry(): CatalogEntry {
+	return {
+		id: ENTRY_ID,
+		project_id: PROJECT.id,
+		name: 'web',
+		kind: 'program',
+		spec: {
+			dir: '/srv/app',
+			exec: 'npm',
+			args: ['run', 'dev'],
+			shell: false,
+			run_as: 'joe',
+			env: {},
+			port: 3031,
+			restart: 'on-failure'
+		},
+		spec_hash: HASH,
+		command_display: 'npm run dev',
+		created_by: USER.id,
+		created_at: '2026-10-14T00:00:00Z',
+		updated_at: '2026-10-14T00:00:00Z',
+		my_actions: ['logs']
+	};
+}
+
+function host(): Host {
+	return {
+		id: HOST_ID,
+		project_id: PROJECT.id,
+		name: 'pi1',
+		node_type: 'pi',
+		os: 'linux',
+		arch: 'arm64',
+		always_on: true,
+		agent_version: '1.2.0',
+		status: 'online',
+		last_seen_at: '2026-10-14T00:00:00Z',
+		enrolled_at: '2026-10-13T00:00:00Z',
+		revoked_at: null,
+		relation: 'owner',
+		share_level: null,
+		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true }
+	};
+}
+
+function deployRow(id: string, outcome: ImageDeploy['outcome'], imageDigest: string | null): ImageDeploy {
+	return {
+		id,
+		entry_id: ENTRY_ID,
+		host_id: HOST_ID,
+		digest: imageDigest,
+		spec_hash: HASH,
+		outcome,
+		exit_code: outcome === 'failed' ? 1 : 0,
+		started_at: '2026-10-14T00:00:00Z',
+		finished_at: '2026-10-14T00:01:00Z',
+		by: USER.id,
+		via: 'console'
+	};
+}
+
+function statusBody() {
+	return {
+		container: 'web',
+		state: 'running',
+		exit_code: null,
+		restart_count: 0,
+		started_at: '2026-10-14T00:00:00Z',
+		finished_at: null,
+		digest: digest('a'),
+		ports: []
+	};
+}
+
+function deployPayload(outcome: ImageDeploy['outcome'] = 'succeeded') {
+	return {
+		deploy: deployRow('00000000-0000-4000-8000-0000000000e1', outcome, digest('a')),
+		status: statusBody(),
+		lines: ['ready']
+	};
+}
+
+function spyTimeouts(mode: 'hold' | 'abort'): { seen: number[]; restore: () => void } {
+	const seen: number[] = [];
+	const original = AbortSignal.timeout;
+	const replacement = (ms: number) => {
+		seen.push(ms);
+		if (mode === 'abort') return AbortSignal.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+		return new AbortController().signal;
+	};
+	Object.defineProperty(AbortSignal, 'timeout', { configurable: true, writable: true, value: replacement });
+	return {
+		seen,
+		restore() {
+			Object.defineProperty(AbortSignal, 'timeout', { configurable: true, writable: true, value: original });
+		}
+	};
+}
+
+function actionData(result: unknown): {
+	message?: string;
+	settingsField?: 'dotenv' | 'token' | null;
+	imageDeploy?: { message?: string | null; history?: ImageDeploy[] | null; confirmation?: { plan: string } | null };
+	imageEditor?: { draft: { env: Array<{ key: string; value: string }> }; message: string | null; field: string | null };
+} {
+	assert.equal(isActionFailure(result), true);
+	if (!isActionFailure(result)) return {};
+	return result.data as unknown as {
+		message?: string;
+		settingsField?: 'dotenv' | 'token' | null;
+		imageDeploy?: { message?: string | null; history?: ImageDeploy[] | null; confirmation?: { plan: string } | null };
+		imageEditor?: { draft: { env: Array<{ key: string; value: string }> }; message: string | null; field: string | null };
+	};
+}
+
+describe('catalog images', { concurrency: false }, () => {
+	const originalFetch = globalThis.fetch;
+	const originalTimeout = AbortSignal.timeout;
+
+	before(() => {
+		useApi('https://api.test');
+	});
+
+	after(() => {
+		globalThis.fetch = originalFetch;
+		Object.defineProperty(AbortSignal, 'timeout', { configurable: true, writable: true, value: originalTimeout });
+		restoreEnv();
+	});
+
+	test('an image form maps empty argv to null and a job forces restart no', () => {
+		const service = new FormData();
+		service.set('name', 'web');
+		service.set('workload', 'service');
+		service.set('image', 'ghcr.io/acme/web:1');
+		service.set('restart', 'on-failure');
+		service.set('healthy_after_sec', '40');
+		service.append('command', '');
+		service.append('entrypoint', '');
+		service.append('port_host', '8080');
+		service.append('port_container', '80');
+		service.append('port_public', '1');
+		const built = imageDraftFromForm(service);
+		assert.equal(built.message, null);
+		const check = imageSpecFromDraft(built.draft, undefined, true);
+		assert.equal(check.ok, true);
+		if (!check.ok) return;
+		assert.equal(check.spec.command, null);
+		assert.equal(check.spec.entrypoint, null);
+		assert.equal(check.spec.restart, 'on-failure');
+		assert.deepEqual(check.spec.ports, [{ host: 8080, container: 80, public: false }]);
+		const body = imageRequestBody(check.spec, check.name);
+		assert.equal(body.kind, 'image');
+		const spec = body.spec as Record<string, unknown>;
+		assert.equal(spec.healthy_after_sec, 40);
+		assert.equal(Object.hasOwn(spec, 'timeout_sec'), false);
+
+		const job = new FormData();
+		job.set('name', 'migrate');
+		job.set('workload', 'job');
+		job.set('image', 'ghcr.io/acme/web:1');
+		job.set('restart', 'unless-stopped');
+		job.set('timeout_sec', '90');
+		job.append('command', 'npm');
+		job.append('command', '');
+		const jobCheck = imageSpecFromDraft(imageDraftFromForm(job).draft, undefined, true);
+		assert.equal(jobCheck.ok, true);
+		if (!jobCheck.ok) return;
+		assert.deepEqual(jobCheck.spec.command, ['npm']);
+		assert.equal(jobCheck.spec.restart, 'no');
+		const jobSpec = imageRequestBody(jobCheck.spec, jobCheck.name).spec as Record<string, unknown>;
+		assert.equal(jobSpec.restart, 'no');
+		assert.equal(jobSpec.timeout_sec, 90);
+		assert.equal(Object.hasOwn(jobSpec, 'healthy_after_sec'), false);
+	});
+
+	test('client checks reject a bad image form before it is saved', () => {
+		const draft = blankImageDraft();
+		draft.name = 'Bad';
+		draft.image = 'ghcr.io/acme/web:1';
+		const name = imageSpecFromDraft(draft, undefined, true);
+		assert.equal(name.ok, false);
+		if (name.ok) return;
+		assert.equal(name.field, 'name');
+
+		const secret = blankImageDraft();
+		secret.name = 'web';
+		secret.image = 'ghcr.io/acme/web:1';
+		secret.env = [{ key: 'API_TOKEN', value: SECRET }];
+		const token = imageSpecFromDraft(secret, undefined, true);
+		assert.equal(token.ok, false);
+		if (token.ok) return;
+		assert.equal(token.field, 'env');
+	});
+
+	test('docker run preview shows env keys and not values', () => {
+		const parsed = parseDockerRun(`docker run -e PORT=3000 -e API_TOKEN=${SECRET} ghcr.io/acme/web:1`);
+		assert.equal(parsed.ok, true);
+		if (!parsed.ok) return;
+		const nginx = parseDockerRun('docker run -e PORT=3000 nginx');
+		assert.equal(nginx.ok, true);
+		if (!nginx.ok) return;
+		assert.equal(nginx.draft.image, 'nginx');
+		const loopback = parseDockerRun('docker run -p 8080:80 nginx');
+		assert.equal(loopback.ok, true);
+		if (!loopback.ok) return;
+		assert.deepEqual(loopback.draft.ports, [{ host: '8080', container: '80' }]);
+		for (const line of [
+			'docker run --memory 256m nginx',
+			'docker run --gpus all nginx',
+			'docker run -dp 80:80 nginx',
+			'docker run --security-opt no-new-privileges nginx',
+			'docker run --network bridge nginx',
+			'docker run --restart always nginx'
+		]) {
+			const refused = parseDockerRun(line);
+			assert.equal(refused.ok, false, line);
+			if (refused.ok) continue;
+			const flag = line.split(' ')[2] ?? '';
+			assert.equal(refused.message.includes(flag), true, line);
+			assert.equal(refused.message.includes('nginx'), false, line);
+		}
+		const privileged = parseDockerRun('docker run --privileged ghcr.io/acme/web:1');
+		assert.equal(privileged.ok, false);
+		if (!privileged.ok) assert.equal(privileged.message, '--privileged is not supported.');
+		const hostNet = parseDockerRun('docker run --network host nginx');
+		assert.equal(hostNet.ok, false);
+		if (!hostNet.ok) assert.equal(hostNet.message, 'Host networking is not supported.');
+		const cap = parseDockerRun('docker run --cap-add SYS_ADMIN nginx');
+		assert.equal(cap.ok, false);
+		if (!cap.ok) assert.equal(cap.message, '--cap-add is not supported.');
+		const root = parseDockerRun('docker run --user root nginx');
+		assert.equal(root.ok, false);
+		if (!root.ok) assert.equal(root.message, 'Running as root is refused.');
+		const bind = parseDockerRun('docker run -v /:/host nginx');
+		assert.equal(bind.ok, false);
+		if (!bind.ok) assert.equal(bind.message, 'Bind mounts are refused.');
+		const rootUser = blankImageDraft();
+		rootUser.image = 'nginx';
+		rootUser.user = 'root';
+		const rootCheck = imageSpecFromDraft(rootUser);
+		assert.equal(rootCheck.ok, false);
+		if (!rootCheck.ok) assert.equal(rootCheck.field, 'user');
+		const line = dockerRunPreview({
+			name: 'web',
+			image: parsed.draft.image ?? '',
+			command: parsed.draft.command ?? [],
+			entrypoint: parsed.draft.entrypoint ?? [],
+			ports: [],
+			envKeys: (parsed.draft.env ?? []).map((row) => row.key),
+			volumes: (parsed.draft.volumes ?? []).map((volume) => ({ name: volume.name, target: volume.target, readOnly: volume.readOnly })),
+			restart: parsed.draft.restart ?? 'unless-stopped',
+			user: parsed.draft.user ?? '',
+			memoryMb: null
+		});
+		assert.match(line, /-e PORT\b/);
+		assert.match(line, /-e API_TOKEN\b/);
+		assert.equal(line.includes('3000'), false);
+		assert.equal(line.includes(SECRET), false);
+	});
+
+	test('harmless docker run flags are ignored and listed', () => {
+		const real = parseDockerRun('docker run -d --name web -p 127.0.0.1:8088:80 nginx');
+		assert.equal(real.ok, true);
+		if (!real.ok) return;
+		assert.equal(real.draft.image, 'nginx');
+		assert.deepEqual(real.draft.ports, [{ host: '8088', container: '80' }]);
+		assert.deepEqual(real.unsupported, ['-d', '--name']);
+		const ignored: Array<[string, string[], 'service' | 'job']> = [
+			['docker run -d nginx', ['-d'], 'service'],
+			['docker run --detach nginx', ['--detach'], 'service'],
+			['docker run --name web nginx', ['--name'], 'service'],
+			['docker run --name=web nginx', ['--name'], 'service'],
+			['docker run -it nginx', ['-it'], 'service'],
+			['docker run -i nginx', ['-i'], 'service'],
+			['docker run -t nginx', ['-t'], 'service'],
+			['docker run --interactive nginx', ['--interactive'], 'service'],
+			['docker run --tty nginx', ['--tty'], 'service'],
+			['docker run --rm nginx', ['--rm'], 'service'],
+			['docker run --rm nginx', [], 'job']
+		];
+		for (const [line, notice, workload] of ignored) {
+			const parsed = parseDockerRun(line, workload);
+			assert.equal(parsed.ok, true, line);
+			if (!parsed.ok) continue;
+			assert.equal(parsed.draft.image, 'nginx', line);
+			assert.deepEqual(parsed.unsupported, notice, line);
+		}
+		const refused = parseDockerRun('docker run --gpus all nginx');
+		assert.equal(refused.ok, false);
+		if (!refused.ok) {
+			assert.equal(refused.message, '--gpus is not supported.');
+			assert.equal(refused.message.includes('nginx'), false);
+		}
+	});
+
+	test('deploy and rollback use the long timeout, and a timeout says the host is still running', async () => {
+		const hold = spyTimeouts('hold');
+		installFetch((call) => {
+			if (call.url.pathname.endsWith('/deploys')) return envelope({ items: [] });
+			if (call.url.pathname.endsWith('/deploy') || call.url.pathname.endsWith('/rollback')) return envelope(deployPayload());
+			if (call.url.pathname.endsWith('/remove')) return envelope({ status: statusBody() });
+			return envelope(null, 500, 'error', call.url.pathname);
+		});
+		const base = {
+			session: TOKEN,
+			user: USER,
+			projects: [PROJECT],
+			params: { id: PROJECT.id }
+		};
+		await projectActions.catalogDeploy(
+			fakeEvent({
+				...base,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogDeploy`,
+				form: { name: 'web', host_id: HOST_ID, workload: 'service', wait_sec: '40', idempotency_key: KEY, force: '1' }
+			}).event as never
+		);
+		await projectActions.catalogRollback(
+			fakeEvent({
+				...base,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogRollback`,
+				form: { name: 'web', host_id: HOST_ID, workload: 'job', wait_sec: '90', idempotency_key: KEY, digest: digest('b') }
+			}).event as never
+		);
+		await projectActions.catalogRemove(
+			fakeEvent({
+				...base,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogRemove`,
+				form: { name: 'web', host_id: HOST_ID, workload: 'service', wait_sec: '40', idempotency_key: KEY }
+			}).event as never
+		);
+		assert.deepEqual(hold.seen, [430000, API_TIMEOUT_MS, 480000, API_TIMEOUT_MS, API_TIMEOUT_MS, API_TIMEOUT_MS]);
+		hold.restore();
+
+		const abort = spyTimeouts('abort');
+		installFetch((call) => {
+			if (call.signal?.aborted) {
+				const reason = call.signal.reason;
+				return Promise.reject(reason instanceof Error ? reason : new DOMException('aborted', 'AbortError'));
+			}
+			return envelope(deployPayload());
+		});
+		const failed = await projectActions.catalogDeploy(
+			fakeEvent({
+				...base,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogDeploy`,
+				form: { name: 'web', host_id: HOST_ID, workload: 'service', wait_sec: '30', idempotency_key: KEY }
+			}).event as never
+		);
+		assert.equal(abort.seen.length, 1);
+		assert.equal(abort.seen[0], 420000);
+		const failedDeploy = actionData(failed).imageDeploy;
+		assert.equal(failedDeploy?.message, 'Still running on the host. Check the history in a minute.');
+		assert.equal(failedDeploy?.history, null);
+		abort.restore();
+
+		const rollbackAbort = spyTimeouts('abort');
+		const rolled = await projectActions.catalogRollback(
+			fakeEvent({
+				...base,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogRollback`,
+				form: { name: 'web', host_id: HOST_ID, workload: 'job', wait_sec: '90', idempotency_key: KEY, digest: digest('b') }
+			}).event as never
+		);
+		assert.equal(rollbackAbort.seen.length, 1);
+		assert.equal(rollbackAbort.seen[0], 480000);
+		assert.equal(actionData(rolled).imageDeploy?.message, 'Still running on the host. Check the history in a minute.');
+		rollbackAbort.restore();
+	});
+
+	test('roll back is offered only for older succeeded or unchanged digests', () => {
+		const history = [
+			deployRow('00000000-0000-4000-8000-0000000000e1', 'failed', digest('e')),
+			deployRow('00000000-0000-4000-8000-0000000000e2', 'succeeded', digest('a')),
+			deployRow('00000000-0000-4000-8000-0000000000e3', 'succeeded', digest('b')),
+			deployRow('00000000-0000-4000-8000-0000000000e4', 'unchanged', digest('c')),
+			deployRow('00000000-0000-4000-8000-0000000000e5', 'succeeded', digest('d'))
+		];
+		assert.deepEqual(rollbackDigests(history), [digest('a'), digest('b'), digest('c')]);
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const html = render(CatalogDeployForm, {
+			props: {
+				entry: imageEntry(['deploy']),
+				hosts: [host()],
+				deployAction: '?/catalogDeploy',
+				rollbackAction: '?/catalogRollback',
+				removeAction: '?/catalogRemove',
+				confirmAction: '?/catalogConfirm',
+				historyAction: '?/catalogDeploys',
+				result: {
+					name: 'web',
+					resultId: '00000000-0000-4000-8000-0000000000e9',
+					hostId: HOST_ID,
+					workload: 'service',
+					waitSec: 30,
+					outcome: history[1] ?? null,
+					status: null,
+					lines: ['ready'],
+					history,
+					confirmation: null,
+					confirmKind: null,
+					message: null
+				}
+			}
+		}).body;
+		assert.equal(html.split('Roll back').length - 1, 3);
+		assert.equal(html.includes(`Roll back to ${shortDigest(digest('a'))}`), true);
+		assert.equal(html.includes('succeeded'), true);
+		assert.equal(html.includes('exit 0'), true);
+		assert.equal(html.includes(shortDigest(digest('a')) ?? ''), true);
+		assert.equal(html.includes('ready'), true);
+		assert.equal(html.includes(`value="${digest('a')}"`), true);
+		assert.equal(html.includes(`value="${digest('d')}"`), false);
+		assert.equal(html.includes(`value="${digest('e')}"`), false);
+		assert.equal(html.includes('>pi1<'), true);
+		const current = [
+			deployRow('00000000-0000-4000-8000-0000000000e2', 'succeeded', digest('a')),
+			deployRow('00000000-0000-4000-8000-0000000000e3', 'succeeded', digest('b'))
+		];
+		const currentHtml = render(CatalogDeployForm, {
+			props: {
+				entry: imageEntry(['deploy']),
+				hosts: [host()],
+				deployAction: '?/catalogDeploy',
+				rollbackAction: '?/catalogRollback',
+				removeAction: '?/catalogRemove',
+				confirmAction: '?/catalogConfirm',
+				historyAction: '?/catalogDeploys',
+				result: {
+					name: 'web',
+					resultId: '00000000-0000-4000-8000-0000000000ea',
+					hostId: HOST_ID,
+					workload: 'service',
+					waitSec: 30,
+					outcome: current[0] ?? null,
+					status: null,
+					lines: [],
+					history: current,
+					confirmation: null,
+					confirmKind: null,
+					message: null
+				}
+			}
+		}).body;
+		assert.equal(currentHtml.split('Roll back').length - 1, 1);
+		assert.equal(currentHtml.includes(shortDigest(digest('b')) ?? ''), true);
+		assert.equal(currentHtml.includes(`value="${digest('a')}"`), false);
+	});
+
+	test('the settings tab loads env sets and registries only while that tab is open', async () => {
+		function answer(call: { url: URL }) {
+			const path = call.url.pathname;
+			if (path === `/v1/projects/${PROJECT.id}`) return envelope({ ...PROJECT, role: 'admin' });
+			if (path === `/v1/projects/${PROJECT.id}/hosts`) return envelope({ items: [host()], next_cursor: null });
+			if (path === `/v1/projects/${PROJECT.id}/members`) return envelope({ items: [], next_cursor: null });
+			if (path.endsWith('/join-tokens') || path.endsWith('/invites')) return envelope({ items: [], next_cursor: null });
+			if (path === `/v1/projects/${PROJECT.id}/env-sets`) {
+				return envelope({
+					items: [{ name: 'app', keys: [{ key: 'API_TOKEN', is_secret: true, value: SECRET }], updated_at: '2026-10-14T00:00:00Z', updated_by: USER.id }]
+				});
+			}
+			if (path === `/v1/projects/${PROJECT.id}/registries`) {
+				return envelope({ items: [{ host: 'ghcr.io', username: 'ada', token: REGISTRY_TOKEN, updated_at: '2026-10-14T00:00:00Z', updated_by: USER.id }] });
+			}
+			return envelope(null, 500, 'error', path);
+		}
+		const catalogCalls = installFetch(answer);
+		await projectLoad(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog`,
+				session: TOKEN,
+				user: USER,
+				projects: [{ ...PROJECT, role: 'admin' }],
+				params: { id: PROJECT.id }
+			}).event as never
+		);
+		assert.equal(catalogCalls.some((call) => call.url.pathname.includes('/env-sets')), false);
+		assert.equal(catalogCalls.some((call) => call.url.pathname.includes('/registries')), false);
+		assert.equal(catalogCalls.some((call) => call.url.pathname.includes('/deploys')), false);
+
+		const viewerCalls = installFetch(answer);
+		await projectLoad(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings`,
+				session: TOKEN,
+				user: USER,
+				projects: [{ ...PROJECT, role: 'viewer' }],
+				params: { id: PROJECT.id }
+			}).event as never
+		);
+		assert.equal(viewerCalls.some((call) => call.url.pathname.includes('/env-sets')), false);
+
+		const settingsCalls = installFetch(answer);
+		const loaded = await projectLoad(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings`,
+				session: TOKEN,
+				user: USER,
+				projects: [{ ...PROJECT, role: 'admin' }],
+				params: { id: PROJECT.id }
+			}).event as never
+		);
+		assert.equal(settingsCalls.some((call) => call.url.pathname.endsWith('/env-sets')), true);
+		assert.equal(settingsCalls.some((call) => call.url.pathname.endsWith('/registries')), true);
+		assert.equal(settingsCalls.some((call) => call.url.pathname.includes('/deploys')), false);
+		const loadedJson = JSON.stringify(loaded);
+		assert.equal(loadedJson.includes(SECRET), false);
+		assert.equal(loadedJson.includes(REGISTRY_TOKEN), false);
+	});
+
+	test('the settings tab renders no secret value, and the paste and token fields start empty', async () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+		const sets: EnvSet[] = [
+			{
+				name: 'app',
+				keys: [
+					{ key: 'API_TOKEN', is_secret: true, value: SECRET },
+					{ key: 'LOG_LEVEL', is_secret: false, value: PLAIN }
+				],
+				updated_at: '2026-10-14T00:00:00Z',
+				updated_by: USER.id
+			}
+		];
+		const registries = [{ host: 'ghcr.io', username: 'ada', token: REGISTRY_TOKEN, updated_at: '2026-10-14T00:00:00Z', updated_by: USER.id }] as unknown as Registry[];
+		const html = render(SettingsSection, {
+			props: { project: PROJECT, canOwner: true, canAdmin: true, message: null, envSets: sets, registries }
+		}).body;
+		assert.equal(html.includes(SECRET), false);
+		assert.equal(html.includes(PLAIN), false);
+		assert.equal(html.includes(REGISTRY_TOKEN), false);
+		assert.equal(html.includes('API_TOKEN'), true);
+		assert.match(html, /type="password"/);
+		assert.doesNotMatch(html, /type="password"[^>]*value="[^"]+"/);
+
+		const calls = installFetch(() => envelope(null, 400, 'bad_request', `refused ${SECRET}`));
+		const saved = await projectActions.saveEnvSet(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings&/saveEnvSet`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { set: 'app', dotenv: `API_TOKEN=${SECRET}` }
+			}).event as never
+		);
+		const savedJson = JSON.stringify(saved);
+		assert.equal(savedJson.includes(SECRET), false);
+		assert.equal(actionData(saved).settingsField, 'dotenv');
+		assert.equal(actionData(saved).message?.includes('Paste the value again.'), true);
+		assert.equal(calls[0]?.body?.includes(SECRET), true);
+		installFetch(() => envelope(null, 409, 'conflict', 'env set app is referenced by web'));
+		const conflict = await projectActions.deleteEnvSet(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings&/deleteEnvSet`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { set: 'app' }
+			}).event as never
+		);
+		assert.equal(actionData(conflict).message, 'env set app is referenced by web');
+		assert.equal(actionData(conflict).settingsField ?? null, null);
+		assert.equal(actionData(conflict).message?.includes('Paste the value again.'), false);
+	});
+
+	test('deploy is offered for an image entry only when my_actions includes it', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const hidden = render(CatalogSection, {
+			props: {
+				canOwner: true,
+				entries: [imageEntry(['logs'])],
+				omitted: 0,
+				truncated: false,
+				message: null,
+				hosts: [host()],
+				members: []
+			}
+		}).body;
+		assert.equal(hidden.includes('Deploy web'), false);
+		const shown = render(CatalogSection, {
+			props: {
+				canOwner: false,
+				entries: [imageEntry(['deploy', 'logs'])],
+				omitted: 0,
+				truncated: false,
+				message: null,
+				hosts: [host()],
+				members: [],
+				permissions: { name: 'web', grants: [], message: null, loaded: true }
+			}
+		}).body;
+		assert.equal(shown.includes('Deploy web'), true);
+		assert.equal(shown.includes('admin_deploy'), true);
+		const program = render(CatalogSection, {
+			props: {
+				canOwner: true,
+				entries: [programEntry()],
+				omitted: 0,
+				truncated: false,
+				message: null,
+				hosts: [host()],
+				members: [],
+				permissions: { name: 'web', grants: [], message: null, loaded: true }
+			}
+		}).body;
+		assert.equal(program.includes('admin_deploy'), false);
+		const form = render(CatalogPermissionsForm, {
+			props: { action: '?/catalogPermissions', name: 'web', grants: [], members: [], loaded: true, includeDeploy: false }
+		}).body;
+		assert.equal(form.includes('admin_deploy'), false);
+	});
+
+	test('an owned container row shows its name and short digest', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+		const row: ProjectServiceRow = {
+			id: '00000000-0000-4000-8000-0000000000bb',
+			name: 'port-80',
+			source: 'owned',
+			kind: 'container',
+			ports: [80],
+			health: null,
+			last_seen_at: null,
+			gone_at: null,
+			display_name: 'Web',
+			owner_user: 'root',
+			project_id: PROJECT.id,
+			host_id: HOST_ID,
+			host_name: 'pi1',
+			host_status: 'online',
+			project_name: 'Lab',
+			catalog_entry: 'web',
+			container_name: 'web-1',
+			image_digest: digest('a'),
+			checks: [],
+			checksMessage: null
+		};
+		const owned = render(ServicesSection, {
+			props: {
+				projectId: PROJECT.id,
+				projectName: 'Lab',
+				hosts: [host()],
+				canAdmin: false,
+				rows: [row],
+				total: 1,
+				prevCursor: null,
+				nextCursor: null,
+				omitted: 0,
+				message: null,
+				probe: null,
+				probeServiceId: null,
+				renameServiceId: null,
+				typedName: null
+			}
+		}).body;
+		assert.equal(owned.includes('web-1'), true);
+		assert.equal(owned.includes('Web'), true);
+		assert.equal(owned.includes(shortDigest(digest('a')) ?? ''), true);
+		const unnamed = { ...row, display_name: null };
+		const once = render(ServicesSection, {
+			props: {
+				projectId: PROJECT.id,
+				projectName: 'Lab',
+				hosts: [host()],
+				canAdmin: false,
+				rows: [unnamed],
+				total: 1,
+				prevCursor: null,
+				nextCursor: null,
+				omitted: 0,
+				message: null,
+				probe: null,
+				probeServiceId: null,
+				renameServiceId: null,
+				typedName: null
+			}
+		}).body;
+		assert.equal(once.split('web-1').length - 1, 1);
+		assert.equal(once.includes(shortDigest(digest('a')) ?? ''), true);
+		const discovered = { ...row, source: 'discovered' as const, display_name: null, catalog_entry: null, image_digest: null };
+		const found = render(ServicesSection, {
+			props: {
+				projectId: PROJECT.id,
+				projectName: 'Lab',
+				hosts: [host()],
+				canAdmin: false,
+				rows: [discovered],
+				total: 1,
+				prevCursor: null,
+				nextCursor: null,
+				omitted: 0,
+				message: null,
+				probe: null,
+				probeServiceId: null,
+				renameServiceId: null,
+				typedName: null
+			}
+		}).body;
+		assert.equal(found.includes('web-1'), true);
+		assert.equal(found.includes('port 80'), false);
+	});
+
+	test('the catalog create action posts an image spec', async () => {
+		const calls = installFetch(() => envelope({ id: ENTRY_ID }));
+		await assert.rejects(
+			async () => {
+				await projectActions.catalogCreate(
+					fakeEvent({
+						url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogCreate`,
+						session: TOKEN,
+						user: USER,
+						projects: [PROJECT],
+						params: { id: PROJECT.id },
+						form: {
+							entry_kind: 'image',
+							name: 'web',
+							workload: 'service',
+							image: 'ghcr.io/acme/web:1',
+							restart: 'unless-stopped',
+							healthy_after_sec: '40',
+							command: '',
+							port_host: '8080',
+							port_container: '80',
+							port_public: '1'
+						}
+					}).event as never
+				);
+			},
+			(err: unknown) => isRedirect(err) && err.status === 303
+		);
+		const body = JSON.parse(calls.find((call) => call.method === 'POST')?.body ?? '{}') as {
+			kind?: string;
+			spec?: { command?: unknown; memory_mb?: unknown; ports?: unknown };
+		};
+		assert.equal(body.kind, 'image');
+		assert.equal(body.spec?.command, null);
+		assert.equal(body.spec?.memory_mb, null);
+		assert.deepEqual(body.spec?.ports, [{ host: 8080, container: 80, public: false }]);
+	});
+
+	test('admins see settings, and the container button stays with the owner', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const data = {
+			project: { ...PROJECT, role: 'admin' as const },
+			userId: USER.id,
+			message: null,
+			tab: 'catalog' as const,
+			canAdmin: true,
+			canOwner: false,
+			hosts: [host()],
+			hostsOmitted: 0,
+			hostsTruncated: false,
+			hostsMessage: null,
+			members: [],
+			membersOmitted: 0,
+			membersTruncated: false,
+			membersMessage: null,
+			tokens: [],
+			tokensOmitted: 0,
+			tokensTruncated: false,
+			tokensMessage: null,
+			invites: [],
+			invitesOmitted: 0,
+			invitesTruncated: false,
+			invitesMessage: null,
+			catalog: [],
+			catalogOmitted: 0,
+			catalogTruncated: false,
+			catalogMessage: null,
+			permissions: null,
+			envSets: [],
+			envSetsMessage: null,
+			registries: [],
+			registriesMessage: null,
+			services: [],
+			servicesTotal: 0,
+			servicesPrev: null,
+			servicesNext: null,
+			servicesOmitted: 0,
+			servicesMessage: null
+		};
+		const admin = render(ProjectPage, { props: { data: data as never, form: null } }).body;
+		assert.equal(admin.includes('>Settings<'), true);
+		assert.equal(admin.includes('Container'), false);
+		assert.equal(admin.includes('New service'), false);
+	});
+
+	test('a secret env value is blanked before a failed save returns the draft', async () => {
+		const calls = installFetch(() => envelope(null, 500, 'error', `echo ${SECRET}`));
+		const form = {
+			entry_kind: 'image',
+			name: 'web',
+			workload: 'service',
+			image: 'ghcr.io/acme/web:1',
+			env_key: 'API_TOKEN',
+			env_value: SECRET,
+			restart: 'unless-stopped'
+		};
+		const base = {
+			session: TOKEN,
+			user: USER,
+			projects: [PROJECT],
+			params: { id: PROJECT.id }
+		};
+		const created = await projectActions.catalogCreate(
+			fakeEvent({ ...base, url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogCreate`, form }).event as never
+		);
+		assert.equal(calls.length, 0);
+		const editor = actionData(created).imageEditor;
+		assert.equal(editor?.field, 'env');
+		assert.equal(editor?.draft.env[0]?.value, '');
+		assert.equal(JSON.stringify(created).includes(SECRET), false);
+		const updated = await projectActions.catalogUpdate(
+			fakeEvent({
+				...base,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogUpdate`,
+				form: { ...form, entry_name: 'web', editor_mode: 'edit' }
+			}).event as never
+		);
+		assert.equal(actionData(updated).imageEditor?.draft.env[0]?.value, '');
+		assert.equal(JSON.stringify(updated).includes(SECRET), false);
+	});
+
+	test('a short registry token is redacted and the failure sits on that form', async () => {
+		const token = 's3cret!';
+		installFetch(() => envelope(null, 400, 'bad_request', `refused ${token}`));
+		const saved = await projectActions.saveRegistry(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings&/saveRegistry`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { host: 'ghcr.io', username: 'ada', token }
+			}).event as never
+		);
+		const data = actionData(saved);
+		assert.equal(data.settingsField, 'token');
+		assert.equal(data.message, 'refused [redacted] Paste the value again.');
+		assert.equal(JSON.stringify(saved).includes(token), false);
+		assert.equal(redactSubmitted('abc stays', ['ab']), 'abc stays');
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+		const html = render(SettingsSection, {
+			props: {
+				project: PROJECT,
+				canOwner: true,
+				canAdmin: true,
+				message: data.message ?? null,
+				settingsField: 'token',
+				envSets: [],
+				registries: []
+			}
+		}).body;
+		const tokenAt = html.indexOf('id="registry-token"');
+		const errorAt = html.indexOf('id="registry-token-error"');
+		assert.equal(tokenAt >= 0 && errorAt > tokenAt, true);
+		assert.equal(html.includes('Paste the value again.'), true);
+		assert.equal(html.includes(token), false);
+		assert.match(html, /id="registry-token-error"[^>]*tabindex="-1"/);
+		assert.match(html, /id="registry-token-error"[^>]*break-words/);
+		assert.match(html, /id="registry-token-error"[^>]*focus-visible:ring-3/);
+		assert.doesNotMatch(html, /id="registry-token-error"[^>]*outline-none/);
+		assert.equal(html.includes('aria-describedby="registry-token-error"'), true);
+		assert.equal(html.includes('aria-invalid="true"'), true);
+		assert.doesNotMatch(html, /type="password"[^>]*value="[^"]+"/);
+		const dotenvHtml = render(SettingsSection, {
+			props: {
+				project: PROJECT,
+				canOwner: true,
+				canAdmin: true,
+				message: 'Could not save the env set. Paste the value again.',
+				settingsField: 'dotenv',
+				envSets: [
+					{
+						name: 'app',
+						keys: [{ key: 'A'.repeat(64), is_secret: true, value: null }],
+						updated_at: '2026-10-14T00:00:00Z',
+						updated_by: USER.id
+					}
+				],
+				registries: []
+			}
+		}).body;
+		const dotenvAt = dotenvHtml.indexOf('id="env-set-dotenv"');
+		const dotenvError = dotenvHtml.indexOf('id="env-set-error"');
+		const registriesAt = dotenvHtml.indexOf('>Registries<');
+		assert.equal(dotenvAt >= 0 && dotenvError > dotenvAt && registriesAt > dotenvError, true);
+		assert.match(dotenvHtml, /<textarea[^>]*text-base/);
+		assert.match(dotenvHtml, new RegExp(`break-all[^>]*>${'A'.repeat(64)}`));
+		assert.match(dotenvHtml, /id="env-set-error"[^>]*focus-visible:ring-3/);
+		assert.doesNotMatch(dotenvHtml, /id="env-set-error"[^>]*outline-none/);
+		assert.equal(dotenvHtml.includes('aria-describedby="env-set-error"'), true);
+		assert.equal(dotenvHtml.includes(SECRET), false);
+	});
+
+	test('clearSecretField blanks the value before the result is applied', async () => {
+		let value = SECRET;
+		let during = 'still-set';
+		await clearSecretField(
+			(next) => {
+				value = next;
+			},
+			async () => {
+				during = value;
+			}
+		);
+		assert.equal(during, '');
+		assert.equal(value, '');
+	});
+
+	test('an image validation error is rendered on that field', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const message = 'Enter an image reference, such as ghcr.io/acme/web:1.';
+		const draft = blankImageDraft();
+		draft.image = 'not an image';
+		const html = render(CatalogImageForm, {
+			props: {
+				mode: 'create',
+				saveAction: '?/catalogCreate',
+				sets: [],
+				editor: { mode: 'create', name: null, draft, field: 'image', message }
+			}
+		}).body;
+		const imageAt = html.indexOf('id="catalog-image-new-image"');
+		const errorAt = html.indexOf(message);
+		const commandAt = html.indexOf('>Command<');
+		assert.equal(imageAt >= 0 && errorAt > imageAt && commandAt > errorAt, true);
+		assert.match(html, /id="catalog-image-new-image"[^>]*aria-invalid="true"/);
+		assert.match(html, /id="catalog-image-new-error"[^>]*tabindex="-1"/);
+		assert.match(html, /aria-pressed="true">(?:<!---->)?Service/);
+		assert.match(html, /aria-pressed="false">(?:<!---->)?Job/);
+		assert.equal(html.includes('No env sets yet'), false);
+		assert.equal(html.includes('Loading env sets…'), true);
+		const ready = render(CatalogImageForm, {
+			props: { mode: 'create', saveAction: '?/catalogCreate', sets: [], setsStatus: 'ready', editor: null }
+		}).body;
+		assert.equal(ready.includes('No env sets yet.'), true);
+		const failedSets = render(CatalogImageForm, {
+			props: {
+				mode: 'create',
+				saveAction: '?/catalogCreate',
+				sets: [],
+				setsStatus: 'error',
+				setsMessage: 'Env sets could not be loaded.',
+				retrySets: () => {}
+			}
+		}).body;
+		assert.equal(failedSets.includes('Env sets could not be loaded.'), true);
+		assert.equal(failedSets.includes('>Retry<'), true);
+		assert.equal(failedSets.includes('No env sets yet'), false);
+	});
+
+	test('the docker run preview in the form omits env values', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const draft = blankImageDraft();
+		draft.name = 'web';
+		draft.image = 'nginx';
+		draft.env = [{ key: 'PORT', value: '3000' }];
+		draft.envSets = ['app'];
+		draft.secrets = [{ key: 'API_TOKEN', set: 'app', name: 'API_TOKEN' }];
+		draft.entrypoint = ['/bin/sh', '-c'];
+		const html = render(CatalogImageForm, {
+			props: {
+				mode: 'create',
+				saveAction: '?/catalogCreate',
+				sets: [{ name: 'app', keys: ['API_TOKEN'] }],
+				setsStatus: 'ready',
+				editor: { mode: 'create', name: null, draft, field: null, message: null }
+			}
+		}).body;
+		const start = html.indexOf('aria-label="docker run preview"');
+		const preview = html.slice(start, html.indexOf('</pre>', start));
+		assert.match(preview, /-e PORT\b/);
+		assert.match(preview, /-e API_TOKEN\b/);
+		assert.equal(preview.includes('3000'), false);
+		assert.equal(preview.includes('app.API_TOKEN'), false);
+		assert.equal(preview.includes('entrypoint /bin/sh -c'), true);
+		const one = dockerRunPreview({
+			name: 'web',
+			image: 'nginx',
+			command: [],
+			entrypoint: ['/bin/sh'],
+			ports: [],
+			envKeys: [],
+			volumes: [],
+			restart: 'no',
+			user: '',
+			memoryMb: null
+		});
+		assert.equal(one.includes('--entrypoint /bin/sh'), true);
+	});
+
+	test('deploy history stays put when the action did not load a new list', () => {
+		assert.deepEqual(nextHistory(['kept'], null), ['kept']);
+		assert.deepEqual(nextHistory(['kept'], []), []);
+		assert.equal(nextIdempotencyKey({ hostId: HOST_ID, force: false, key: KEY }, { hostId: HOST_ID, force: false }, 'fresh'), KEY);
+		assert.equal(nextIdempotencyKey({ hostId: HOST_ID, force: false, key: KEY }, { hostId: 'other', force: false }, 'fresh'), 'fresh');
+		assert.equal(nextIdempotencyKey({ hostId: HOST_ID, force: false, key: KEY }, { hostId: HOST_ID, force: true }, 'fresh'), 'fresh');
+		assert.equal(nextRollbackKey({ hostId: HOST_ID, key: KEY }, HOST_ID, 'fresh'), KEY);
+		assert.equal(nextRollbackKey({ hostId: HOST_ID, key: KEY }, 'other', 'fresh'), 'fresh');
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const props = {
+			entry: imageEntry(['deploy']),
+			hosts: [host()],
+			deployAction: '?/catalogDeploy',
+			rollbackAction: '?/catalogRollback',
+			removeAction: '?/catalogRemove',
+			confirmAction: '?/catalogConfirm',
+			historyAction: '?/catalogDeploys'
+		};
+		const waiting = render(CatalogDeployForm, { props: { ...props, result: null } }).body;
+		assert.equal(waiting.includes('Loading history'), false);
+		assert.equal(waiting.includes('No deploys yet'), false);
+		const empty = render(CatalogDeployForm, {
+			props: {
+				...props,
+				result: {
+					name: 'web',
+					resultId: '00000000-0000-4000-8000-0000000000eb',
+					hostId: HOST_ID,
+					workload: 'service',
+					waitSec: 30,
+					outcome: null,
+					status: null,
+					lines: [],
+					history: [],
+					confirmation: null,
+					confirmKind: null,
+					message: null
+				}
+			}
+		}).body;
+		assert.equal(empty.includes('No deploys yet.'), true);
+		const stalled = render(CatalogDeployForm, {
+			props: {
+				...props,
+				result: {
+					name: 'web',
+					resultId: '00000000-0000-4000-8000-0000000000ec',
+					hostId: HOST_ID,
+					workload: 'service',
+					waitSec: 30,
+					outcome: null,
+					status: null,
+					lines: [],
+					history: null,
+					confirmation: null,
+					confirmKind: null,
+					message: 'Still running on the host. Check the history in a minute.'
+				}
+			}
+		}).body;
+		assert.equal(stalled.includes('Still running on the host. Check the history in a minute.'), true);
+		assert.equal(stalled.includes('>Retry<'), true);
+		assert.equal(stalled.includes('No deploys yet'), false);
+		assert.equal(stalled.includes('Loading history'), false);
+	});
+
+	test('a confirmation plan drops env values and confirm uses the long timeout', async () => {
+		const planSecret = 'plan-secret-value';
+		const confirmationId = 'A'.repeat(43);
+		const hold = spyTimeouts('hold');
+		installFetch((call) => {
+			if (call.url.pathname === `/v1/projects/${PROJECT.id}/catalog/web/deploy`) {
+				return envelope({
+					confirmation_id: confirmationId,
+					plan: `Deploy web API_TOKEN=${planSecret} on pi1`,
+					expires_at: '2026-10-14T00:00:00Z'
+				});
+			}
+			if (call.url.pathname.endsWith('/deploys')) return envelope({ items: [] });
+			if (call.url.pathname.startsWith('/v1/confirmations/')) return envelope(deployPayload());
+			return envelope(null, 500, 'error', call.url.pathname);
+		});
+		const base = {
+			session: TOKEN,
+			user: USER,
+			projects: [PROJECT],
+			params: { id: PROJECT.id }
+		};
+		const deployed = (await projectActions.catalogDeploy(
+			fakeEvent({
+				...base,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogDeploy`,
+				form: { name: 'web', host_id: HOST_ID, workload: 'service', wait_sec: '30', idempotency_key: KEY }
+			}).event as never
+		)) as { imageDeploy?: { confirmation?: { plan: string; confirmation_id: string } | null } };
+		const plan = deployed.imageDeploy?.confirmation?.plan ?? '';
+		assert.equal(plan.includes('Deploy'), true);
+		assert.equal(plan.includes('API_TOKEN'), true);
+		assert.equal(plan.includes(planSecret), false);
+		assert.equal(JSON.stringify(deployed).includes(planSecret), false);
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const html = render(CatalogDeployForm, {
+			props: {
+				entry: imageEntry(['deploy']),
+				hosts: [host()],
+				deployAction: '?/catalogDeploy',
+				rollbackAction: '?/catalogRollback',
+				removeAction: '?/catalogRemove',
+				confirmAction: '?/catalogConfirm',
+				historyAction: '?/catalogDeploys',
+				result: {
+					name: 'web',
+					resultId: '00000000-0000-4000-8000-0000000000ed',
+					hostId: HOST_ID,
+					workload: 'service',
+					waitSec: 30,
+					outcome: null,
+					status: null,
+					lines: [],
+					history: [],
+					confirmation: {
+						confirmation_id: confirmationId,
+						plan,
+						expires_at: '2026-10-14T00:00:00Z'
+					},
+					confirmKind: 'deploy',
+					message: null
+				}
+			}
+		}).body;
+		assert.equal(html.includes('>Confirm<'), true);
+		assert.equal(html.includes(planSecret), false);
+		assert.equal(html.includes(plan), true);
+		hold.restore();
+
+		const confirmHold = spyTimeouts('hold');
+		const confirmCalls = installFetch((call) => {
+			if (call.url.pathname.startsWith('/v1/confirmations/')) return envelope(deployPayload());
+			if (call.url.pathname.endsWith('/deploys')) return envelope({ items: [] });
+			return envelope(null, 500, 'error', call.url.pathname);
+		});
+		await projectActions.catalogConfirm(
+			fakeEvent({
+				...base,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogConfirm`,
+				form: {
+					name: 'web',
+					host_id: HOST_ID,
+					workload: 'service',
+					wait_sec: '40',
+					idempotency_key: KEY,
+					confirmation_id: confirmationId,
+					confirm_kind: 'deploy'
+				}
+			}).event as never
+		);
+		const post = confirmCalls.find((call) => call.method === 'POST' && call.url.pathname.startsWith('/v1/confirmations/'));
+		assert.equal(post?.url.pathname, `/v1/confirmations/${confirmationId}`);
+		assert.deepEqual(JSON.parse(post?.body ?? '{}'), { idempotency_key: KEY });
+		assert.equal(confirmHold.seen[0], 430000);
+		confirmHold.restore();
+
+		const removeHold = spyTimeouts('hold');
+		await projectActions.catalogConfirm(
+			fakeEvent({
+				...base,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogConfirm`,
+				form: {
+					name: 'web',
+					host_id: HOST_ID,
+					workload: 'service',
+					wait_sec: '40',
+					idempotency_key: KEY,
+					confirmation_id: confirmationId,
+					confirm_kind: 'remove'
+				}
+			}).event as never
+		);
+		assert.equal(removeHold.seen[0], API_TIMEOUT_MS);
+		removeHold.restore();
+
+		const abort = spyTimeouts('abort');
+		installFetch((call) => {
+			if (call.signal?.aborted) return Promise.reject(call.signal.reason instanceof Error ? call.signal.reason : new DOMException('aborted', 'AbortError'));
+			return envelope(deployPayload());
+		});
+		const failed = await projectActions.catalogConfirm(
+			fakeEvent({
+				...base,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogConfirm`,
+				form: {
+					name: 'web',
+					host_id: HOST_ID,
+					workload: 'service',
+					wait_sec: '30',
+					idempotency_key: KEY,
+					confirmation_id: confirmationId,
+					confirm_kind: 'deploy'
+				}
+			}).event as never
+		);
+		assert.equal(abort.seen.length, 1);
+		assert.equal(abort.seen[0], 420000);
+		assert.equal(actionData(failed).imageDeploy?.message, 'Still running on the host. Check the history in a minute.');
+		abort.restore();
+	});
+
+	test('image status and logs parse and post host_id only', async () => {
+		const parsedStatus = parseImageStatus(statusBody());
+		assert.equal(parsedStatus?.state, 'running');
+		assert.equal(parsedStatus?.container, 'web');
+		const parsedLogs = parseImageLogs({ container: 'web', lines: ['ready'], truncated: false });
+		assert.deepEqual(parsedLogs?.lines, ['ready']);
+		const calls = installFetch((call) => {
+			if (call.url.pathname.endsWith('/status')) return envelope(statusBody());
+			if (call.url.pathname.endsWith('/logs')) return envelope({ container: 'web', lines: ['ready'], truncated: false });
+			return envelope(null, 500, 'error', call.url.pathname);
+		});
+		const base = {
+			session: TOKEN,
+			user: USER,
+			projects: [PROJECT],
+			params: { id: PROJECT.id }
+		};
+		const status = (await projectActions.catalogStatus(
+			fakeEvent({
+				...base,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogStatus`,
+				form: { name: 'web', host_id: HOST_ID, entry_kind: 'image' }
+			}).event as never
+		)) as { catalogAction?: { status?: { state?: string; container?: string | null } | null } };
+		assert.equal(status.catalogAction?.status?.state, 'running');
+		assert.equal(status.catalogAction?.status?.container, 'web');
+		const logs = (await projectActions.catalogLogs(
+			fakeEvent({
+				...base,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogLogs`,
+				form: { name: 'web', host_id: HOST_ID, entry_kind: 'image' }
+			}).event as never
+		)) as { catalogAction?: { logs?: { lines?: string[] } | null } };
+		assert.deepEqual(logs.catalogAction?.logs?.lines, ['ready']);
+		for (const call of calls) {
+			assert.deepEqual(JSON.parse(call.body ?? '{}'), { host_id: HOST_ID });
+			assert.equal(call.body?.includes('idempotency'), false);
+		}
+		const blank = parseDeployPayload({
+			deploy: {
+				id: '00000000-0000-4000-8000-0000000000e1',
+				entry_id: ENTRY_ID,
+				host_id: HOST_ID,
+				digest: null,
+				spec_hash: HASH,
+				outcome: 'timeout',
+				exit_code: null,
+				started_at: '2026-10-14T00:00:00Z',
+				finished_at: null,
+				by: USER.id,
+				via: 'console'
+			},
+			status: {
+				container: null,
+				state: 'unknown',
+				exit_code: null,
+				restart_count: 0,
+				started_at: null,
+				finished_at: null,
+				digest: null,
+				ports: []
+			},
+			lines: []
+		});
+		assert.equal(blank?.kind, 'deploy');
+		if (blank?.kind !== 'deploy') return;
+		assert.equal(blank.status.state, 'unknown');
+		assert.equal(blank.status.container, null);
+		assert.equal(blank.deploy.outcome, 'timeout');
+		assert.equal(blank.deploy.digest, null);
+		assert.equal(parseImageStatus({ ...statusBody(), state: '' }), null);
+		assert.equal(parseImageStatus({ ...statusBody(), state: 'bogus' }), null);
+		assert.equal(parseImageStatus({ ...statusBody(), state: 'missing' })?.state, 'missing');
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const html = render(CatalogDeployForm, {
+			props: {
+				entry: imageEntry(['deploy']),
+				hosts: [host()],
+				deployAction: '?/catalogDeploy',
+				rollbackAction: '?/catalogRollback',
+				removeAction: '?/catalogRemove',
+				confirmAction: '?/catalogConfirm',
+				historyAction: '?/catalogDeploys',
+				result: {
+					name: 'web',
+					resultId: '00000000-0000-4000-8000-0000000000f3',
+					hostId: HOST_ID,
+					workload: 'service',
+					waitSec: 30,
+					outcome: deployRow('00000000-0000-4000-8000-0000000000e1', 'timeout', null),
+					status: blank.status,
+					lines: [],
+					history: [],
+					confirmation: null,
+					confirmKind: null,
+					message: null
+				}
+			}
+		}).body;
+		const unknownAt = html.indexOf('text-status-unknown');
+		assert.equal(unknownAt > 0, true);
+		const unknownBadge = html.slice(unknownAt, html.indexOf('</p>', unknownAt));
+		assert.equal(unknownBadge.includes('text-status-unknown'), true);
+		assert.equal(unknownBadge.includes('unknown<!---->'), true);
+		assert.equal(unknownBadge.includes('text-status-offline'), false);
+		assert.equal(unknownBadge.includes('missing'), false);
+		assert.equal(unknownBadge.includes('stopped'), false);
+		const runHtml = render(CatalogRunForm, {
+			props: {
+				kind: 'status',
+				entryName: 'web',
+				runAs: 'joe',
+				shell: false,
+				hosts: [host()],
+				action: '?/catalogStatus',
+				entryKind: 'image',
+				result: {
+					name: 'web',
+					kind: 'status',
+					resultId: '00000000-0000-4000-8000-0000000000f4',
+					status: blank.status,
+					logs: null,
+					message: null
+				}
+			}
+		}).body;
+		const runAt = runHtml.indexOf('text-status-unknown');
+		assert.equal(runAt > 0, true);
+		const runBadge = runHtml.slice(runAt, runHtml.indexOf('</p>', runAt));
+		assert.equal(runBadge.includes('unknown<!---->'), true);
+		assert.equal(runBadge.includes('text-status-offline'), false);
+		assert.equal(runBadge.includes('missing'), false);
+		assert.equal(runBadge.includes('stopped'), false);
+	});
+
+	test('a catalog image entry and a container digest round-trip', () => {
+		const entry = {
+			id: ENTRY_ID,
+			project_id: PROJECT.id,
+			name: 'web',
+			kind: 'image',
+			spec: {
+				kind: 'service',
+				image: 'ghcr.io/acme/web:1',
+				command: null,
+				entrypoint: null,
+				ports: [{ host: 8080, container: 80, public: false }],
+				env: { PORT: '3000' },
+				env_sets: [],
+				secret_env: {},
+				volumes: [],
+				restart: 'unless-stopped',
+				user: 'app',
+				healthy_after_sec: 30,
+				memory_mb: null,
+				timeout_sec: 600
+			},
+			spec_hash: HASH,
+			command_display: 'ghcr.io/acme/web:1',
+			created_by: USER.id,
+			created_at: '2026-10-14T00:00:00Z',
+			updated_at: '2026-10-14T00:00:00Z',
+			my_actions: ['deploy']
+		};
+		const parsed = parseCatalogEntry(entry);
+		assert.equal(parsed?.kind, 'image');
+		if (parsed?.kind !== 'image') return;
+		assert.equal(parsed.spec.image, 'ghcr.io/acme/web:1');
+		assert.equal(parsed.spec.command, null);
+		assert.equal(parsed.spec.restart, 'unless-stopped');
+		assert.equal(parsed.spec.user, 'app');
+		assert.deepEqual(parsed.spec.ports, [{ host: 8080, container: 80, public: false }]);
+		assert.deepEqual(parsed.spec.env, { PORT: '3000' });
+		const job = parseCatalogEntry({
+			...entry,
+			spec: { ...entry.spec, kind: 'job', restart: 'unless-stopped' }
+		});
+		assert.equal(job, null);
+		const service = {
+			id: '00000000-0000-4000-8000-0000000000bb',
+			name: 'web-1',
+			source: 'owned',
+			kind: 'container',
+			ports: [80],
+			health: null,
+			container_name: 'web-1',
+			image_digest: digest('a')
+		};
+		const row = parseService(service);
+		assert.equal(row?.container_name, 'web-1');
+		assert.equal(row?.image_digest, digest('a'));
+		assert.equal(parseService({ ...service, image_digest: 'sha256:nope' }), null);
+		assert.equal(parseService({ ...service, container_name: undefined, image_digest: undefined })?.container_name, null);
+	});
+
+	test('a stored service with timeout 0 stays in the catalog list', () => {
+		const spec = {
+			env: { FOO: 'bar' },
+			kind: 'service',
+			user: '',
+			image: 'docker.io/library/nginx:1.27',
+			ports: [{ host: 8088, public: false, container: 80 }],
+			command: null,
+			restart: 'unless-stopped',
+			volumes: [],
+			env_sets: [],
+			memory_mb: null,
+			entrypoint: null,
+			secret_env: {},
+			timeout_sec: 0,
+			healthy_after_sec: 30
+		};
+		const parsed = parseImageSpec(spec);
+		assert.equal(parsed?.kind, 'service');
+		if (!parsed || parsed.kind !== 'service') return;
+		assert.equal(parsed.image, 'docker.io/library/nginx:1.27');
+		assert.equal(parsed.timeout_sec, 0);
+		assert.equal(parsed.healthy_after_sec, 30);
+		assert.equal(parsed.user, '');
+		assert.equal(parsed.restart, 'unless-stopped');
+		assert.equal(parsed.command, null);
+		assert.equal(parsed.entrypoint, null);
+		assert.deepEqual(parsed.ports, [{ host: 8088, container: 80, public: false }]);
+		assert.deepEqual(parsed.env, { FOO: 'bar' });
+		const list = parseCatalogList({
+			items: [
+				{
+					id: ENTRY_ID,
+					project_id: PROJECT.id,
+					name: 'web',
+					kind: 'image',
+					spec,
+					spec_hash: HASH,
+					command_display: 'docker.io/library/nginx:1.27',
+					created_by: USER.id,
+					created_at: '2026-10-14T00:00:00Z',
+					updated_at: '2026-10-14T00:00:00Z',
+					my_actions: ['deploy']
+				}
+			],
+			next_cursor: null
+		});
+		assert.equal(list?.omitted, 0);
+		assert.equal(list?.items.length, 1);
+		assert.equal(list?.items[0]?.kind, 'image');
+		const job = parseImageSpec({ ...spec, kind: 'job', restart: 'no', timeout_sec: 600, healthy_after_sec: 0 });
+		assert.equal(job?.kind, 'job');
+		if (!job || job.kind !== 'job') return;
+		assert.equal(job.healthy_after_sec, 0);
+		assert.equal(job.timeout_sec, 600);
+		assert.equal(job.restart, 'no');
+		assert.equal(job.image, 'docker.io/library/nginx:1.27');
+		const serviceWithoutTimeout: Record<string, unknown> = { ...spec };
+		delete serviceWithoutTimeout.timeout_sec;
+		const omittedTimeout = parseImageSpec(serviceWithoutTimeout);
+		assert.equal(omittedTimeout?.kind, 'service');
+		assert.equal(omittedTimeout?.timeout_sec, 0);
+		assert.equal(omittedTimeout?.healthy_after_sec, 30);
+		const jobWithoutHealthy: Record<string, unknown> = { ...spec, kind: 'job', restart: 'no', timeout_sec: 600 };
+		delete jobWithoutHealthy.healthy_after_sec;
+		const omittedHealthy = parseImageSpec(jobWithoutHealthy);
+		assert.equal(omittedHealthy?.kind, 'job');
+		assert.equal(omittedHealthy?.healthy_after_sec, 0);
+		assert.equal(omittedHealthy?.timeout_sec, 600);
+		assert.equal(parseImageSpec({ ...spec, healthy_after_sec: 4 }), null);
+		assert.equal(parseImageSpec({ ...spec, kind: 'job', restart: 'no', timeout_sec: 9, healthy_after_sec: 0 }), null);
+		assert.equal(parseImageSpec({ ...spec, kind: 'job', restart: 'no', timeout_sec: 0, healthy_after_sec: 0 }), null);
+		assert.equal(parseImageSpec({ ...spec, timeout_sec: -1 }), null);
+	});
+
+	test('an image permissions save can grant deploy', async () => {
+		const memberId = '00000000-0000-4000-8000-0000000000d1';
+		const calls = installFetch((call) => {
+			if (call.url.pathname.endsWith('/members')) {
+				return envelope({
+					items: [{ user_id: memberId, email: 'bea@example.com', name: 'Bea', role: 'admin', created_at: '2026-10-13T00:00:00Z' }],
+					next_cursor: null
+				});
+			}
+			return envelope({ grants: [] });
+		});
+		const base = {
+			session: TOKEN,
+			user: USER,
+			projects: [PROJECT],
+			params: { id: PROJECT.id }
+		};
+		await assert.rejects(
+			async () => {
+				await projectActions.catalogPermissions(
+					fakeEvent({
+						...base,
+						url: `http://console.example/projects/${PROJECT.id}?tab=catalog&permissions=web&/catalogPermissions`,
+						form: { name: 'web', entry_kind: 'image', admin_deploy: '1', admin_logs: '1' }
+					}).event as never
+				);
+			},
+			(err: unknown) => isRedirect(err) && err.status === 303
+		);
+		const put = calls.find((call) => call.method === 'PUT');
+		assert.deepEqual(JSON.parse(put?.body ?? ''), { grants: [{ subject: 'role:admin', actions: ['logs', 'deploy'] }] });
+		const plain = installFetch((call) => {
+			if (call.url.pathname.endsWith('/members')) return envelope({ items: [], next_cursor: null });
+			return envelope({ grants: [] });
+		});
+		await assert.rejects(
+			async () => {
+				await projectActions.catalogPermissions(
+					fakeEvent({
+						...base,
+						url: `http://console.example/projects/${PROJECT.id}?tab=catalog&permissions=web&/catalogPermissions`,
+						form: { name: 'web', admin_deploy: '1', admin_logs: '1' }
+					}).event as never
+				);
+			},
+			(err: unknown) => isRedirect(err) && err.status === 303
+		);
+		const programPut = plain.find((call) => call.method === 'PUT');
+		assert.deepEqual(JSON.parse(programPut?.body ?? ''), { grants: [{ subject: 'role:admin', actions: ['logs'] }] });
+	});
+
+	test('a history response for another host is ignored', () => {
+		assert.equal(acceptHostHistory('host-b', 'host-a', 'host-a'), 'ignore');
+		assert.equal(acceptHostHistory('host-b', 'host-b', 'host-a'), 'ignore');
+		assert.equal(acceptHostHistory('host-b', 'host-b', 'host-b'), 'accept');
+		assert.equal(acceptHostHistory('host-b', 'host-b', null), 'missing');
+		assert.equal(acceptHostHistory('', 'host-b', 'host-b'), 'ignore');
+		assert.equal(switchedHistoryHost('host-a', 'host-b'), true);
+		assert.equal(switchedHistoryHost('', 'host-a'), false);
+		assert.equal(switchedHistoryHost('host-a', 'host-a'), false);
+		const listed = { history: [digest('a')], ready: true, pending: false, error: null, listedHost: 'host-a' };
+		const switched = historyAfterSwitch('host-a', 'host-b', listed);
+		assert.equal(switched.switched, true);
+		assert.deepEqual(switched.history, []);
+		assert.equal(switched.ready, false);
+		assert.equal(switched.pending, true);
+		assert.equal(switched.error, null);
+		const cleared = { history: switched.history, ready: switched.ready, pending: switched.pending, error: switched.error, listedHost: 'host-a' };
+		const late = applyHistoryResponse(cleared, 'host-b', 'host-a', 'host-a', [digest('a')], null);
+		assert.deepEqual(late.history, []);
+		assert.equal(late.ready, false);
+		assert.equal(late.pending, true);
+		const wrongHost = applyHistoryResponse(cleared, 'host-b', 'host-b', 'host-a', [digest('a')], null);
+		assert.deepEqual(wrongHost.history, []);
+		assert.equal(wrongHost.ready, false);
+		const accepted = applyHistoryResponse(cleared, 'host-b', 'host-b', 'host-b', [digest('b')], null);
+		assert.deepEqual(accepted.history, [digest('b')]);
+		assert.equal(accepted.ready, true);
+		assert.equal(accepted.pending, false);
+		assert.equal(accepted.listedHost, 'host-b');
+		const missing = applyHistoryResponse(
+			{ history: ['kept'], ready: true, pending: false, error: null, listedHost: 'host-b' },
+			'host-b',
+			'host-b',
+			null,
+			['other'],
+			null
+		);
+		assert.deepEqual(missing.history, ['kept']);
+		assert.equal(missing.ready, true);
+		assert.equal(missing.pending, false);
+		assert.equal(missing.error, 'History could not be loaded.');
+		const first = historyAfterSwitch('', 'host-a', { history: ['kept'], ready: true, pending: false, error: null });
+		assert.equal(first.switched, false);
+		assert.deepEqual(first.history, ['kept']);
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const waiting = render(CatalogDeployForm, {
+			props: {
+				entry: imageEntry(['deploy']),
+				hosts: [host()],
+				deployAction: '?/catalogDeploy',
+				rollbackAction: '?/catalogRollback',
+				removeAction: '?/catalogRemove',
+				confirmAction: '?/catalogConfirm',
+				historyAction: '?/catalogDeploys',
+				result: null
+			}
+		}).body;
+		assert.equal(waiting.split('Roll back').length - 1, 0);
+		assert.equal(waiting.includes('Loading history'), false);
+	});
+
+	test('history is read for a host that cannot deploy', () => {
+		assert.equal(historyNotice({ hostCount: 0, pending: true, ready: false, count: 0 }), 'no-hosts');
+		assert.equal(historyNotice({ hostCount: 1, pending: false, ready: false, count: 0 }), 'quiet');
+		assert.equal(historyNotice({ hostCount: 1, pending: true, ready: false, count: 0 }), 'loading');
+		assert.equal(historyNotice({ hostCount: 1, pending: false, ready: true, count: 0 }), 'empty');
+		assert.deepEqual(historyFetch('', '', true), { submit: false, pending: false });
+		assert.deepEqual(historyFetch(HOST_ID, '', true), { submit: true, pending: true });
+		assert.deepEqual(historyFetch(HOST_ID, HOST_ID, true), { submit: false, pending: false });
+		assert.deepEqual(historyFetch(HOST_ID, '', false), { submit: false, pending: false });
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const second = '00000000-0000-4000-8000-0000000000ab';
+		const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: true };
+		const blockedHost = { ...host(), programs };
+		const openHost = { ...host(), id: second, name: 'pi2', programs: { ...programs, images: true, docker: true } };
+		const props = {
+			entry: imageEntry(['deploy']),
+			deployAction: '?/catalogDeploy',
+			rollbackAction: '?/catalogRollback',
+			removeAction: '?/catalogRemove',
+			confirmAction: '?/catalogConfirm',
+			historyAction: '?/catalogDeploys'
+		};
+		function buttons(html: string): string[] {
+			return [...html.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)].map((match) => match[0]);
+		}
+		function control(html: string, label: string): string {
+			const found = buttons(html).find((tag) => tag.includes(label));
+			assert.equal(found != null, true, label);
+			return found ?? '';
+		}
+		function markedDisabled(tag: string): boolean {
+			const open = tag.slice(0, tag.indexOf('>') + 1);
+			return /\sdisabled(?:=|\s|>)/.test(open);
+		}
+		const blocked = render(CatalogDeployForm, { props: { ...props, hosts: [blockedHost, openHost], result: null } }).body;
+		const radios = buttons(blocked).filter((tag) => tag.includes('role="radio"'));
+		assert.equal(radios.length, 2);
+		assert.equal(radios[0]?.includes('aria-checked="true"'), true);
+		assert.equal(radios[0]?.includes('pi1'), true);
+		assert.equal(markedDisabled(radios[0] ?? ''), false);
+		assert.equal(radios[1]?.includes('aria-checked="false"'), true);
+		assert.equal(radios[1]?.includes('pi2'), true);
+		assert.equal(markedDisabled(radios[1] ?? ''), false);
+		assert.equal(blocked.includes('pi1: This host does not run containers.'), true);
+		assert.equal(blocked.includes('pi2: This host does not run containers.'), false);
+		assert.equal(blocked.includes(`value="${HOST_ID}"`), true);
+		assert.equal(blocked.includes(`value="${second}"`), false);
+		assert.equal(blocked.includes('Loading history'), false);
+		assert.equal(blocked.includes('No hosts in this project.'), false);
+		assert.equal(markedDisabled(control(blocked, 'Deploy')), true);
+		assert.equal(markedDisabled(control(blocked, 'Remove')), true);
+		const open = render(CatalogDeployForm, { props: { ...props, hosts: [openHost], result: null } }).body;
+		assert.equal(markedDisabled(control(open, 'Deploy')), false);
+		assert.equal(markedDisabled(control(open, 'Remove')), false);
+		assert.equal(open.includes('Loading history'), false);
+		const listed = render(CatalogDeployForm, {
+			props: {
+				...props,
+				hosts: [blockedHost],
+				result: {
+					name: 'web',
+					resultId: '00000000-0000-4000-8000-0000000000f2',
+					hostId: HOST_ID,
+					workload: 'service' as const,
+					waitSec: 30,
+					outcome: null,
+					status: null,
+					lines: [],
+					history: [deployRow('00000000-0000-4000-8000-0000000000e2', 'succeeded', digest('a')), deployRow('00000000-0000-4000-8000-0000000000e3', 'succeeded', digest('b'))],
+					confirmation: null,
+					confirmKind: null,
+					message: null
+				}
+			}
+		}).body;
+		assert.equal(markedDisabled(control(listed, 'Roll back to')), true);
+		assert.equal(markedDisabled(control(listed, 'Deploy')), true);
+		assert.equal(markedDisabled(control(listed, 'Remove')), true);
+		const none = render(CatalogDeployForm, { props: { ...props, hosts: [], result: null } }).body;
+		assert.equal(none.includes('No hosts in this project.'), true);
+		assert.equal(none.includes('Loading history'), false);
+		const flying = render(CatalogDeployForm, { props: { ...props, hosts: [blockedHost], result: null, historyInFlight: true } }).body;
+		assert.equal(flying.includes('Loading history…'), true);
+		assert.equal(flying.includes('No hosts in this project.'), false);
+		const stuck = render(CatalogDeployForm, { props: { ...props, hosts: [], result: null, historyInFlight: true } }).body;
+		assert.equal(stuck.includes('No hosts in this project.'), true);
+		assert.equal(stuck.includes('Loading history'), false);
+	});
+
+	test('deploy notices wrap and remove waits for a host', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const longRef = `ghcr.io/${'a'.repeat(200)}/web:1`;
+		const message = `Could not deploy ${longRef}`;
+		const plan = `Plan ${longRef}`;
+		const longHost = 'h'.repeat(80);
+		const props = {
+			entry: imageEntry(['deploy']),
+			deployAction: '?/catalogDeploy',
+			rollbackAction: '?/catalogRollback',
+			removeAction: '?/catalogRemove',
+			confirmAction: '?/catalogConfirm',
+			historyAction: '?/catalogDeploys'
+		};
+		const html = render(CatalogDeployForm, {
+			props: {
+				...props,
+				hosts: [{ ...host(), name: longHost }],
+				result: {
+					name: 'web',
+					resultId: '00000000-0000-4000-8000-0000000000ee',
+					hostId: HOST_ID,
+					workload: 'service' as const,
+					waitSec: 30,
+					outcome: null,
+					status: null,
+					lines: [],
+					history: [],
+					confirmation: { confirmation_id: 'A'.repeat(43), plan, expires_at: '2026-10-14T00:00:00Z' },
+					confirmKind: 'deploy' as const,
+					message
+				}
+			}
+		}).body;
+		const messageAt = html.indexOf(message);
+		const planAt = html.indexOf(plan);
+		assert.equal(messageAt > 0 && html.slice(Math.max(0, messageAt - 500), messageAt).includes('break-words'), true);
+		assert.equal(planAt > 0 && html.slice(Math.max(0, planAt - 500), planAt).includes('break-words'), true);
+		const radios = [...html.matchAll(/<button\b[^>]*>/g)].map((match) => match[0]).filter((tag) => tag.includes('role="radio"'));
+		assert.equal(radios.some((tag) => tag.includes('break-all') && tag.includes('whitespace-normal')), true);
+		assert.equal(html.includes(longHost), true);
+		assert.equal(html.includes('Remove'), true);
+		const blocked = render(CatalogDeployForm, {
+			props: { ...props, hosts: [{ ...host(), programs: null }], result: null }
+		}).body;
+		assert.equal(blocked.includes('Loading history'), false);
+		assert.equal(blocked.includes('This host does not run containers.'), true);
+		const unnamed = render(CatalogDeployForm, {
+			props: {
+				...props,
+				hosts: [host()],
+				result: {
+					name: 'web',
+					resultId: '00000000-0000-4000-8000-0000000000ef',
+					hostId: '00000000-0000-4000-8000-0000000000ff',
+					workload: 'service' as const,
+					waitSec: 30,
+					outcome: null,
+					status: null,
+					lines: [],
+					history: null,
+					confirmation: null,
+					confirmKind: null,
+					message: null
+				}
+			}
+		}).body;
+		assert.equal(unnamed.includes('Remove'), false);
+		const runHtml = render(CatalogRunForm, {
+			props: {
+				kind: 'run',
+				entryName: 'web',
+				runAs: 'joe',
+				shell: false,
+				hosts: [host()],
+				action: '?/catalogRun',
+				entryKind: 'image',
+				result: {
+					name: 'web',
+					kind: 'run',
+					resultId: '00000000-0000-4000-8000-0000000000f1',
+					status: null,
+					logs: null,
+					message: `Run failed for ${longRef}`
+				}
+			}
+		}).body;
+		const runAt = runHtml.indexOf(longRef);
+		assert.equal(runAt > 0 && runHtml.slice(Math.max(0, runAt - 500), runAt).includes('break-words'), true);
+		assert.equal([...runHtml.matchAll(/<button\b[^>]*>/g)].some((match) => match[0].includes('role="radio"') && match[0].includes('break-all')), true);
+	});
+
+	test('an image field error names its control and env set names wrap when ready', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const message = 'Enter an image reference, such as ghcr.io/acme/web:1.';
+		const draft = blankImageDraft();
+		draft.image = 'not an image';
+		const setName = 'a'.repeat(48);
+		const secretKey = 'A'.repeat(64);
+		draft.secrets = [{ key: 'API_TOKEN', set: setName, name: secretKey }];
+		draft.volumes = [{ name: 'data', target: '/data', readOnly: false }];
+		const html = render(CatalogImageForm, {
+			props: {
+				mode: 'create',
+				saveAction: '?/catalogCreate',
+				sets: [{ name: setName, keys: [secretKey] }],
+				setsStatus: 'ready',
+				editor: { mode: 'create', name: null, draft, field: 'image', message }
+			}
+		}).body;
+		assert.equal(html.includes('aria-describedby="catalog-image-new-error"'), true);
+		assert.match(html, /id="catalog-image-new-error"[^>]*focus-visible:ring-3/);
+		assert.doesNotMatch(html, /id="catalog-image-new-error"[^>]*outline-none/);
+		assert.match(html, new RegExp(`break-all[^>]*>${setName}`));
+		assert.match(html, /min-w-0 items-start/);
+		assert.equal(html.includes(secretKey), true);
+		assert.equal(html.includes('aria-label="Remove command argument 1"'), true);
+		assert.equal(html.includes('aria-label="Remove entrypoint argument 1"'), true);
+		assert.equal(html.includes('aria-label="Remove secret 1"'), true);
+		assert.equal(html.includes('aria-label="Remove volume 1"'), true);
+		assert.equal(html.includes('aria-label="Read only volume 1"'), true);
+		const secretRadios = [...html.matchAll(/<button\b[^>]*>/g)].map((match) => match[0]).filter((tag) => tag.includes('role="radio"'));
+		assert.equal(secretRadios.some((tag) => tag.includes('break-all') && tag.includes('whitespace-normal')), true);
+		const loading = render(CatalogImageForm, {
+			props: {
+				mode: 'create',
+				saveAction: '?/catalogCreate',
+				sets: [{ name: 'gone', keys: [] }],
+				setsStatus: 'loading',
+				editor: null
+			}
+		}).body;
+		assert.equal(loading.includes('gone'), false);
+		assert.equal(loading.includes('Loading env sets…'), true);
+		assert.equal(loading.includes('No env sets yet'), false);
+	});
+});

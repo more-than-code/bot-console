@@ -5,13 +5,14 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import * as Select from '$lib/components/ui/select';
 	import Notice from '$lib/components/Notice.svelte';
-	import type { Host, ProgramStatus } from '$lib/api-types';
-	import { APPROVAL_WAIT, hostBlockReason, isCatalogHost, reuseIdempotencyKey } from '$lib/catalog';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import type { Host, ImageStatus, ProgramStatus } from '$lib/api-types';
+	import { APPROVAL_WAIT, hostBlockReason, imageHostBlockReason, isCatalogHost, reuseIdempotencyKey } from '$lib/catalog';
+	import { shortDigest } from '$lib/image-spec';
 	import type { CatalogRunKind, CatalogRunState } from '$lib/project-action';
 
-	const LABELS = { run: 'Run', stop: 'Stop', restart: 'Restart', logs: 'Logs' } as const;
+	const LABELS = { run: 'Run', stop: 'Stop', restart: 'Restart', logs: 'Logs', status: 'Status' } as const;
 
 	let {
 		kind,
@@ -21,6 +22,7 @@
 		hosts,
 		action,
 		result = null,
+		entryKind = 'program',
 		cancel
 	}: {
 		kind: CatalogRunKind;
@@ -30,14 +32,16 @@
 		hosts: Host[];
 		action: string;
 		result?: CatalogRunState | null;
+		entryKind?: 'program' | 'image';
 		cancel?: Snippet;
 	} = $props();
 
 	const label = $derived(LABELS[kind]);
+	const keyed = $derived(kind !== 'logs' && kind !== 'status');
 	const eligible = $derived(hosts.filter((host) => isCatalogHost(host)));
 
 	function firstHost(): string {
-		return eligible.find((host) => hostBlockReason(host, runAs, shell) == null)?.id ?? '';
+		return eligible.find((host) => reasonFor(host) == null)?.id ?? '';
 	}
 
 	let hostId = $state(untrack(firstHost));
@@ -46,17 +50,25 @@
 	let submitting = $state(false);
 
 	$effect(() => {
-		if (!browser || kind === 'logs' || idempotencyKey !== '') return;
+		if (!browser || !keyed || idempotencyKey !== '') return;
 		idempotencyKey = crypto.randomUUID();
 	});
 
-	function statusLine(status: ProgramStatus): string {
-		const pid = status.main_pid == null ? 'pid none' : `pid ${status.main_pid}`;
+	function statusLine(status: ProgramStatus | ImageStatus): string {
+		if ('active_state' in status) {
+			const pid = status.main_pid == null ? 'pid none' : `pid ${status.main_pid}`;
+			const ports = status.ports.length > 0 ? `ports ${status.ports.join(', ')}` : 'ports none';
+			return `${status.unit} ${status.active_state} (${status.sub_state}) ${pid} ${ports}`;
+		}
+		const exit = status.exit_code == null ? 'exit none' : `exit ${status.exit_code}`;
 		const ports = status.ports.length > 0 ? `ports ${status.ports.join(', ')}` : 'ports none';
-		return `${status.unit} ${status.active_state} (${status.sub_state}) ${pid} ${ports}`;
+		const digest = shortDigest(status.digest);
+		const name = status.container ?? 'unnamed';
+		return digest ? `${name} ${status.state} ${exit} restarts ${status.restart_count} ${digest}` : `${name} ${status.state} ${exit} restarts ${status.restart_count} ${ports}`;
 	}
 
 	function reasonFor(host: Host): string | null {
+		if (entryKind === 'image') return imageHostBlockReason(host);
 		return hostBlockReason(host, runAs, shell);
 	}
 </script>
@@ -66,7 +78,7 @@
 	{action}
 	class="grid gap-3"
 	use:enhance={({ formData, cancel }) => {
-		if (kind !== 'logs') {
+		if (keyed) {
 			if (submitting) {
 				cancel();
 				return async () => {};
@@ -79,7 +91,7 @@
 			try {
 				await update({ reset: false });
 			} finally {
-				if (kind === 'logs') return;
+				if (!keyed) return;
 				submitting = false;
 				if (!reuseIdempotencyKey(result.type)) idempotencyKey = crypto.randomUUID();
 			}
@@ -87,24 +99,30 @@
 	}}
 >
 	<Input type="hidden" name="name" value={entryName} />
-	{#if kind !== 'logs'}
+	{#if entryKind === 'image'}
+		<Input type="hidden" name="entry_kind" value="image" />
+	{/if}
+	{#if keyed}
 		<Input type="hidden" name="idempotency_key" value={idempotencyKey} />
 	{/if}
 	<div class="grid min-w-0 gap-1.5">
-		<Label for="{kind}-{entryName}-host">Host</Label>
-		<Select.Root type="single" name="host_id" bind:value={hostId}>
-			<Select.Trigger id="{kind}-{entryName}-host" class="w-full min-w-0">
-				<Select.Value placeholder="Choose a host" class="min-w-0 truncate">{hostLabel || 'Choose a host'}</Select.Value>
-			</Select.Trigger>
-			<Select.Content>
-				{#each eligible as host (host.id)}
-					{@const reason = reasonFor(host)}
-					<Select.Item value={host.id} disabled={reason != null} label={host.name}>
-						{host.name}
-					</Select.Item>
-				{/each}
-			</Select.Content>
-		</Select.Root>
+		<Label id="{kind}-{entryName}-host">Host</Label>
+		<div role="radiogroup" aria-labelledby="{kind}-{entryName}-host" class="grid min-w-0 gap-1">
+			{#each eligible as host (host.id)}
+				{@const reason = reasonFor(host)}
+				<Button
+					type="button"
+					role="radio"
+					variant={hostId === host.id ? 'secondary' : 'outline'}
+					aria-checked={hostId === host.id}
+					class="h-auto w-full min-w-0 justify-start text-left whitespace-normal break-all"
+					disabled={reason != null}
+					onclick={() => {
+						if (reason == null) hostId = host.id;
+					}}>{host.name}</Button>
+			{/each}
+		</div>
+		<Input type="hidden" name="host_id" value={hostId} />
 		{#each eligible as host (host.id)}
 			{@const reason = reasonFor(host)}
 			{#if reason}
@@ -113,12 +131,21 @@
 		{/each}
 	</div>
 	{#if result?.message === APPROVAL_WAIT}
-		<Notice kind="info">{result.message}</Notice>
+		<div class="max-w-full min-w-0 break-words">
+			<Notice kind="info">{result.message}</Notice>
+		</div>
 	{:else if result?.message}
-		<Notice kind="error">{result.message}</Notice>
+		<div class="max-w-full min-w-0 break-words">
+			<Notice kind="error">{result.message}</Notice>
+		</div>
 	{/if}
-	{#if result?.status}
-		<p role="status">{statusLine(result.status)}</p>
+	{#if result?.status && !('active_state' in result.status) && result.status.state === 'unknown'}
+		<p role="status" class="flex flex-wrap items-center gap-2 break-all">
+			{result.status.container ?? 'unnamed'}
+			<StatusBadge status="unknown" />
+		</p>
+	{:else if result?.status}
+		<p role="status" class="break-all">{statusLine(result.status)}</p>
 	{/if}
 	{#if result?.logs}
 		{#if result.logs.lines.length === 0}
@@ -132,7 +159,7 @@
 		{/if}
 	{/if}
 	<div class="flex flex-wrap items-center gap-2">
-		<Button type="submit" disabled={kind !== 'logs' && submitting}>{label}</Button>
+		<Button type="submit" disabled={keyed && submitting}>{label}</Button>
 		{#if cancel}
 			{@render cancel()}
 		{/if}

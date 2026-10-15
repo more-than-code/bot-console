@@ -3,7 +3,26 @@
 
 	let { status }: { status: string } = $props();
 
-	const known = ['online', 'offline', 'asleep', 'revoked', 'up', 'down', 'unknown', 'stopped', 'gone'] as const;
+	const known = [
+		'online',
+		'offline',
+		'asleep',
+		'revoked',
+		'up',
+		'down',
+		'unknown',
+		'stopped',
+		'gone',
+		'succeeded',
+		'unchanged',
+		'failed',
+		'timeout',
+		'rolled_back',
+		'rollback_failed',
+		'image_unavailable',
+		'forbidden_spec',
+		'conflict'
+	] as const;
 	const text = $derived(known.includes(status as (typeof known)[number]) ? status : 'unknown');
 
 	const tone: Record<string, string> = {
@@ -15,7 +34,16 @@
 		down: 'text-status-down',
 		unknown: 'text-status-unknown',
 		stopped: 'text-status-offline',
-		gone: 'text-status-unknown'
+		gone: 'text-status-unknown',
+		succeeded: 'text-status-up',
+		unchanged: 'text-status-up',
+		failed: 'text-status-down',
+		timeout: 'text-status-down',
+		rolled_back: 'text-status-asleep',
+		rollback_failed: 'text-status-down',
+		image_unavailable: 'text-status-down',
+		forbidden_spec: 'text-status-revoked',
+		conflict: 'text-status-offline'
 	};
 </script>
 

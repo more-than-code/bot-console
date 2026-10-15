@@ -978,6 +978,8 @@ function serviceRow(projectName: string, overrides: Partial<ProjectServiceRow> =
 		checks: [{ id: CHECK_ID, protocol: 'http', port: 80, path: '/health', enabled: true }],
 		checksMessage: null,
 		catalog_entry: null,
+		container_name: null,
+		image_digest: null,
 		...overrides
 	};
 }

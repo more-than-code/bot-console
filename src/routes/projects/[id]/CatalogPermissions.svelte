@@ -10,7 +10,8 @@
 		members,
 		message = null,
 		loaded,
-		closeHref
+		closeHref,
+		includeDeploy = false
 	}: {
 		action: string;
 		name: string;
@@ -19,6 +20,7 @@
 		message?: string | null;
 		loaded: boolean;
 		closeHref: string;
+		includeDeploy?: boolean;
 	} = $props();
 </script>
 
@@ -26,7 +28,7 @@
 	<h2 id="catalog-permissions-heading" class="text-lg font-semibold tracking-tight">Permissions for {name}</h2>
 	<p class="text-muted-foreground mb-3 text-sm">The owner always has every action. Admins, viewers, and members get only what is checked.</p>
 	{#key name}
-		<CatalogPermissionsForm {action} {name} {grants} {members} {message} {loaded}>
+		<CatalogPermissionsForm {action} {name} {grants} {members} {message} {loaded} {includeDeploy}>
 			{#snippet cancel()}
 				<Button href={closeHref} variant="outline">Cancel</Button>
 			{/snippet}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Activity from '@lucide/svelte/icons/activity';
 	import Play from '@lucide/svelte/icons/play';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import ScrollText from '@lucide/svelte/icons/scroll-text';
@@ -10,8 +11,8 @@
 	import type { CatalogRunKind, CatalogRunState } from '$lib/project-action';
 	import CatalogRunForm from './CatalogRunForm.svelte';
 
-	const ICONS = { run: Play, stop: Square, restart: RotateCw, logs: ScrollText } as const;
-	const LABELS = { run: 'Run', stop: 'Stop', restart: 'Restart', logs: 'Logs' } as const;
+	const ICONS = { run: Play, stop: Square, restart: RotateCw, logs: ScrollText, status: Activity } as const;
+	const LABELS = { run: 'Run', stop: 'Stop', restart: 'Restart', logs: 'Logs', status: 'Status' } as const;
 
 	let {
 		kind,
@@ -20,7 +21,8 @@
 		shell,
 		hosts,
 		action,
-		result = null
+		result = null,
+		entryKind = 'program'
 	}: {
 		kind: CatalogRunKind;
 		entryName: string;
@@ -29,6 +31,7 @@
 		hosts: Host[];
 		action: string;
 		result?: CatalogRunState | null;
+		entryKind?: 'program' | 'image';
 	} = $props();
 
 	const Icon = $derived(ICONS[kind]);
@@ -52,15 +55,17 @@
 			</Dialog.Trigger>
 		{/snippet}
 	</RowAction>
-	<Dialog.Content class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
-		<Dialog.Header>
-			<Dialog.Title>{label} {entryName}</Dialog.Title>
+	<Dialog.Content class="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-xl">
+		<Dialog.Header class="shrink-0 pr-8">
+			<Dialog.Title class="break-all">{label} {entryName}</Dialog.Title>
 			<Dialog.Description>Choose a host in this project, or a host shared with it at deploy.</Dialog.Description>
 		</Dialog.Header>
-		<CatalogRunForm {kind} {entryName} {runAs} {shell} {hosts} {action} {result}>
-			{#snippet cancel()}
-				<Dialog.Close type="button">Cancel</Dialog.Close>
-			{/snippet}
-		</CatalogRunForm>
+		<div class="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+			<CatalogRunForm {kind} {entryName} {runAs} {shell} {hosts} {action} {result} {entryKind}>
+				{#snippet cancel()}
+					<Dialog.Close type="button">Cancel</Dialog.Close>
+				{/snippet}
+			</CatalogRunForm>
+		</div>
 	</Dialog.Content>
 </Dialog.Root>

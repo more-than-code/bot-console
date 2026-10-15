@@ -27,7 +27,7 @@ SvelteKit 2 (not 3): config stays in `svelte.config.js`, imports use `$lib`, and
 
 ```
 src/hooks.server.ts          security headers, no-store, required BOT_API_URL, session gate, / → /projects
-src/lib/server/api.ts        bot-api-server client (Bearer, envelope, 35s timeout)
+src/lib/server/api.ts        bot-api-server client (Bearer, envelope, 35s timeout; deploy and rollback pass a longer one)
 src/lib/server/session.ts    bot_session cookie, safe next path, public routes
 src/lib/server/guard.ts      503 when BOT_API_URL is missing or invalid; require a user
 src/lib/host-view.ts         host tabs, metric series names, service and process columns, chart alignment
@@ -76,7 +76,7 @@ The app shell header is the product name, the Projects link, `ThemeSwitch`, and 
 - `DataTable` — every table, on the shadcn `table`. Sort headers and the pager are `button` links. Client sort, search, and paging are pure functions in `src/lib/table.ts`, driven by namespaced URL params (`<id>.q`, `<id>.sort`, `<id>.dir`, `<id>.page`). Server mode uses the same names plus `<id>.host` and `<id>.cursor`, and does not sort or page the rows in the browser. A column's `firstDir` is the direction used the first time that column is chosen (`asc` when omitted). Clicking the active column still toggles. Process CPU, RSS, memory, and threads open descending. Service `last_seen` opens descending. The processes table default is `defaultDir="desc"`.
 - `Tabs` — host and project link strips (`aria-current="page"`), with a Lucide icon beside the label. Not a `tablist`.
 - `PageHeader` — breadcrumbs (`breadcrumb`), title, optional subtitle and actions. Every routed page with an `h1`.
-- `StatusBadge` — `badge` plus a CSS dot. Known labels: `online`, `offline`, `asleep`, `revoked`, `up`, `down`, `unknown`, `stopped`, `gone`. `stopped` uses the offline token and `gone` uses the unknown token. Anything else renders as `unknown`. `StatusText` is gone.
+- `StatusBadge` — `badge` plus a CSS dot. Known labels: `online`, `offline`, `asleep`, `revoked`, `up`, `down`, `unknown`, `stopped`, `gone`, `succeeded`, `unchanged`, `failed`, `timeout`, `rolled_back`, `rollback_failed`, `image_unavailable`, `forbidden_spec`, `conflict`. `stopped` uses the offline token and `gone` uses the unknown token. `succeeded` and `unchanged` use the up token, `failed`, `timeout`, `rollback_failed`, and `image_unavailable` use the down token, `rolled_back` uses the asleep token, `forbidden_spec` uses the revoked token, and `conflict` uses the offline token. Anything else renders as `unknown`. `StatusText` is gone.
 - `Notice` — shadcn `alert`. `error` stays `role="alert"`. `info` and `success` are `role="status"`.
 - `SearchField` — shadcn `input` and `button`. The label is visually hidden.
 - `CopyButton` — shadcn `button` with the Copy and Check icons. It stays a text button on the join-token card.

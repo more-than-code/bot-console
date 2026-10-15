@@ -8,7 +8,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import Notice from '$lib/components/Notice.svelte';
 	import type { CatalogGrant, CatalogGrantAction, Member } from '$lib/api-types';
-	import { GRANT_ACTIONS } from '$lib/catalog';
+	import { GRANT_ACTIONS, IMAGE_GRANT_ACTIONS } from '$lib/catalog';
 
 	type Boxes = Record<CatalogGrantAction, boolean>;
 
@@ -21,6 +21,7 @@
 		members,
 		message = null,
 		loaded,
+		includeDeploy = false,
 		cancel
 	}: {
 		action: string;
@@ -29,8 +30,11 @@
 		members: Member[];
 		message?: string | null;
 		loaded: boolean;
+		includeDeploy?: boolean;
 		cancel?: Snippet;
 	} = $props();
+
+	const actions = $derived(includeDeploy ? IMAGE_GRANT_ACTIONS : GRANT_ACTIONS);
 
 	function boxesFor(subject: string): Boxes {
 		const grant = grants.find((item) => item.subject === subject);
@@ -38,7 +42,8 @@
 			run: grant?.actions.includes('run') ?? false,
 			stop: grant?.actions.includes('stop') ?? false,
 			restart: grant?.actions.includes('restart') ?? false,
-			logs: grant?.actions.includes('logs') ?? false
+			logs: grant?.actions.includes('logs') ?? false,
+			deploy: grant?.actions.includes('deploy') ?? false
 		};
 	}
 
@@ -61,7 +66,7 @@
 
 	function addMember() {
 		if (rows.length >= 100) return;
-		rows = [...rows, { user: '', run: false, stop: false, restart: false, logs: false }];
+		rows = [...rows, { user: '', run: false, stop: false, restart: false, logs: false, deploy: false }];
 	}
 
 	function removeMember(index: number) {
@@ -74,10 +79,13 @@
 		<Notice kind="error">{message}</Notice>
 	{/if}
 	<Input type="hidden" name="name" value={name} />
+	{#if includeDeploy}
+		<Input type="hidden" name="entry_kind" value="image" />
+	{/if}
 	<div class="grid gap-2">
 		<p class="text-sm font-medium">Admins</p>
 		<div class="flex flex-wrap gap-3">
-			{#each GRANT_ACTIONS as actionName (actionName)}
+			{#each actions as actionName (actionName)}
 				<Label class="flex items-center gap-2">
 					<Checkbox name="admin_{actionName}" value="1" checked={admin[actionName]} onCheckedChange={(value) => (admin[actionName] = value)} />
 					{actionName}
@@ -88,7 +96,7 @@
 	<div class="grid gap-2">
 		<p class="text-sm font-medium">Viewers</p>
 		<div class="flex flex-wrap gap-3">
-			{#each GRANT_ACTIONS as actionName (actionName)}
+			{#each actions as actionName (actionName)}
 				<Label class="flex items-center gap-2">
 					<Checkbox name="viewer_{actionName}" value="1" checked={viewer[actionName]} onCheckedChange={(value) => (viewer[actionName] = value)} />
 					{actionName}
@@ -115,7 +123,7 @@
 					</Select.Content>
 				</Select.Root>
 				<div class="flex flex-wrap items-center gap-3">
-					{#each GRANT_ACTIONS as actionName (actionName)}
+					{#each actions as actionName (actionName)}
 						<Label class="flex items-center gap-2">
 							<Checkbox name="member_{index}_{actionName}" value="1" checked={row[actionName]} onCheckedChange={(value) => (row[actionName] = value)} />
 							{actionName}

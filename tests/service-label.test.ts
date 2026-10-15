@@ -15,6 +15,9 @@ test('serviceLabel prefers display_name, then name, then a port label', () => {
 	assert.equal(serviceLabel({ name: 'port-8080', owner_user: '   ' }), 'port 8080');
 	assert.equal(serviceLabel({ name: 'port-x', owner_user: 'ada' }), 'port-x');
 	assert.equal(serviceLabel({ name: 'port-', owner_user: 'ada' }), 'port-');
+	assert.equal(serviceLabel({ name: 'port-80', owner_user: 'root', kind: 'container', container_name: 'caddy' }), 'caddy');
+	assert.equal(serviceLabel({ name: 'port-80', owner_user: 'root', kind: 'container', container_name: '  ' }), 'port 80 \u00b7 root');
+	assert.equal(serviceLabel({ name: 'port-80', owner_user: 'root', kind: 'process', container_name: 'caddy' }), 'port 80 \u00b7 root');
 });
 
 test('rename is offered to an admin of this project when the host owner is unknown or local', () => {

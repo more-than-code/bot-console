@@ -2,6 +2,7 @@ import { error, fail, isHttpError, isRedirect, redirect, type RequestEvent } fro
 import { randomUUID } from 'node:crypto';
 import {
 	GRANT_ACTIONS,
+	IMAGE_GRANT_ACTIONS,
 	byteLength,
 	cleanCommand,
 	cleanDir,
@@ -14,13 +15,14 @@ import {
 	isIdempotencyKey,
 	isSpecHash
 } from '$lib/catalog';
-import type { CatalogGrant, Host, Member } from '$lib/api-types';
+import type { CatalogGrant, CatalogGrantAction, Host, Member } from '$lib/api-types';
 import type { CatalogDraft, CatalogEditorState, CatalogPermissionsState, CatalogRunKind, CatalogRunState } from '$lib/project-action';
 import { ApiError, actionFailure, apiFetch, apiList } from '$lib/server/api';
 import { formText } from '$lib/server/form';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
-import { parseCatalogPreview, parseHost, parseMember, parseProgramLogs, parseProgramStatus } from '$lib/server/shape';
+import { saveImageEntry } from '$lib/server/image-actions';
+import { parseCatalogPreview, parseHost, parseImageLogs, parseImageStatus, parseMember, parseProgramLogs, parseProgramStatus } from '$lib/server/shape';
 import { isUuid } from '$lib/server/validate';
 import { backTo } from '$lib/url';
 
@@ -181,8 +183,12 @@ function permissionsState(name: string, grants: CatalogGrant[], message: string 
 	return { name, grants, message, loaded };
 }
 
-function roleGrant(form: FormData, role: 'admin' | 'viewer'): CatalogGrant | null {
-	const actions = GRANT_ACTIONS.filter((action) => formText(form, `${role}_${action}`) === '1');
+function grantActionsOf(form: FormData): readonly CatalogGrantAction[] {
+	return formText(form, 'entry_kind') === 'image' ? IMAGE_GRANT_ACTIONS : GRANT_ACTIONS;
+}
+
+function roleGrant(form: FormData, role: 'admin' | 'viewer', allowed: readonly CatalogGrantAction[]): CatalogGrant | null {
+	const actions = allowed.filter((action) => formText(form, `${role}_${action}`) === '1');
 	if (actions.length === 0) return null;
 	return { subject: `role:${role}`, actions: [...actions] };
 }
@@ -201,9 +207,10 @@ function memberIndexes(form: FormData): number[] | null {
 }
 
 function readGrants(form: FormData, members: Member[]): { grants: CatalogGrant[]; message: string | null } {
+	const allowed = grantActionsOf(form);
 	const grants: CatalogGrant[] = [];
-	const admin = roleGrant(form, 'admin');
-	const viewer = roleGrant(form, 'viewer');
+	const admin = roleGrant(form, 'admin', allowed);
+	const viewer = roleGrant(form, 'viewer', allowed);
 	if (admin) grants.push(admin);
 	if (viewer) grants.push(viewer);
 	const indexes = memberIndexes(form);
@@ -212,7 +219,7 @@ function readGrants(form: FormData, members: Member[]): { grants: CatalogGrant[]
 	let message: string | null = null;
 	for (const index of indexes) {
 		const user = formText(form, `member_${index}_user`);
-		const actions = GRANT_ACTIONS.filter((action) => formText(form, `member_${index}_${action}`) === '1');
+		const actions = allowed.filter((action) => formText(form, `member_${index}_${action}`) === '1');
 		if (user === '' && actions.length === 0) continue;
 		if (!isUuid(user)) {
 			message ??= user === '' ? 'Choose a member.' : 'That member is not valid.';
@@ -242,6 +249,7 @@ async function saveEntry(event: RequestEvent, mode: 'create' | 'edit') {
 	requireUser(event);
 	const id = projectIdOf(event.params);
 	const form = await event.request.formData();
+	if (formText(form, 'entry_kind') === 'image') return saveImageEntry(event, mode, form, id);
 	const built = draftFrom(form);
 	const name = mode === 'edit' ? entryName(form) : null;
 	if (mode === 'edit' && !name) {
@@ -271,8 +279,9 @@ async function catalogAct(event: RequestEvent, kind: CatalogRunKind) {
 	const shown = isCatalogName(name) ? name : '';
 	if (!isCatalogName(name)) return runFailure(event, 400, shown, kind, 'That catalog entry is not valid.');
 	if (!isUuid(hostId)) return runFailure(event, 400, shown, kind, 'Choose a host.');
+	const image = formText(form, 'entry_kind') === 'image';
 	const body: { host_id: string; idempotency_key?: string } = { host_id: hostId };
-	if (kind !== 'logs') {
+	if (kind !== 'logs' && kind !== 'status') {
 		const key = formText(form, 'idempotency_key');
 		if (!isIdempotencyKey(key)) return runFailure(event, 400, shown, kind, 'The idempotency key is not valid.');
 		body.idempotency_key = key;
@@ -283,11 +292,11 @@ async function catalogAct(event: RequestEvent, kind: CatalogRunKind) {
 			body: JSON.stringify(body)
 		});
 		if (kind === 'logs') {
-			const logs = parseProgramLogs(payload);
+			const logs = image ? parseImageLogs(payload) : parseProgramLogs(payload);
 			if (!logs) return runFailure(event, 502, shown, kind, UNEXPECTED);
 			return present(event, { scope: 'catalog' as const, catalogAction: runResult(shown, kind, null, logs, null) });
 		}
-		const status = parseProgramStatus(payload);
+		const status = image ? parseImageStatus(payload) : parseProgramStatus(payload);
 		if (!status) return runFailure(event, 502, shown, kind, UNEXPECTED);
 		return present(event, { scope: 'catalog' as const, catalogAction: runResult(shown, kind, status, null, null) });
 	} catch (err) {
@@ -360,6 +369,10 @@ export async function catalogRestart(event: RequestEvent) {
 
 export async function catalogLogs(event: RequestEvent) {
 	return catalogAct(event, 'logs');
+}
+
+export async function catalogStatus(event: RequestEvent) {
+	return catalogAct(event, 'status');
 }
 
 export async function catalogPermissions(event: RequestEvent) {

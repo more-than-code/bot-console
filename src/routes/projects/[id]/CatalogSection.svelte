@@ -8,15 +8,23 @@
 	import RowAction from '$lib/components/RowAction.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import type { CatalogEntry, Host, Member } from '$lib/api-types';
-	import { GRANT_ACTIONS } from '$lib/catalog';
-	import type { CatalogEditorState, CatalogPermissionsState, CatalogRunState } from '$lib/project-action';
+	import type { CatalogEditorState, CatalogPermissionsState, CatalogRunState, ImageDeployState, ImageEditorState } from '$lib/project-action';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
+	import CatalogDeployDialog from './CatalogDeployDialog.svelte';
 	import CatalogEntryDialog from './CatalogEntryDialog.svelte';
+	import CatalogImageDialog from './CatalogImageDialog.svelte';
 	import CatalogPermissions from './CatalogPermissions.svelte';
 	import CatalogRunDialog from './CatalogRunDialog.svelte';
 
-	const RUN_ACTION = { run: 'catalogRun', stop: 'catalogStop', restart: 'catalogRestart', logs: 'catalogLogs' } as const;
+	const ROW_ACTIONS = ['run', 'stop', 'restart', 'logs', 'status'] as const;
+	const RUN_ACTION = {
+		run: 'catalogRun',
+		stop: 'catalogStop',
+		restart: 'catalogRestart',
+		logs: 'catalogLogs',
+		status: 'catalogStatus'
+	} as const;
 
 	const permissionsCloseHref = $derived.by(() => {
 		const params = new URLSearchParams(page.url.searchParams);
@@ -38,7 +46,9 @@
 		members,
 		editor = null,
 		run = null,
-		permissions = null
+		permissions = null,
+		imageEditor = null,
+		imageDeploy = null
 	}: {
 		canOwner: boolean;
 		entries: CatalogEntry[];
@@ -50,17 +60,23 @@
 		editor?: CatalogEditorState | null;
 		run?: CatalogRunState | null;
 		permissions?: CatalogPermissionsState | null;
+		imageEditor?: ImageEditorState | null;
+		imageDeploy?: ImageDeployState | null;
 	} = $props();
 
 	const columns: Column<CatalogEntry>[] = [
 		{ key: 'name', label: 'Name', sortable: true, searchable: true, value: (row) => row.name },
 		{ key: 'command', label: 'Command', sortable: true, searchable: true, value: (row) => row.command_display },
-		{ key: 'run_as', label: 'Run as', sortable: true, value: (row) => row.spec.run_as },
-		{ key: 'port', label: 'Port', sortable: true, value: (row) => (row.spec.port == null ? '' : String(row.spec.port)) },
+		{ key: 'run_as', label: 'Run as', sortable: true, value: (row) => (row.kind === 'image' ? row.spec.user : row.spec.run_as) },
+		{ key: 'port', label: 'Port', sortable: true, value: (row) => portOf(row) },
 		{ key: 'actions', label: 'Actions', srLabel: true }
 	];
 
 	function portOf(entry: CatalogEntry): string {
+		if (entry.kind === 'image') {
+			if (entry.spec.ports.length === 0) return 'n/a';
+			return entry.spec.ports.map((port) => `${port.host}:${port.container}`).join(', ');
+		}
 		return entry.spec.port == null ? 'n/a' : String(entry.spec.port);
 	}
 
@@ -68,6 +84,8 @@
 		if (run == null || run.name !== entry.name) return null;
 		return run;
 	}
+
+	const permissionEntry = $derived(permissions ? (entries.find((item) => item.name === permissions.name) ?? null) : null);
 </script>
 
 {#if message}
@@ -93,24 +111,37 @@
 		<tr>
 			<td class="p-2 align-middle">{entry.name}</td>
 			<td class="p-2 align-middle"><CommandText value={entry.command_display} /></td>
-			<td class="p-2 align-middle">{entry.spec.run_as}</td>
+			<td class="p-2 align-middle">{entry.kind === 'image' ? entry.spec.user : entry.spec.run_as}</td>
 			<td class="p-2 align-middle font-mono">{portOf(entry)}</td>
 			<td class="p-2 align-middle whitespace-normal">
 				<div class="flex flex-wrap items-center gap-1">
-					{#each GRANT_ACTIONS as action (action)}
+					{#each ROW_ACTIONS as action (action)}
 						{#if entry.my_actions.includes(action)}
 							<CatalogRunDialog
 								kind={action}
 								entryName={entry.name}
-								runAs={entry.spec.run_as}
-								shell={entry.spec.shell}
+								runAs={entry.kind === 'program' ? entry.spec.run_as : ''}
+								shell={entry.kind === 'program' ? entry.spec.shell : false}
 								{hosts}
 								action={actionUrlFrom(page.url, RUN_ACTION[action])}
 								result={runFor(entry)?.kind === action ? runFor(entry) : null}
+								entryKind={entry.kind === 'image' ? 'image' : 'program'}
 							/>
 						{/if}
 					{/each}
-					{#if canOwner}
+					{#if entry.kind === 'image' && entry.my_actions.includes('deploy')}
+						<CatalogDeployDialog
+							{entry}
+							{hosts}
+							deployAction={actionUrlFrom(page.url, 'catalogDeploy')}
+							rollbackAction={actionUrlFrom(page.url, 'catalogRollback')}
+							removeAction={actionUrlFrom(page.url, 'catalogRemove')}
+							confirmAction={actionUrlFrom(page.url, 'catalogConfirm')}
+							historyAction={actionUrlFrom(page.url, 'catalogDeploys')}
+							result={imageDeploy?.name === entry.name ? imageDeploy : null}
+						/>
+					{/if}
+					{#if canOwner && entry.kind === 'program'}
 						<CatalogEntryDialog
 							mode="edit"
 							{entry}
@@ -120,6 +151,17 @@
 							revealed={editor?.mode === 'edit' && editor.name === entry.name}
 							editor={editor?.mode === 'edit' && editor.name === entry.name ? editor : null}
 						/>
+					{:else if canOwner && entry.kind === 'image'}
+						<CatalogImageDialog
+							mode="edit"
+							{entry}
+							saveAction={actionUrlFrom(page.url, 'catalogUpdate')}
+							setsAction={actionUrlFrom(page.url, 'catalogEnvSets')}
+							revealed={imageEditor?.mode === 'edit' && imageEditor.name === entry.name}
+							editor={imageEditor?.mode === 'edit' && imageEditor.name === entry.name ? imageEditor : null}
+						/>
+					{/if}
+					{#if canOwner}
 						<form method="GET" action={page.url.pathname}>
 							<Input type="hidden" name="tab" value="catalog" />
 							<Input type="hidden" name="permissions" value={entry.name} />
@@ -149,5 +191,6 @@
 		message={permissions.message}
 		loaded={permissions.loaded}
 		closeHref={permissionsCloseHref}
+		includeDeploy={permissionEntry?.kind === 'image'}
 	/>
 {/if}

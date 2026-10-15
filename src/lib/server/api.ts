@@ -67,7 +67,19 @@ type CallOptions = {
 	bearer: string | null;
 	on401: 'redirect' | 'throw';
 	clearOn401: boolean;
+	/** Overrides the default. Out of range falls back to API_TIMEOUT_MS. */
+	timeoutMs?: number;
 };
+
+const TIMEOUT_FLOOR_MS = 1_000;
+const TIMEOUT_CAP_MS = 4_000_000;
+
+function callTimeoutMs(options: CallOptions): number {
+	const value = options.timeoutMs;
+	if (value == null) return API_TIMEOUT_MS;
+	if (!Number.isFinite(value) || value < TIMEOUT_FLOOR_MS || value > TIMEOUT_CAP_MS) return API_TIMEOUT_MS;
+	return Math.floor(value);
+}
 
 /** Kit env first, then process.env. An empty kit value falls through. */
 export function readPrivate(name: string): string {
@@ -106,10 +118,10 @@ export function apiBaseUrl(): URL | null {
 	return new URL(`${url.origin}/`);
 }
 
-export function apiFetch(event: RequestEvent, path: string, init?: RequestInit): Promise<unknown> {
+export function apiFetch(event: RequestEvent, path: string, init?: RequestInit, timeoutMs?: number): Promise<unknown> {
 	const raw = event.cookies.get(SESSION_COOKIE);
 	const bearer = isSessionToken(raw) ? raw : null;
-	return callApi(event, path, init, { bearer, on401: 'redirect', clearOn401: true });
+	return callApi(event, path, init, { bearer, on401: 'redirect', clearOn401: true, timeoutMs });
 }
 
 /** OAuth start and callback are public. A 401 there must not clear a console session. */
@@ -224,7 +236,7 @@ async function callApi(event: RequestEvent, path: string, init: RequestInit | un
 	const client = clientAddress(event);
 	if (client) headers.set('x-forwarded-for', client);
 
-	const timeout = AbortSignal.timeout(API_TIMEOUT_MS);
+	const timeout = AbortSignal.timeout(callTimeoutMs(options));
 	const signal = init?.signal ? AbortSignal.any([timeout, init.signal]) : timeout;
 	let response: Response;
 	try {

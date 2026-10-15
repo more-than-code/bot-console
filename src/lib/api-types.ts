@@ -91,11 +91,27 @@ export type Host = {
 };
 
 /** What the caller may do with one catalog entry. `status` comes with any other action. */
-export type CatalogAction = 'run' | 'stop' | 'restart' | 'logs' | 'status';
+export type CatalogAction = 'run' | 'stop' | 'restart' | 'logs' | 'status' | 'deploy';
 
-export type CatalogGrantAction = 'run' | 'stop' | 'restart' | 'logs';
+export type CatalogGrantAction = 'run' | 'stop' | 'restart' | 'logs' | 'deploy';
 
 export type CatalogRestart = 'on-failure' | 'no';
+
+export type ImageWorkload = 'service' | 'job';
+
+export type ImageRestart = 'no' | 'on-failure' | 'unless-stopped';
+
+/** Deploy and rollback outcomes. They arrive in the 200 body, not as HTTP errors. */
+export type ImageOutcome =
+	| 'succeeded'
+	| 'unchanged'
+	| 'failed'
+	| 'timeout'
+	| 'rolled_back'
+	| 'rollback_failed'
+	| 'image_unavailable'
+	| 'forbidden_spec'
+	| 'conflict';
 
 /** Program policy from the agent's hello. Paths and executables stay on the host. */
 export type HostPrograms = {
@@ -103,6 +119,10 @@ export type HostPrograms = {
 	run_as: string[];
 	allow_shell: boolean;
 	policy_hash: string;
+	/** True when the agent reported a usable image policy. Missing on older hellos is false. */
+	images: boolean;
+	/** True when the helper answered container_list at start-up. Missing on older hellos is false. */
+	docker: boolean;
 };
 
 export type ProgramSpec = {
@@ -116,18 +136,120 @@ export type ProgramSpec = {
 	restart: CatalogRestart;
 };
 
-export type CatalogEntry = {
+export type ImagePort = {
+	host: number;
+	container: number;
+	public: boolean;
+};
+
+export type ImageVolume = {
+	name: string;
+	target: string;
+	read_only: boolean;
+};
+
+export type ImageSpec = {
+	kind: ImageWorkload;
+	image: string;
+	command: string[] | null;
+	entrypoint: string[] | null;
+	ports: ImagePort[];
+	env: Record<string, string>;
+	env_sets: string[];
+	secret_env: Record<string, string>;
+	volumes: ImageVolume[];
+	restart: ImageRestart;
+	user: string;
+	healthy_after_sec: number;
+	memory_mb: number | null;
+	timeout_sec: number;
+};
+
+type CatalogEntryBase = {
 	id: string;
 	project_id: string;
 	name: string;
-	kind: 'program';
-	spec: ProgramSpec;
 	spec_hash: string;
 	command_display: string;
 	created_by: string;
 	created_at: string;
 	updated_at: string;
 	my_actions: CatalogAction[];
+};
+
+export type ProgramEntry = CatalogEntryBase & {
+	kind: 'program';
+	spec: ProgramSpec;
+};
+
+export type ImageEntry = CatalogEntryBase & {
+	kind: 'image';
+	spec: ImageSpec;
+};
+
+export type CatalogEntry = ProgramEntry | ImageEntry;
+
+export type ImageDeploy = {
+	id: string;
+	entry_id: string;
+	host_id: string;
+	digest: string | null;
+	spec_hash: string;
+	outcome: ImageOutcome;
+	exit_code: number | null;
+	started_at: string;
+	finished_at: string | null;
+	by: string;
+	via: 'console' | 'mcp';
+};
+
+export type ImageState = 'running' | 'exited' | 'created' | 'paused' | 'restarting' | 'dead' | 'missing' | 'unknown';
+
+export type ImageStatus = {
+	container: string | null;
+	/** `unknown` when a deploy or rollback timed out and the API has no container state. */
+	state: ImageState;
+	exit_code: number | null;
+	restart_count: number;
+	started_at: string | null;
+	finished_at: string | null;
+	digest: string | null;
+	ports: number[];
+};
+
+export type ImageLogs = {
+	container: string | null;
+	lines: string[];
+	truncated: boolean;
+};
+
+/** `value` is null for a secret. The console also drops secret values before they reach the browser. */
+export type EnvSetKey = {
+	key: string;
+	is_secret: boolean;
+	value: string | null;
+};
+
+export type EnvSet = {
+	name: string;
+	keys: EnvSetKey[];
+	updated_at: string;
+	updated_by: string;
+};
+
+/** A registry row. The token is never part of this object. */
+export type Registry = {
+	host: string;
+	username: string;
+	updated_at: string;
+	updated_by: string;
+};
+
+/** D25 plan returned instead of a result when the API asks the caller to confirm. */
+export type PendingConfirmation = {
+	confirmation_id: string;
+	plan: string;
+	expires_at: string;
 };
 
 /** `role:admin`, `role:viewer`, or `user:<uuid>`. The owner is never a subject. */
@@ -218,6 +340,10 @@ export type ServiceSummary = {
 	host_id: string | null;
 	/** Catalog entry name when this service was started from the catalog. Otherwise null. */
 	catalog_entry: string | null;
+	/** Docker container name. Null when the host did not report one. */
+	container_name: string | null;
+	/** Image digest for an owned container. Null for other rows. */
+	image_digest: string | null;
 };
 
 export type ServiceRow = ServiceSummary & {

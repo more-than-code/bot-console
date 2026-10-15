@@ -7,17 +7,30 @@ import type {
 	CatalogPreview,
 	CreatedInvite,
 	DeviceView,
+	EnvSet,
+	EnvSetKey,
 	Grant,
 	Health,
 	HealthCheck,
 	Host,
 	HostPrograms,
 	HostStatus,
+	ImageDeploy,
+	ImageLogs,
+	ImageOutcome,
+	ImagePort,
+	ImageRestart,
+	ImageSpec,
+	ImageState,
+	ImageStatus,
+	ImageVolume,
+	ImageWorkload,
 	ShareLevel,
 	Invite,
 	InviteLookup,
 	JoinToken,
 	Member,
+	PendingConfirmation,
 	ProbeView,
 	ProcessItem,
 	ProcessSample,
@@ -26,12 +39,14 @@ import type {
 	ProgramStatus,
 	Project,
 	ProjectService,
+	Registry,
 	ServiceSummary,
 	OauthRequest,
 	SnapshotView,
 	User
 } from '../api-types';
 import { CATALOG_NAME, ENV_KEY, GRANT_ACTIONS, RUN_AS, SPEC_HASH } from '../catalog';
+import { cleanImageUser, cleanVolumeTarget, isConfirmationId, isRegistryHost, isSetName, redactAssignments } from '../image-spec';
 import { isRole } from './roles';
 import { acceptedInstallCommand, acceptedInviteUrl, consentRedirect, isJoinToken, isOauthRequestId, isUuid } from './validate';
 
@@ -190,7 +205,16 @@ export function parseHostPrograms(value: unknown): HostPrograms | null {
 	}
 	if (typeof value.policy_hash !== 'string' || value.policy_hash.length === 0 || value.policy_hash.length > POLICY_HASH_MAX) return null;
 	if (LINE_BREAK.test(value.policy_hash)) return null;
-	return { enabled: value.enabled, run_as, allow_shell: value.allow_shell, policy_hash: value.policy_hash };
+	const images = reportedBool(value, 'images');
+	const docker = reportedBool(value, 'docker');
+	if (images === null || docker === null) return null;
+	return { enabled: value.enabled, run_as, allow_shell: value.allow_shell, policy_hash: value.policy_hash, images, docker };
+}
+
+/** Missing or null is false. A present non-boolean is not a policy. */
+function reportedBool(value: Record<string, unknown>, key: string): boolean | null {
+	if (!Object.hasOwn(value, key) || value[key] == null) return false;
+	return typeof value[key] === 'boolean' ? value[key] : null;
 }
 
 /** Owner carries a null level. A share must name metrics or deploy. */
@@ -332,6 +356,9 @@ export function parseService(value: unknown): ServiceSummary | null {
 	if (project_id === undefined || host_id === undefined) return null;
 	const catalog_entry = parseCatalogEntryName(value);
 	if (catalog_entry === undefined) return null;
+	const container_name = containerNameOf(value.container_name);
+	const image_digest = imageDigestOf(value.image_digest);
+	if (container_name === undefined || image_digest === undefined) return null;
 	return {
 		id,
 		name,
@@ -345,8 +372,26 @@ export function parseService(value: unknown): ServiceSummary | null {
 		owner_user,
 		project_id,
 		host_id,
-		catalog_entry
+		catalog_entry,
+		container_name,
+		image_digest
 	};
+}
+
+/** Missing or null is no container name. A bad string drops the row. */
+function containerNameOf(value: unknown): string | null | undefined {
+	if (value == null) return null;
+	const parsed = text(value, 200);
+	if (parsed === null) return undefined;
+	const trimmed = parsed.trim();
+	return trimmed === '' ? null : trimmed;
+}
+
+/** Missing or null is no digest. Anything that is not `sha256:` plus 64 hex digits drops the row. */
+function imageDigestOf(value: unknown): string | null | undefined {
+	if (value == null) return null;
+	if (typeof value !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(value)) return undefined;
+	return value;
 }
 
 /** Missing or null is not a catalog service. A present value must be an entry name. */
@@ -696,8 +741,8 @@ export function parseProbe(value: unknown): ProbeView | null {
 	};
 }
 
-const CATALOG_ACTIONS = new Set<CatalogAction>(['run', 'stop', 'restart', 'logs', 'status']);
-const GRANT_ACTION_SET = new Set<CatalogGrantAction>(GRANT_ACTIONS);
+const CATALOG_ACTIONS = new Set<CatalogAction>(['run', 'stop', 'restart', 'logs', 'status', 'deploy']);
+const GRANT_ACTION_SET = new Set<CatalogGrantAction>([...GRANT_ACTIONS, 'deploy']);
 const ENTRY_CAP = 200;
 const GRANT_LIST_CAP = 100;
 const LOG_LINE_CAP = 1000;
@@ -777,12 +822,10 @@ function parseMyActions(value: unknown): CatalogAction[] | null {
 	return actions;
 }
 
-export function parseCatalogEntry(value: unknown): CatalogEntry | null {
-	if (!isRecord(value) || value.kind !== 'program') return null;
+function parseEntryBase(value: Record<string, unknown>): Omit<CatalogEntry, 'kind' | 'spec'> | null {
 	const id = text(value.id, 36);
 	const project_id = text(value.project_id, 36);
 	const name = text(value.name, 48);
-	const spec = parseProgramSpec(value.spec);
 	const spec_hash = text(value.spec_hash, 64);
 	const command_display = commandDisplay(value.command_display);
 	const created_by = text(value.created_by, 36);
@@ -790,13 +833,30 @@ export function parseCatalogEntry(value: unknown): CatalogEntry | null {
 	const updated_at = timestamp(value.updated_at);
 	const my_actions = parseMyActions(value.my_actions);
 	if (!id || !isUuid(id) || !project_id || !isUuid(project_id) || !name || !CATALOG_NAME.test(name)) return null;
-	if (!spec || !spec_hash || !SPEC_HASH.test(spec_hash) || !command_display) return null;
+	if (!spec_hash || !SPEC_HASH.test(spec_hash) || !command_display) return null;
 	if (!created_by || !isUuid(created_by) || !created_at || !updated_at || !my_actions) return null;
-	return { id, project_id, name, kind: 'program', spec, spec_hash, command_display, created_by, created_at, updated_at, my_actions };
+	return { id, project_id, name, spec_hash, command_display, created_by, created_at, updated_at, my_actions };
+}
+
+export function parseCatalogEntry(value: unknown): CatalogEntry | null {
+	if (!isRecord(value)) return null;
+	const base = parseEntryBase(value);
+	if (!base) return null;
+	if (value.kind === 'program') {
+		const spec = parseProgramSpec(value.spec);
+		if (!spec) return null;
+		return { ...base, kind: 'program', spec };
+	}
+	if (value.kind === 'image') {
+		const spec = parseImageSpec(value.spec);
+		if (!spec) return null;
+		return { ...base, kind: 'image', spec };
+	}
+	return null;
 }
 
 function parseGrantActions(value: unknown): CatalogGrantAction[] | null {
-	if (!Array.isArray(value) || value.length === 0 || value.length > GRANT_ACTIONS.length) return null;
+	if (!Array.isArray(value) || value.length === 0 || value.length > GRANT_ACTION_SET.size) return null;
 	const actions: CatalogGrantAction[] = [];
 	for (const item of value) {
 		if (typeof item !== 'string' || !GRANT_ACTION_SET.has(item as CatalogGrantAction) || actions.includes(item as CatalogGrantAction)) {
@@ -924,6 +984,361 @@ export function parseProgramLogs(value: unknown): ProgramLogs | null {
 		lines.push(displayText(item, LOG_LINE_MAX));
 	}
 	return { unit, lines, truncated: value.truncated || value.lines.length > LOG_LINE_CAP };
+}
+
+const IMAGE_OUTCOMES = new Set<ImageOutcome>([
+	'succeeded',
+	'unchanged',
+	'failed',
+	'timeout',
+	'rolled_back',
+	'rollback_failed',
+	'image_unavailable',
+	'forbidden_spec',
+	'conflict'
+]);
+
+const IMAGE_STATES = new Set<ImageState>(['running', 'exited', 'created', 'paused', 'restarting', 'dead', 'missing', 'unknown']);
+
+/** Missing or null uses the fallback. An out-of-range value drops the spec. */
+function optionalBounded(record: Record<string, unknown>, key: string, min: number, max: number, fallback: number): number | null {
+	if (!Object.hasOwn(record, key) || record[key] == null) return fallback;
+	return boundedInt(record[key], min, max);
+}
+
+/** The timer the kind does not use. The API stores 0. Omit and null are 0. A negative or non-integer drops the spec. */
+function unusedTimer(record: Record<string, unknown>, key: string): number | null {
+	if (!Object.hasOwn(record, key) || record[key] == null) return 0;
+	const value = record[key];
+	if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) return null;
+	return value;
+}
+
+function parseImageRef(value: unknown): string | null {
+	if (typeof value !== 'string' || value.length === 0 || utf8.encode(value).byteLength > 255) return null;
+	if (LINE_BREAK.test(value) || /\s/.test(value)) return null;
+	return value;
+}
+
+function parseArgvField(value: unknown): string[] | null | undefined {
+	if (value === null) return null;
+	const args = parseArgs(value);
+	return args === null ? undefined : args;
+}
+
+function parseImagePorts(value: unknown): ImagePort[] | null {
+	if (!Array.isArray(value) || value.length > 16) return null;
+	const ports: ImagePort[] = [];
+	const hosts = new Set<number>();
+	for (const item of value) {
+		if (!isRecord(item) || typeof item.public !== 'boolean') return null;
+		const host = boundedInt(item.host, 1, 65535);
+		const container = boundedInt(item.container, 1, 65535);
+		if (host == null || container == null || hosts.has(host)) return null;
+		hosts.add(host);
+		ports.push({ host, container, public: item.public });
+	}
+	return ports;
+}
+
+function parseNameList(value: unknown): string[] | null {
+	if (!Array.isArray(value) || value.length > 8) return null;
+	const names: string[] = [];
+	for (const item of value) {
+		if (typeof item !== 'string' || !isSetName(item) || names.includes(item)) return null;
+		names.push(item);
+	}
+	return names;
+}
+
+function parseSecretEnv(value: unknown): Record<string, string> | null {
+	if (!isRecord(value)) return null;
+	const keys = Object.keys(value);
+	if (keys.length > 64) return null;
+	const secret: Record<string, string> = {};
+	for (const key of keys) {
+		if (!ENV_KEY.test(key)) return null;
+		const raw = value[key];
+		if (typeof raw !== 'string') return null;
+		const dot = raw.indexOf('.');
+		if (dot <= 0) return null;
+		const set = raw.slice(0, dot);
+		const name = raw.slice(dot + 1);
+		if (!isSetName(set) || !ENV_KEY.test(name)) return null;
+		secret[key] = raw;
+	}
+	return secret;
+}
+
+function parseImageVolumes(value: unknown): ImageVolume[] | null {
+	if (!Array.isArray(value) || value.length > 8) return null;
+	const volumes: ImageVolume[] = [];
+	const targets = new Set<string>();
+	for (const item of value) {
+		if (!isRecord(item) || typeof item.read_only !== 'boolean' || typeof item.name !== 'string' || !isSetName(item.name)) return null;
+		const target = cleanVolumeTarget(typeof item.target === 'string' ? item.target : '');
+		if (!target || targets.has(target)) return null;
+		targets.add(target);
+		volumes.push({ name: item.name, target, read_only: item.read_only });
+	}
+	return volumes;
+}
+
+export function parseImageSpec(value: unknown): ImageSpec | null {
+	if (!isRecord(value)) return null;
+	if (value.kind !== 'service' && value.kind !== 'job') return null;
+	const workload: ImageWorkload = value.kind;
+	const image = parseImageRef(value.image);
+	const command = parseArgvField(value.command);
+	const entrypoint = parseArgvField(value.entrypoint);
+	const ports = parseImagePorts(value.ports);
+	const env = parseEnv(value.env);
+	const env_sets = parseNameList(value.env_sets);
+	const secret_env = parseSecretEnv(value.secret_env);
+	const volumes = parseImageVolumes(value.volumes);
+	if (!image || command === undefined || entrypoint === undefined || !ports || !env || !env_sets || !secret_env || !volumes) return null;
+	if (value.restart !== 'no' && value.restart !== 'on-failure' && value.restart !== 'unless-stopped') return null;
+	const restart: ImageRestart = value.restart;
+	if (workload === 'job' && restart !== 'no') return null;
+	if (typeof value.user !== 'string' || cleanImageUser(value.user) === null) return null;
+	let memory_mb: number | null;
+	if (!Object.hasOwn(value, 'memory_mb') || value.memory_mb == null) memory_mb = null;
+	else {
+		const memory = boundedInt(value.memory_mb, 16, 65536);
+		if (memory == null) return null;
+		memory_mb = memory;
+	}
+	const healthy = workload === 'service' ? optionalBounded(value, 'healthy_after_sec', 5, 600, 30) : unusedTimer(value, 'healthy_after_sec');
+	const timeout = workload === 'job' ? optionalBounded(value, 'timeout_sec', 10, 3600, 600) : unusedTimer(value, 'timeout_sec');
+	if (healthy === null || timeout === null) return null;
+	return {
+		kind: workload,
+		image,
+		command,
+		entrypoint,
+		ports,
+		env,
+		env_sets,
+		secret_env,
+		volumes,
+		restart,
+		user: value.user,
+		healthy_after_sec: healthy,
+		memory_mb,
+		timeout_sec: timeout
+	};
+}
+
+function parseLogLines(value: unknown): { lines: string[]; truncated: boolean } | null {
+	if (!Array.isArray(value)) return null;
+	const capped = value.slice(0, LOG_LINE_CAP);
+	const lines: string[] = [];
+	for (const item of capped) {
+		if (typeof item !== 'string') return null;
+		lines.push(displayText(item, LOG_LINE_MAX));
+	}
+	return { lines, truncated: value.length > LOG_LINE_CAP };
+}
+
+export function parseImageStatus(value: unknown): ImageStatus | null {
+	if (!isRecord(value) || typeof value.restart_count !== 'number' || !Number.isSafeInteger(value.restart_count) || value.restart_count < 0) {
+		return null;
+	}
+	if (typeof value.state !== 'string' || !IMAGE_STATES.has(value.state as ImageState)) return null;
+	const container = value.container == null ? null : text(value.container, 200);
+	if (value.container != null && !container) return null;
+	const digest = imageDigestOf(value.digest);
+	if (digest === undefined) return null;
+	const started_at = optionalText(value.started_at, 64);
+	const finished_at = optionalText(value.finished_at, 64);
+	const ports = parsePorts(value.ports);
+	if (started_at === undefined || finished_at === undefined || !ports) return null;
+	let exit_code: number | null;
+	if (value.exit_code == null) exit_code = null;
+	else if (typeof value.exit_code !== 'number' || !Number.isInteger(value.exit_code) || value.exit_code < 0 || value.exit_code > 255) return null;
+	else exit_code = value.exit_code;
+	return {
+		container,
+		state: value.state as ImageState,
+		exit_code,
+		restart_count: value.restart_count,
+		started_at,
+		finished_at,
+		digest,
+		ports
+	};
+}
+
+export function parseImageLogs(value: unknown): ImageLogs | null {
+	if (!isRecord(value) || typeof value.truncated !== 'boolean') return null;
+	const container = value.container == null ? null : text(value.container, 200);
+	if (value.container != null && !container) return null;
+	const lines = parseLogLines(value.lines);
+	if (!lines) return null;
+	return { container, lines: lines.lines, truncated: value.truncated || lines.truncated };
+}
+
+function parseExitCode(value: unknown): number | null | undefined {
+	if (value == null) return null;
+	if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 255) return undefined;
+	return value;
+}
+
+export function parseImageDeploy(value: unknown): ImageDeploy | null {
+	if (!isRecord(value)) return null;
+	const id = text(value.id, 36);
+	const entry_id = text(value.entry_id, 36);
+	const host_id = text(value.host_id, 36);
+	const spec_hash = text(value.spec_hash, 64);
+	const by = text(value.by, 36);
+	const started_at = timestamp(value.started_at);
+	const finished_at = optionalText(value.finished_at, 64);
+	const digest = imageDigestOf(value.digest);
+	const exit_code = parseExitCode(value.exit_code);
+	if (!id || !isUuid(id) || !entry_id || !isUuid(entry_id) || !host_id || !isUuid(host_id)) return null;
+	if (!spec_hash || !SPEC_HASH.test(spec_hash) || !by || !isUuid(by) || !started_at || finished_at === undefined) return null;
+	if (digest === undefined || exit_code === undefined) return null;
+	if (typeof value.outcome !== 'string' || !IMAGE_OUTCOMES.has(value.outcome as ImageOutcome)) return null;
+	if (value.via !== 'console' && value.via !== 'mcp') return null;
+	return {
+		id,
+		entry_id,
+		host_id,
+		digest,
+		spec_hash,
+		outcome: value.outcome as ImageOutcome,
+		exit_code,
+		started_at,
+		finished_at,
+		by,
+		via: value.via
+	};
+}
+
+export function parseConfirmation(value: unknown): PendingConfirmation | null {
+	if (!isRecord(value)) return null;
+	const confirmation_id = text(value.confirmation_id, 43);
+	if (!confirmation_id || !isConfirmationId(confirmation_id)) return null;
+	if (typeof value.plan !== 'string' || value.plan.length === 0 || value.plan.length > 2000) return null;
+	const expires_at = timestamp(value.expires_at);
+	if (!expires_at) return null;
+	return { confirmation_id, plan: redactAssignments(displayText(value.plan, 2000)), expires_at };
+}
+
+export type DeployPayload =
+	| { kind: 'confirmation'; confirmation: PendingConfirmation }
+	| { kind: 'deploy'; deploy: ImageDeploy; status: ImageStatus; lines: string[] };
+
+export function parseDeployPayload(value: unknown): DeployPayload | null {
+	if (!isRecord(value)) return null;
+	if (Object.hasOwn(value, 'confirmation_id') && !Object.hasOwn(value, 'deploy')) {
+		const confirmation = parseConfirmation(value);
+		return confirmation ? { kind: 'confirmation', confirmation } : null;
+	}
+	const deploy = parseImageDeploy(value.deploy);
+	const status = parseImageStatus(value.status);
+	const lines = parseLogLines(value.lines);
+	if (!deploy || !status || !lines) return null;
+	return { kind: 'deploy', deploy, status, lines: lines.lines };
+}
+
+export type RemovePayload = { kind: 'confirmation'; confirmation: PendingConfirmation } | { kind: 'status'; status: ImageStatus };
+
+export function parseRemovePayload(value: unknown): RemovePayload | null {
+	if (!isRecord(value)) return null;
+	if (Object.hasOwn(value, 'confirmation_id') && !Object.hasOwn(value, 'status')) {
+		const confirmation = parseConfirmation(value);
+		return confirmation ? { kind: 'confirmation', confirmation } : null;
+	}
+	const status = parseImageStatus(value.status);
+	return status ? { kind: 'status', status } : null;
+}
+
+export function parseImageDeployList(payload: unknown): { items: ImageDeploy[]; omitted: number } | null {
+	const page = parseListPayload(payload);
+	if (!page) return null;
+	const capped = page.raw.slice(0, 50);
+	let omitted = page.raw.length - capped.length;
+	const items: ImageDeploy[] = [];
+	for (const item of capped) {
+		const row = parseImageDeploy(item);
+		if (row) items.push(row);
+		else omitted += 1;
+	}
+	return { items, omitted };
+}
+
+function parseEnvSetKey(value: unknown): EnvSetKey | null {
+	if (!isRecord(value) || typeof value.is_secret !== 'boolean') return null;
+	const key = text(value.key, 64);
+	if (!key || !ENV_KEY.test(key)) return null;
+	if (value.is_secret) return { key, is_secret: true, value: null };
+	if (value.value == null) return { key, is_secret: false, value: null };
+	if (typeof value.value !== 'string' || utf8.encode(value.value).byteLength > 4096 || LINE_BREAK.test(value.value)) return null;
+	return { key, is_secret: false, value: value.value };
+}
+
+export function parseEnvSet(value: unknown): EnvSet | null {
+	if (!isRecord(value) || !Array.isArray(value.keys) || value.keys.length > 256) return null;
+	const name = text(value.name, 48);
+	const updated_at = timestamp(value.updated_at);
+	const updated_by = text(value.updated_by, 36);
+	if (!name || !isSetName(name) || !updated_at || !updated_by || !isUuid(updated_by)) return null;
+	const keys: EnvSetKey[] = [];
+	const seen = new Set<string>();
+	for (const item of value.keys) {
+		const parsed = parseEnvSetKey(item);
+		if (!parsed || seen.has(parsed.key)) return null;
+		seen.add(parsed.key);
+		keys.push(parsed);
+	}
+	return { name, keys, updated_at, updated_by };
+}
+
+export function parseEnvSetList(payload: unknown): { items: EnvSet[]; omitted: number } | null {
+	const page = parseListPayload(payload);
+	if (!page) return null;
+	const capped = page.raw.slice(0, 200);
+	let omitted = page.raw.length - capped.length;
+	const items: EnvSet[] = [];
+	const seen = new Set<string>();
+	for (const item of capped) {
+		const row = parseEnvSet(item);
+		if (!row || seen.has(row.name)) omitted += 1;
+		else {
+			seen.add(row.name);
+			items.push(row);
+		}
+	}
+	return { items, omitted };
+}
+
+export function parseRegistry(value: unknown): Registry | null {
+	if (!isRecord(value)) return null;
+	const host = text(value.host, 255);
+	const username = text(value.username, 255);
+	const updated_at = timestamp(value.updated_at);
+	const updated_by = text(value.updated_by, 36);
+	if (!host || !isRegistryHost(host) || username === null || !updated_at || !updated_by || !isUuid(updated_by)) return null;
+	return { host, username, updated_at, updated_by };
+}
+
+export function parseRegistryList(payload: unknown): { items: Registry[]; omitted: number } | null {
+	const page = parseListPayload(payload);
+	if (!page) return null;
+	const capped = page.raw.slice(0, 100);
+	let omitted = page.raw.length - capped.length;
+	const items: Registry[] = [];
+	const seen = new Set<string>();
+	for (const item of capped) {
+		const row = parseRegistry(item);
+		if (!row || seen.has(row.host)) omitted += 1;
+		else {
+			seen.add(row.host);
+			items.push(row);
+		}
+	}
+	return { items, omitted };
 }
 
 export type CatalogList = { items: CatalogEntry[]; omitted: number; truncated: boolean };

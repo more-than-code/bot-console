@@ -1,5 +1,5 @@
 import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
-import type { CatalogEntry, Host, Invite, JoinToken, Member, ProjectService, ProjectServiceRow } from '$lib/api-types';
+import type { CatalogEntry, EnvSet, Host, Invite, JoinToken, Member, ProjectService, ProjectServiceRow, Registry } from '$lib/api-types';
 import { catalogForCaller, isCatalogName } from '$lib/catalog';
 import { SERVICE_DEFAULT_DIR, SERVICE_DEFAULT_SORT, serviceColumns, serviceHostReachable } from '$lib/host-view';
 import { serviceShow } from '$lib/service-view';
@@ -9,6 +9,7 @@ import {
 	catalogCreate,
 	catalogDelete,
 	catalogLogs,
+	catalogStatus,
 	catalogParse,
 	catalogPermissions,
 	catalogRestart,
@@ -16,6 +17,20 @@ import {
 	catalogStop,
 	catalogUpdate
 } from '$lib/server/catalog-actions';
+import {
+	catalogConfirm,
+	catalogDeploy,
+	catalogDeploys,
+	catalogEnvSets,
+	catalogRemove,
+	catalogRollback,
+	deleteEnvSet,
+	deleteRegistry,
+	loadProjectSettings,
+	patchEnvKey,
+	saveEnvSet,
+	saveRegistry
+} from '$lib/server/image-actions';
 import { formText } from '$lib/server/form';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
@@ -49,8 +64,8 @@ function invalid(event: RequestEvent, scope: ProjectScope, message: string) {
 	return fail(400, present(event, { scope, message }));
 }
 
-function tabOf(value: string | null, canAdmin: boolean, canOwner: boolean): ProjectScope {
-	if (value === 'settings') return canOwner ? 'settings' : 'hosts';
+function tabOf(value: string | null, canAdmin: boolean): ProjectScope {
+	if (value === 'settings') return canAdmin ? 'settings' : 'hosts';
 	if (value === 'tokens') return canAdmin ? 'tokens' : 'hosts';
 	if (value === 'members') return 'members';
 	if (value === 'services') return 'services';
@@ -151,6 +166,10 @@ const empty = {
 	catalogTruncated: false,
 	catalogMessage: null as string | null,
 	permissions: null as CatalogPermissionsState | null,
+	envSets: [] as EnvSet[],
+	envSetsMessage: null as string | null,
+	registries: [] as Registry[],
+	registriesMessage: null as string | null,
 	...noServices
 };
 
@@ -170,7 +189,7 @@ export const load: PageServerLoad = async (event) => {
 	const role = uiRole(localsRole, project.role);
 	const canAdmin = roleAtLeast(role, 'admin');
 	const canOwner = roleAtLeast(role, 'owner');
-	const tab = tabOf(event.url.searchParams.get('tab'), canAdmin, canOwner);
+	const tab = tabOf(event.url.searchParams.get('tab'), canAdmin);
 
 	let hosts: Host[] = [];
 	let hostsOmitted = 0;
@@ -254,6 +273,18 @@ export const load: PageServerLoad = async (event) => {
 		}
 	}
 
+	let envSets: EnvSet[] = [];
+	let envSetsMessage: string | null = null;
+	let registries: Registry[] = [];
+	let registriesMessage: string | null = null;
+	if (tab === 'settings' && canAdmin) {
+		const settings = await loadProjectSettings(event, id);
+		envSets = settings.envSets;
+		envSetsMessage = settings.envSetsMessage;
+		registries = settings.registries;
+		registriesMessage = settings.registriesMessage;
+	}
+
 	return present(event, {
 		project,
 		userId,
@@ -282,6 +313,10 @@ export const load: PageServerLoad = async (event) => {
 		catalogTruncated,
 		catalogMessage,
 		permissions,
+		envSets,
+		envSetsMessage,
+		registries,
+		registriesMessage,
 		...services
 	});
 };
@@ -360,7 +395,19 @@ export const actions: Actions = {
 	catalogStop,
 	catalogRestart,
 	catalogLogs,
+	catalogStatus,
 	catalogPermissions,
+	catalogDeploy,
+	catalogRollback,
+	catalogRemove,
+	catalogConfirm,
+	catalogDeploys,
+	catalogEnvSets,
+	saveEnvSet,
+	patchEnvKey,
+	deleteEnvSet,
+	saveRegistry,
+	deleteRegistry,
 	askRevoke: async (event) => {
 		requireUser(event);
 		projectId(event.params);

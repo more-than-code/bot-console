@@ -9,7 +9,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import * as Select from '$lib/components/ui/select';
 	import Notice from '$lib/components/Notice.svelte';
-	import type { CatalogEntry, Host } from '$lib/api-types';
+	import type { Host, ProgramEntry } from '$lib/api-types';
 	import { hoistPreviewEnv, previewToken, runAsChoices, shellRisk, shouldApplyPreviewUpdate, submitCatalogPreview } from '$lib/catalog';
 	import type { CatalogDraft, CatalogEditorState } from '$lib/project-action';
 
@@ -23,7 +23,7 @@
 		cancel
 	}: {
 		mode: 'create' | 'edit';
-		entry?: CatalogEntry | null;
+		entry?: ProgramEntry | null;
 		hosts: Host[];
 		saveAction: string;
 		parseAction: string;
@@ -35,7 +35,7 @@
 		return { name: '', command: '', shell: false, dir: '', runAs: '', port: '', restart: 'on-failure', env: [] };
 	}
 
-	function fromEntry(item: CatalogEntry): CatalogDraft {
+	function fromEntry(item: ProgramEntry): CatalogDraft {
 		return {
 			name: item.name,
 			command: item.command_display,
