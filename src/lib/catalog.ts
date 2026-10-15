@@ -1,4 +1,4 @@
-import type { CatalogEntry, Host } from '$lib/api-types';
+import type { CatalogEntry, CatalogPreview, Host } from '$lib/api-types';
 
 export const APPROVAL_WAIT = "waiting for the host owner's approval";
 
@@ -135,21 +135,6 @@ export function cleanEnv(rows: readonly { key: string; value: string }[]): EnvCl
 
 export type EnvRow = { key: string; value: string };
 
-/** Add preview keys the rows do not already have. An existing key is left as the operator typed it. */
-export function mergePreviewEnv(rows: readonly EnvRow[], env: Record<string, string>): EnvRow[] {
-	const next = rows.map((row) => ({ key: row.key, value: row.value }));
-	const seen = new Set<string>();
-	for (const row of next) {
-		if (row.key !== '') seen.add(row.key);
-	}
-	for (const [key, value] of Object.entries(env)) {
-		if (seen.has(key)) continue;
-		next.push({ key, value });
-		seen.add(key);
-	}
-	return next;
-}
-
 type PreviewSubmitter = {
 	addEventListener(type: 'submit', listener: () => void, options: { once: true }): void;
 	removeEventListener(type: 'submit', listener: () => void): void;
@@ -187,4 +172,34 @@ export function catalogForCaller(entries: readonly CatalogEntry[], owner: boolea
 		...item,
 		spec: { ...item.spec, exec: '', args: [], env: {} }
 	}));
+}
+
+/** Identifies a parsed line, so the form does not ask the server to parse the same line twice. */
+export function previewToken(shell: boolean, line: string): string {
+	return `${shell ? '1' : '0'}\n${line}`;
+}
+
+/**
+ * Apply a parse preview to the form. Hoisted `KEY=value` words leave the command (`command_display`
+ * is the argv without them) and become env rows; a typed value replaces a row with the same key.
+ * Leaving them in both places would send each key twice. Returns null when there is nothing to do:
+ * shell mode (nothing is split), nothing hoisted, or the field no longer holds the previewed line.
+ */
+export function hoistPreviewEnv(
+	command: string,
+	shell: boolean,
+	rows: readonly EnvRow[],
+	previewedLine: string,
+	preview: CatalogPreview
+): { command: string; env: EnvRow[] } | null {
+	const hoisted = Object.entries(preview.env);
+	if (shell || hoisted.length === 0 || command !== previewedLine) return null;
+	const env = rows.map((row) => ({
+		key: row.key,
+		value: Object.hasOwn(preview.env, row.key) ? preview.env[row.key] : row.value
+	}));
+	for (const [key, value] of hoisted) {
+		if (!env.some((row) => row.key === key)) env.push({ key, value });
+	}
+	return { command: preview.command_display, env };
 }

@@ -41,6 +41,7 @@
 	}
 
 	let hostId = $state(untrack(firstHost));
+	const hostLabel = $derived(eligible.find((host) => host.id === hostId)?.name ?? hostId);
 	let idempotencyKey = $state('');
 	let submitting = $state(false);
 
@@ -89,11 +90,11 @@
 	{#if kind !== 'logs'}
 		<Input type="hidden" name="idempotency_key" value={idempotencyKey} />
 	{/if}
-	<div class="grid gap-1.5">
+	<div class="grid min-w-0 gap-1.5">
 		<Label for="{kind}-{entryName}-host">Host</Label>
 		<Select.Root type="single" name="host_id" bind:value={hostId}>
-			<Select.Trigger id="{kind}-{entryName}-host" class="w-full">
-				<Select.Value placeholder="Choose a host" />
+			<Select.Trigger id="{kind}-{entryName}-host" class="w-full min-w-0">
+				<Select.Value placeholder="Choose a host" class="min-w-0 truncate">{hostLabel || 'Choose a host'}</Select.Value>
 			</Select.Trigger>
 			<Select.Content>
 				{#each eligible as host (host.id)}

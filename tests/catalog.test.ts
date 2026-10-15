@@ -6,7 +6,8 @@ import { render } from 'svelte/server';
 import type { CatalogEntry, CatalogGrant, Host, Member, ProjectServiceRow } from '../src/lib/api-types.ts';
 import {
 	APPROVAL_WAIT,
-	mergePreviewEnv,
+	hoistPreviewEnv,
+	previewToken,
 	reuseIdempotencyKey,
 	runAsChoices,
 	shellRisk,
@@ -583,10 +584,6 @@ describe('catalog', { concurrency: false }, () => {
 	});
 
 	test('preview env merges, save is not dropped, and the shell line names an account', () => {
-		assert.deepEqual(mergePreviewEnv([{ key: 'PORT', value: '80' }], { PORT: '3031', NODE_ENV: 'dev' }), [
-			{ key: 'PORT', value: '80' },
-			{ key: 'NODE_ENV', value: 'dev' }
-		]);
 		assert.equal(shouldApplyPreviewUpdate(false, 1, 2), true);
 		assert.equal(shouldApplyPreviewUpdate(true, 1, 2), false);
 		assert.equal(shouldApplyPreviewUpdate(true, 2, 2), true);
@@ -596,7 +593,6 @@ describe('catalog', { concurrency: false }, () => {
 		const entryForm = readFileSync(new URL('../src/routes/projects/[id]/CatalogEntryForm.svelte', import.meta.url), 'utf8');
 		assert.equal(entryForm.includes('shouldApplyPreviewUpdate'), true);
 		assert.equal(entryForm.includes('clearPreviewTimer'), true);
-		assert.equal(entryForm.includes('mergePreviewEnv'), true);
 		assert.equal(entryForm.includes('if (mine !== requestId) return'), false);
 
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
@@ -1026,3 +1022,94 @@ function serviceProps(catalogEntry: string | null) {
 	};
 }
 
+
+function selectValueText(html: string): string[] {
+	return [...html.matchAll(/data-slot="select-value"[^>]*>([\s\S]*?)<\/span>/g)].map((match) =>
+		(match[1] ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+	);
+}
+
+test('the run dialog host select shows the host name, not its id', () => {
+	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+	const html = render(CatalogRunForm, {
+		props: { kind: 'stop', entryName: 'web', runAs: 'joe', shell: false, hosts: [host()], action: '?/catalogStop', result: null }
+	}).body;
+	assert.deepEqual(selectValueText(html), ['pi1']);
+	assert.match(html, new RegExp(`<input\\b(?=[^>]*name="host_id")(?=[^>]*value="${HOST_ID}")`));
+});
+
+test('the permissions member select shows the member name, not the user id', () => {
+	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+	const members: Member[] = [
+		{ user_id: MEMBER_ID, email: 'bea@example.com', name: 'Bea', role: 'admin', created_at: '2026-10-13T00:00:00Z' }
+	];
+	const html = render(CatalogPermissionsForm, {
+		props: {
+			action: '?/catalogPermissions',
+			name: 'web',
+			grants: [{ subject: `user:${MEMBER_ID}`, actions: ['run'] }] satisfies CatalogGrant[],
+			members,
+			message: null,
+			loaded: true
+		}
+	}).body;
+	assert.deepEqual(selectValueText(html), ['Bea']);
+	assert.match(html, new RegExp(`<input\\b(?=[^>]*name="member_0_user")(?=[^>]*value="${MEMBER_ID}")`));
+
+	// A member that is gone, or has a blank name, shows the id rather than a blank or misleading label.
+	const GONE = '00000000-0000-4000-8000-0000000000d9';
+	const fallback = render(CatalogPermissionsForm, {
+		props: {
+			action: '?/catalogPermissions',
+			name: 'web',
+			grants: [
+				{ subject: `user:${GONE}`, actions: ['run'] },
+				{ subject: `user:${MEMBER_ID}`, actions: ['logs'] }
+			] satisfies CatalogGrant[],
+			members: [{ ...members[0], name: '  ' }],
+			message: null,
+			loaded: true
+		}
+	}).body;
+	assert.deepEqual(selectValueText(fallback), [GONE, MEMBER_ID]);
+});
+
+test('hoisted KEY=value words leave the command and win over an existing row', () => {
+	const preview = { exec: 'pnpm', args: ['run', 'dev'], env: { NODE_ENV: 'production' }, command_display: 'pnpm run dev' };
+	const line = 'NODE_ENV=production pnpm run dev';
+	assert.deepEqual(hoistPreviewEnv(line, false, [], line, preview), {
+		command: 'pnpm run dev',
+		env: [{ key: 'NODE_ENV', value: 'production' }]
+	});
+	assert.deepEqual(
+		hoistPreviewEnv(line, false, [{ key: 'NODE_ENV', value: 'development' }, { key: 'PORT', value: '3031' }], line, preview),
+		{ command: 'pnpm run dev', env: [{ key: 'NODE_ENV', value: 'production' }, { key: 'PORT', value: '3031' }] }
+	);
+	// Already applied: the field holds command_display, not the previewed line.
+	assert.equal(hoistPreviewEnv('pnpm run dev', false, [{ key: 'NODE_ENV', value: 'production' }], line, preview), null);
+	// The operator typed the prefix again: it is stripped again.
+	assert.deepEqual(hoistPreviewEnv(line, false, [{ key: 'NODE_ENV', value: 'production' }], line, preview), {
+		command: 'pnpm run dev',
+		env: [{ key: 'NODE_ENV', value: 'production' }]
+	});
+	assert.equal(previewToken(false, 'pnpm run dev'), '0\npnpm run dev');
+	assert.notEqual(previewToken(true, 'pnpm run dev'), previewToken(false, 'pnpm run dev'));
+	// Shell mode splits nothing, so nothing moves.
+	assert.equal(hoistPreviewEnv(line, true, [], line, preview), null);
+	// Nothing hoisted: the typed line stays even when command_display is shorter.
+	const plain = { exec: 'pnpm', args: ['run', 'dev'], env: {}, command_display: 'pnpm run dev' };
+	assert.equal(hoistPreviewEnv('pnpm run dev --watch', false, [{ key: 'PORT', value: '3031' }], 'pnpm run dev --watch', plain), null);
+
+	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+	const draft = { name: 'web', command: line, shell: false, dir: '/srv/web', runAs: 'joe', port: '', restart: 'on-failure' as const, env: [] };
+	const html = decode(
+		render(CatalogEntryForm, {
+			props: dialogProps({ mode: 'create', name: null, draft, preview, previewMessage: null, message: null })
+		}).body
+	);
+	assert.match(html, /<input\b(?=[^>]*name="command")(?=[^>]*value="pnpm run dev")/);
+	assert.match(html, /<input\b(?=[^>]*name="env_key")(?=[^>]*value="NODE_ENV")/);
+	assert.match(html, /<input\b(?=[^>]*name="env_value")(?=[^>]*value="production")/);
+	assert.equal(html.includes('will run:'), true);
+	assert.equal(html.includes('>pnpm<'), true);
+});

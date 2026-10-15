@@ -10,7 +10,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import Notice from '$lib/components/Notice.svelte';
 	import type { CatalogEntry, Host } from '$lib/api-types';
-	import { mergePreviewEnv, runAsChoices, shellRisk, shouldApplyPreviewUpdate, submitCatalogPreview } from '$lib/catalog';
+	import { hoistPreviewEnv, previewToken, runAsChoices, shellRisk, shouldApplyPreviewUpdate, submitCatalogPreview } from '$lib/catalog';
 	import type { CatalogDraft, CatalogEditorState } from '$lib/project-action';
 
 	let {
@@ -52,11 +52,12 @@
 		const base = editor ? editor.draft : entry ? fromEntry(entry) : emptyDraft();
 		const shown = editor?.preview;
 		if (!editor || !shown) return base;
-		if (editor.draft.command !== base.command || editor.draft.shell !== base.shell) return base;
-		return { ...base, env: mergePreviewEnv(base.env, shown.env) };
+		const hoisted = hoistPreviewEnv(base.command, base.shell, base.env, editor.draft.command, shown);
+		return hoisted ? { ...base, ...hoisted } : base;
 	}
 
 	const initial = untrack(starting);
+	const hoistedAtStart = untrack(() => editor != null && initial.command !== editor.draft.command);
 	let name = $state(initial.name);
 	let command = $state(initial.command);
 	let shell = $state(initial.shell);
@@ -69,8 +70,8 @@
 	let previewButton = $state<HTMLButtonElement | null>(null);
 	let previewRequest = 0;
 	let previewTimer: ReturnType<typeof setTimeout> | undefined;
-	let lastPreview = '';
-	let appliedPreview = '';
+	// A line the server already parsed (and hoisted) is not parsed again.
+	let lastPreview = hoistedAtStart ? previewToken(initial.shell, initial.command) : '';
 
 	function clearPreviewTimer() {
 		if (previewTimer !== undefined) {
@@ -79,13 +80,13 @@
 		}
 	}
 
-	function previewIdentity(exec: string, args: readonly string[], env: Record<string, string>, display: string): string {
-		return `${display}\n${exec}\n${args.join('\n')}\n${JSON.stringify(env)}`;
-	}
-
 	const choices = $derived(runAsChoices(hosts, shell));
 	const fieldId = $derived(mode === 'edit' && entry ? `catalog-${entry.name}` : 'catalog-new');
-	const matched = $derived(editor != null && editor.draft.command === command && editor.draft.shell === shell);
+	const matched = $derived(
+		editor != null &&
+			editor.draft.shell === shell &&
+			(editor.draft.command === command || editor.preview?.command_display === command)
+	);
 	const preview = $derived(matched ? (editor?.preview ?? null) : null);
 	const previewMessage = $derived(matched ? (editor?.previewMessage ?? null) : null);
 	const saveMessage = $derived(editor?.message ?? null);
@@ -98,19 +99,20 @@
 
 	$effect(() => {
 		const current = preview;
-		if (!current) return;
-		const identity = previewIdentity(current.exec, current.args, current.env, current.command_display);
-		if (identity === appliedPreview) return;
-		appliedPreview = identity;
-		const rows = untrack(() => envRows);
-		envRows = mergePreviewEnv(rows, current.env);
+		if (!current || !editor) return;
+		const applied = hoistPreviewEnv(command, shell, untrack(() => envRows), editor.draft.command, current);
+		if (!applied) return;
+		envRows = applied.env;
+		command = applied.command;
+		// The hoisted line is what the preview parsed; do not parse it again.
+		lastPreview = previewToken(false, applied.command);
 	});
 
 	$effect(() => {
 		if (!browser) return;
 		const line = command;
 		const useShell = shell;
-		const token = `${useShell ? '1' : '0'}\n${line}`;
+		const token = previewToken(useShell, line);
 		if (line.length === 0 || token === lastPreview) return;
 		previewTimer = setTimeout(() => {
 			previewTimer = undefined;
@@ -149,7 +151,7 @@
 		return async ({ update }) => {
 			if (!shouldApplyPreviewUpdate(previewing, mine, previewRequest)) return;
 			await update({ reset: false });
-			if (previewing) lastPreview = `${shell ? '1' : '0'}\n${command}`;
+			if (previewing) lastPreview = previewToken(shell, command);
 		};
 	}}
 >

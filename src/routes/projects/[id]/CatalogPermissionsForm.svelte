@@ -53,6 +53,12 @@
 	let rows = $state<MemberRow[]>(untrack(memberRows));
 	const choosable = $derived(members.filter((member) => member.role !== 'owner'));
 
+	function memberLabel(user: string): string {
+		if (user === '') return 'Choose a member';
+		const name = choosable.find((member) => member.user_id === user)?.name.trim();
+		return name ? name : user;
+	}
+
 	function addMember() {
 		if (rows.length >= 100) return;
 		rows = [...rows, { user: '', run: false, stop: false, restart: false, logs: false }];
@@ -93,11 +99,11 @@
 	<div class="grid gap-2">
 		<p class="text-sm font-medium">Members</p>
 		{#each rows as row, index (index)}
-			<div class="grid gap-2">
+			<div class="grid min-w-0 gap-2">
 				<Label class="sr-only" for="catalog-member-{index}">Member {index + 1}</Label>
 				<Select.Root type="single" name="member_{index}_user" bind:value={rows[index].user}>
-					<Select.Trigger id="catalog-member-{index}" class="w-full">
-						<Select.Value placeholder="Choose a member" />
+					<Select.Trigger id="catalog-member-{index}" class="w-full min-w-0">
+						<Select.Value placeholder="Choose a member" class="min-w-0 truncate">{memberLabel(row.user)}</Select.Value>
 					</Select.Trigger>
 					<Select.Content>
 						{#each choosable as member (member.user_id)}
