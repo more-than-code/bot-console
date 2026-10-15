@@ -86,6 +86,99 @@ export type Host = {
 	relation: HostRelation;
 	/** Null when `relation` is owner. */
 	share_level: ShareLevel | null;
+	/** Null when the agent reports no program policy. */
+	programs: HostPrograms | null;
+};
+
+/** What the caller may do with one catalog entry. `status` comes with any other action. */
+export type CatalogAction = 'run' | 'stop' | 'restart' | 'logs' | 'status';
+
+export type CatalogGrantAction = 'run' | 'stop' | 'restart' | 'logs';
+
+export type CatalogRestart = 'on-failure' | 'no';
+
+/** Program policy from the agent's hello. Paths and executables stay on the host. */
+export type HostPrograms = {
+	enabled: boolean;
+	run_as: string[];
+	allow_shell: boolean;
+	policy_hash: string;
+};
+
+export type ProgramSpec = {
+	dir: string;
+	exec: string;
+	args: string[];
+	shell: boolean;
+	run_as: string;
+	env: Record<string, string>;
+	port: number | null;
+	restart: CatalogRestart;
+};
+
+export type CatalogEntry = {
+	id: string;
+	project_id: string;
+	name: string;
+	kind: 'program';
+	spec: ProgramSpec;
+	spec_hash: string;
+	command_display: string;
+	created_by: string;
+	created_at: string;
+	updated_at: string;
+	my_actions: CatalogAction[];
+};
+
+/** `role:admin`, `role:viewer`, or `user:<uuid>`. The owner is never a subject. */
+export type CatalogGrant = {
+	subject: string;
+	actions: CatalogGrantAction[];
+};
+
+export type CatalogPreview = {
+	exec: string;
+	args: string[];
+	env: Record<string, string>;
+	command_display: string;
+};
+
+export type ApprovalStatus = 'pending' | 'approved';
+
+export type Approval = {
+	entry_id: string;
+	entry_name: string;
+	project_id: string;
+	project_name: string;
+	host_id: string;
+	spec_hash: string;
+	command_display: string;
+	exec: string;
+	args: string[];
+	env: Record<string, string>;
+	dir: string;
+	run_as: string;
+	shell: boolean;
+	status: ApprovalStatus;
+	requested_by: string;
+	requested_at: string;
+	approved_by: string | null;
+	approved_at: string | null;
+};
+
+export type ProgramStatus = {
+	unit: string;
+	active_state: string;
+	sub_state: string;
+	main_pid: number | null;
+	started_at: string | null;
+	ports: number[];
+};
+
+export type ProgramLogs = {
+	unit: string;
+	lines: string[];
+	truncated: boolean;
 };
 
 export type HealthStatus = 'up' | 'down' | 'unknown';
@@ -121,6 +214,8 @@ export type ServiceSummary = {
 	project_id: string | null;
 	/** Host that runs the service. Missing becomes null; a bad id fails the row. */
 	host_id: string | null;
+	/** Catalog entry name when this service was started from the catalog. Otherwise null. */
+	catalog_entry: string | null;
 };
 
 export type ServiceRow = ServiceSummary & {

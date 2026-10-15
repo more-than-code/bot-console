@@ -50,7 +50,8 @@ const HOST: Host = {
 	enrolled_at: '2026-10-13T00:00:00Z',
 	revoked_at: null,
 	relation: 'owner',
-	share_level: null
+	share_level: null,
+	programs: null
 };
 
 const OTHER = { ...PROJECT, id: OTHER_ID, name: 'Share', slug: 'share', role: 'admin' as const };
@@ -894,6 +895,7 @@ function serviceRow(projectName: string, overrides: Partial<ProjectServiceRow> =
 		project_name: projectName,
 		checks: [{ id: CHECK_ID, protocol: 'http', port: 80, path: '/health', enabled: true }],
 		checksMessage: null,
+		catalog_entry: null,
 		...overrides
 	};
 }

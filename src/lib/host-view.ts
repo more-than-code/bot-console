@@ -1,4 +1,4 @@
-import type { Host, ProcessItem, ProcessSample, ProjectServiceRow } from './api-types';
+import type { Approval, Host, ProcessItem, ProcessSample, ProjectServiceRow } from './api-types';
 import { parseRange, type RangeKey } from './ranges';
 import { serviceLabel } from './service-label';
 import type { Column, SortDir } from './table';
@@ -119,6 +119,12 @@ export type HostPage = {
 	metrics: MetricChart[];
 	processes: ProcessSample | null;
 	processesMessage: string | null;
+	/** Owning-project admin+. The approvals queue stays hidden for everyone else. */
+	canApproveCatalog: boolean;
+	approvals: Approval[];
+	approvalsOmitted: number;
+	approvalsTruncated: boolean;
+	approvalsMessage: string | null;
 };
 
 export function parseHostTab(value: string | null): HostTab {

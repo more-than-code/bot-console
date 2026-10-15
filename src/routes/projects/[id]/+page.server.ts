@@ -1,13 +1,27 @@
 import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
-import type { Host, Invite, JoinToken, Member, ProjectService, ProjectServiceRow } from '$lib/api-types';
+import type { CatalogEntry, Host, Invite, JoinToken, Member, ProjectService, ProjectServiceRow } from '$lib/api-types';
+import { catalogForCaller, isCatalogName } from '$lib/catalog';
 import { SERVICE_DEFAULT_DIR, SERVICE_DEFAULT_SORT, serviceColumns, serviceHostReachable } from '$lib/host-view';
-import type { ProjectScope } from '$lib/project-action';
+import type { CatalogPermissionsState, ProjectScope } from '$lib/project-action';
 import { ApiError, actionFailure, apiFetch, apiList, loadFailure } from '$lib/server/api';
+import {
+	catalogCreate,
+	catalogDelete,
+	catalogLogs,
+	catalogParse,
+	catalogPermissions,
+	catalogRestart,
+	catalogRun,
+	catalogStop,
+	catalogUpdate
+} from '$lib/server/catalog-actions';
 import { formText } from '$lib/server/form';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
 import { roleAtLeast, uiRole } from '$lib/server/roles';
 import {
+	parseCatalogGrants,
+	parseCatalogList,
 	parseCreatedInvite,
 	parseCreatedJoin,
 	parseHost,
@@ -39,6 +53,7 @@ function tabOf(value: string | null, canAdmin: boolean, canOwner: boolean): Proj
 	if (value === 'tokens') return canAdmin ? 'tokens' : 'hosts';
 	if (value === 'members') return 'members';
 	if (value === 'services') return 'services';
+	if (value === 'catalog') return 'catalog';
 	return 'hosts';
 }
 
@@ -129,6 +144,11 @@ const empty = {
 	invitesOmitted: 0,
 	invitesTruncated: false,
 	invitesMessage: null as string | null,
+	catalog: [] as CatalogEntry[],
+	catalogOmitted: 0,
+	catalogTruncated: false,
+	catalogMessage: null as string | null,
+	permissions: null as CatalogPermissionsState | null,
 	...noServices
 };
 
@@ -209,6 +229,29 @@ export const load: PageServerLoad = async (event) => {
 	const reachableHostIds = new Set(hosts.filter(serviceHostReachable).map((host) => host.id));
 	const services = tab === 'services' ? await loadProjectServices(event, id, reachableHostIds) : noServices;
 
+	let catalog: CatalogEntry[] = [];
+	let catalogOmitted = 0;
+	let catalogTruncated = false;
+	let catalogMessage: string | null = null;
+	let permissions: CatalogPermissionsState | null = null;
+	if (tab === 'catalog') {
+		try {
+			const parsed = parseCatalogList(await apiFetch(event, `/v1/projects/${id}/catalog`));
+			if (!parsed) catalogMessage = 'The API returned an unexpected response.';
+			else {
+				catalog = catalogForCaller(parsed.items, canOwner);
+				catalogOmitted = parsed.omitted;
+				catalogTruncated = parsed.truncated;
+			}
+		} catch (err) {
+			catalogMessage = loadFailure(err).message;
+		}
+		const requested = event.url.searchParams.get('permissions');
+		if (canOwner && requested && isCatalogName(requested)) {
+			permissions = await loadPermissions(event, id, requested);
+		}
+	}
+
 	return present(event, {
 		project,
 		userId,
@@ -232,9 +275,25 @@ export const load: PageServerLoad = async (event) => {
 		invitesOmitted,
 		invitesTruncated,
 		invitesMessage,
+		catalog,
+		catalogOmitted,
+		catalogTruncated,
+		catalogMessage,
+		permissions,
 		...services
 	});
 };
+
+async function loadPermissions(event: RequestEvent, id: string, name: string): Promise<CatalogPermissionsState> {
+	try {
+		const grants = parseCatalogGrants(await apiFetch(event, `/v1/projects/${id}/catalog/${name}/permissions`));
+		if (!grants) return { name, grants: [], message: 'The API returned an unexpected response.', loaded: false };
+		return { name, grants, message: null, loaded: true };
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return { name, grants: [], message: loadFailure(err).message, loaded: false };
+	}
+}
 
 const INVITE_EXPIRY_SEC: Record<string, number> = {
 	'86400': 86400,
@@ -291,6 +350,15 @@ async function renameService(event: RequestEvent, serviceId: string, form: FormD
 }
 
 export const actions: Actions = {
+	catalogCreate,
+	catalogUpdate,
+	catalogDelete,
+	catalogParse,
+	catalogRun,
+	catalogStop,
+	catalogRestart,
+	catalogLogs,
+	catalogPermissions,
 	askRevoke: async (event) => {
 		requireUser(event);
 		projectId(event.params);

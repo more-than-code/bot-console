@@ -23,7 +23,8 @@ const CODE_STATUS: Record<string, number> = {
 	authorization_pending: 400,
 	slow_down: 400,
 	expired_token: 400,
-	access_denied: 400
+	access_denied: 400,
+	not_implemented: 501
 };
 
 export class ApiError extends Error {

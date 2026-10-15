@@ -4,10 +4,13 @@ import type { HostPage, MetricChart, ProcessSort, ServiceLink } from '$lib/host-
 import { hostQuery, METRIC_SPECS } from '$lib/host-view';
 import { rangeWindow, type RangeKey } from '$lib/ranges';
 import { processServiceHref, serviceLabel } from '$lib/service-label';
+import { approveCatalog, revokeCatalog } from '$lib/server/catalog-actions';
 import { actionFailure, apiFetch, loadFailure } from '$lib/server/api';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
+import { roleAtLeast } from '$lib/server/roles';
 import {
+	parseApprovalList,
 	parseHost,
 	parseListPayload,
 	parseMetricPayload,
@@ -26,6 +29,14 @@ function hostId(params: { id?: string }): string {
 	return params.id;
 }
 
+const noApprovals = {
+	canApproveCatalog: false,
+	approvals: [],
+	approvalsOmitted: 0,
+	approvalsTruncated: false,
+	approvalsMessage: null as string | null
+};
+
 function blank(tab: HostPage['tab'], range: RangeKey, processSort: ProcessSort, message: string): HostPage {
 	return {
 		host: null,
@@ -37,7 +48,8 @@ function blank(tab: HostPage['tab'], range: RangeKey, processSort: ProcessSort, 
 		serviceLinks: {},
 		metrics: [],
 		processes: null,
-		processesMessage: null
+		processesMessage: null,
+		...noApprovals
 	};
 }
 
@@ -80,7 +92,8 @@ async function loadOverview(event: LoadEvent, host: Host, range: RangeKey, proce
 		serviceLinks: {},
 		metrics,
 		processes: null,
-		processesMessage: null
+		processesMessage: null,
+		...noApprovals
 	};
 }
 
@@ -159,8 +172,33 @@ async function loadProcesses(event: RequestEvent, host: Host, range: RangeKey, p
 		serviceLinks,
 		metrics: [],
 		processes: processes.sample,
-		processesMessage: processes.message
+		processesMessage: processes.message,
+		...noApprovals
 	};
+}
+
+function canApprove(event: RequestEvent, host: Host): boolean {
+	const role = event.locals.projects.find((project) => project.id === host.project_id)?.role ?? null;
+	return roleAtLeast(role, 'admin');
+}
+
+/** One list call. A failure stays on this section and does not replace the page message. */
+async function loadApprovals(event: RequestEvent, host: Host): Promise<Pick<HostPage, 'canApproveCatalog' | 'approvals' | 'approvalsOmitted' | 'approvalsTruncated' | 'approvalsMessage'>> {
+	if (!canApprove(event, host)) return noApprovals;
+	try {
+		const parsed = parseApprovalList(await apiFetch(event, `/v1/hosts/${host.id}/catalog-approvals`));
+		if (!parsed) return { ...noApprovals, canApproveCatalog: true, approvalsMessage: 'The API returned an unexpected response.' };
+		return {
+			canApproveCatalog: true,
+			approvals: parsed.items,
+			approvalsOmitted: parsed.omitted,
+			approvalsTruncated: parsed.truncated,
+			approvalsMessage: null
+		};
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return { ...noApprovals, canApproveCatalog: true, approvalsMessage: loadFailure(err).message };
+	}
 }
 
 export const load: PageServerLoad = async (event) => {
@@ -174,8 +212,9 @@ export const load: PageServerLoad = async (event) => {
 			const project = await projectForServices(event, host);
 			if (project) redirect(303, `/projects/${project}?tab=services&services.host=${host.id}`);
 		}
-		if (query.tab === 'processes') return present(event, await loadProcesses(event, host, query.range, query.processSort));
-		return present(event, await loadOverview(event, host, query.range, query.processSort));
+		const approvals = await loadApprovals(event, host);
+		if (query.tab === 'processes') return present(event, { ...(await loadProcesses(event, host, query.range, query.processSort)), ...approvals });
+		return present(event, { ...(await loadOverview(event, host, query.range, query.processSort)), ...approvals });
 	} catch (err) {
 		const failure = loadFailure(err);
 		return present(event, blank(query.tab, query.range, query.processSort, failure.message));
@@ -183,6 +222,8 @@ export const load: PageServerLoad = async (event) => {
 };
 
 export const actions: Actions = {
+	approveCatalog,
+	revokeCatalog,
 	snapshot: async (event) => {
 		requireUser(event);
 		const id = hostId(event.params);

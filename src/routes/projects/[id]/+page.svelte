@@ -3,7 +3,11 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { servicesRenameView, type ProjectActionData, type ProjectScope } from '$lib/project-action';
+	import CatalogEntryDialog from './CatalogEntryDialog.svelte';
+	import CatalogSection from './CatalogSection.svelte';
 	import HostsSection from './HostsSection.svelte';
+	import { actionUrlFrom } from '$lib/url';
+	import { page } from '$app/state';
 	import MembersSection from './MembersSection.svelte';
 	import ServicesSection from './ServicesSection.svelte';
 	import SettingsSection from './SettingsSection.svelte';
@@ -14,12 +18,22 @@
 	const scope = $derived<ProjectScope>(action?.scope ?? data.tab ?? 'hosts');
 	const sectionMessage = $derived(action?.scope === scope ? (action.message ?? null) : null);
 	const rename = $derived(servicesRenameView(action));
+	const catalogEditor = $derived(action?.scope === 'catalog' ? (action.catalogEditor ?? null) : null);
+	const catalogRun = $derived(action?.scope === 'catalog' ? (action.catalogAction ?? null) : null);
+	const catalogPermissions = $derived(
+		action?.scope === 'catalog' && action.permissions ? action.permissions : (data.permissions ?? null)
+	);
+	const catalogMessage = $derived.by(() => {
+		if (catalogEditor || catalogRun || (action?.scope === 'catalog' && action.permissions)) return data.catalogMessage ?? null;
+		return sectionMessage ?? data.catalogMessage ?? null;
+	});
 
 	const tabs = $derived(
 		data.project
 			? [
 					{ key: 'hosts', label: 'Hosts', href: `/projects/${data.project.id}?tab=hosts` },
 					{ key: 'services', label: 'Services', href: `/projects/${data.project.id}?tab=services` },
+					{ key: 'catalog', label: 'Catalog', href: `/projects/${data.project.id}?tab=catalog` },
 					{ key: 'members', label: 'Members', href: `/projects/${data.project.id}?tab=members` },
 					...(data.canAdmin
 						? [{ key: 'tokens', label: 'Join tokens', href: `/projects/${data.project.id}?tab=tokens` }]
@@ -44,7 +58,20 @@
 		title={data.project.name}
 		subtitle="{data.project.slug} · your role {data.project.role}"
 		breadcrumbs={[{ label: 'Projects', href: '/projects' }, { label: data.project.name }]}
-	/>
+	>
+		{#snippet actions()}
+			{#if scope === 'catalog' && data.canOwner}
+				<CatalogEntryDialog
+					mode="create"
+					hosts={data.hosts ?? []}
+					saveAction={actionUrlFrom(page.url, 'catalogCreate')}
+					parseAction={actionUrlFrom(page.url, 'catalogParse')}
+					revealed={catalogEditor?.mode === 'create'}
+					editor={catalogEditor?.mode === 'create' ? catalogEditor : null}
+				/>
+			{/if}
+		{/snippet}
+	</PageHeader>
 	<Tabs label="Project sections" current={scope} items={tabs} />
 
 	{#if scope === 'hosts'}
@@ -71,6 +98,19 @@
 			probeServiceId={action?.scope === 'services' ? (action.probeServiceId ?? null) : null}
 			renameServiceId={rename.renameServiceId}
 			typedName={rename.typedName}
+		/>
+	{:else if scope === 'catalog'}
+		<CatalogSection
+			canOwner={data.canOwner}
+			entries={data.catalog ?? []}
+			omitted={data.catalogOmitted ?? 0}
+			truncated={data.catalogTruncated ?? false}
+			message={catalogMessage}
+			hosts={data.hosts ?? []}
+			members={data.members ?? []}
+			editor={catalogEditor?.mode === 'edit' ? catalogEditor : null}
+			run={catalogRun}
+			permissions={catalogPermissions}
 		/>
 	{:else if scope === 'members'}
 		<MembersSection

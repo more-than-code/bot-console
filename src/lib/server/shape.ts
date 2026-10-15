@@ -1,10 +1,17 @@
 import type {
+	Approval,
+	CatalogAction,
+	CatalogEntry,
+	CatalogGrant,
+	CatalogGrantAction,
+	CatalogPreview,
 	CreatedInvite,
 	DeviceView,
 	Grant,
 	Health,
 	HealthCheck,
 	Host,
+	HostPrograms,
 	HostStatus,
 	ShareLevel,
 	Invite,
@@ -14,6 +21,9 @@ import type {
 	ProbeView,
 	ProcessItem,
 	ProcessSample,
+	ProgramLogs,
+	ProgramSpec,
+	ProgramStatus,
 	Project,
 	ProjectService,
 	ServiceSummary,
@@ -21,10 +31,13 @@ import type {
 	SnapshotView,
 	User
 } from '../api-types';
+import { CATALOG_NAME, ENV_KEY, GRANT_ACTIONS, RUN_AS, SPEC_HASH } from '../catalog';
 import { isRole } from './roles';
 import { acceptedInstallCommand, acceptedInviteUrl, consentRedirect, isJoinToken, isOauthRequestId, isUuid } from './validate';
 
 const CONTROL = /[\u0000-\u001F\u007F]/;
+/** Catalog command, dir, args, and env values forbid NUL and newline. A tab is kept. */
+const LINE_BREAK = /[\u0000\n\r]/;
 const PATH_MAX_BYTES = 512;
 const utf8 = new TextEncoder();
 
@@ -134,6 +147,7 @@ export function parseHost(value: unknown): Host | null {
 	if (agent_version === undefined || last_seen_at === undefined || revoked_at === undefined) return null;
 	const share = parseHostShare(value);
 	if (!share) return null;
+	const programs = parseProgramsField(value);
 	return {
 		id,
 		project_id,
@@ -148,8 +162,35 @@ export function parseHost(value: unknown): Host | null {
 		enrolled_at,
 		revoked_at,
 		relation: share.relation,
-		share_level: share.share_level
+		share_level: share.share_level,
+		programs
 	};
+}
+
+/**
+ * A missing key or null is "no policy". A present object that does not parse is also
+ * "no policy": the host stays on the page, and the catalog treats programs as absent.
+ */
+function parseProgramsField(value: Record<string, unknown>): HostPrograms | null {
+	if (!Object.hasOwn(value, 'programs') || value.programs == null) return null;
+	return parseHostPrograms(value.programs);
+}
+
+/** Above this, the list is not a policy the console can offer. The host is kept with programs null. */
+const RUN_AS_LIST_CAP = 256;
+const POLICY_HASH_MAX = 4096;
+
+export function parseHostPrograms(value: unknown): HostPrograms | null {
+	if (!isRecord(value) || typeof value.enabled !== 'boolean' || typeof value.allow_shell !== 'boolean') return null;
+	if (!Array.isArray(value.run_as) || value.run_as.length > RUN_AS_LIST_CAP) return null;
+	const run_as: string[] = [];
+	for (const item of value.run_as) {
+		if (typeof item !== 'string' || item === 'root' || !RUN_AS.test(item)) return null;
+		run_as.push(item);
+	}
+	if (typeof value.policy_hash !== 'string' || value.policy_hash.length === 0 || value.policy_hash.length > POLICY_HASH_MAX) return null;
+	if (LINE_BREAK.test(value.policy_hash)) return null;
+	return { enabled: value.enabled, run_as, allow_shell: value.allow_shell, policy_hash: value.policy_hash };
 }
 
 /** Owner carries a null level. A share must name metrics or deploy. */
@@ -288,6 +329,8 @@ export function parseService(value: unknown): ServiceSummary | null {
 	const host_id = optionalUuid(value.host_id);
 	if (last_seen_at === undefined || display_name === undefined || owner_user === undefined) return null;
 	if (project_id === undefined || host_id === undefined) return null;
+	const catalog_entry = parseCatalogEntryName(value);
+	if (catalog_entry === undefined) return null;
 	return {
 		id,
 		name,
@@ -299,8 +342,17 @@ export function parseService(value: unknown): ServiceSummary | null {
 		display_name,
 		owner_user,
 		project_id,
-		host_id
+		host_id,
+		catalog_entry
 	};
+}
+
+/** Missing or null is not a catalog service. A present value must be an entry name. */
+function parseCatalogEntryName(value: Record<string, unknown>): string | null | undefined {
+	if (!Object.hasOwn(value, 'catalog_entry') || value.catalog_entry == null) return null;
+	const name = text(value.catalog_entry, 48);
+	if (!name || !CATALOG_NAME.test(name)) return undefined;
+	return name;
 }
 
 const PAGE_CURSOR_MAX = 512;
@@ -640,4 +692,263 @@ export function parseProbe(value: unknown): ProbeView | null {
 		latency_ms: nullableNumber(value.latency_ms),
 		checked_at: optionalText(value.checked_at, 64) ?? null
 	};
+}
+
+const CATALOG_ACTIONS = new Set<CatalogAction>(['run', 'stop', 'restart', 'logs', 'status']);
+const GRANT_ACTION_SET = new Set<CatalogGrantAction>(GRANT_ACTIONS);
+const ENTRY_CAP = 200;
+const GRANT_LIST_CAP = 100;
+const LOG_LINE_CAP = 1000;
+const LOG_LINE_MAX = 8192;
+
+/** command_display is kept whole. Only an empty value, or one with NUL or a newline, is dropped. */
+function commandDisplay(value: unknown): string | null {
+	if (typeof value !== 'string' || value.length === 0 || LINE_BREAK.test(value)) return null;
+	if (value.trim() === '') return null;
+	return value;
+}
+
+function requireKey(value: Record<string, unknown>, key: string): boolean {
+	return Object.hasOwn(value, key);
+}
+
+function parseDir(value: unknown): string | null {
+	if (typeof value !== 'string' || LINE_BREAK.test(value) || utf8.encode(value).byteLength > 255) return null;
+	if (!value.startsWith('/') || value.split('/').includes('..')) return null;
+	return value;
+}
+
+function parseArgs(value: unknown): string[] | null {
+	if (!Array.isArray(value) || value.length > 32) return null;
+	const args: string[] = [];
+	for (const item of value) {
+		if (typeof item !== 'string' || utf8.encode(item).byteLength > 4096 || LINE_BREAK.test(item)) return null;
+		args.push(item);
+	}
+	return args;
+}
+
+/** Stored env is kept as the API sent it, including keys the write path will later refuse. */
+function parseEnv(value: unknown): Record<string, string> | null {
+	if (!isRecord(value)) return null;
+	const keys = Object.keys(value);
+	if (keys.length > 64) return null;
+	const env: Record<string, string> = {};
+	for (const key of keys) {
+		if (!ENV_KEY.test(key)) return null;
+		const raw = value[key];
+		if (typeof raw !== 'string' || utf8.encode(raw).byteLength > 4096 || LINE_BREAK.test(raw)) return null;
+		env[key] = raw;
+	}
+	return env;
+}
+
+function parseProgramPort(value: unknown): number | null | undefined {
+	if (value === null) return null;
+	if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 65535) return undefined;
+	return value;
+}
+
+export function parseProgramSpec(value: unknown): ProgramSpec | null {
+	if (!isRecord(value) || typeof value.shell !== 'boolean') return null;
+	if (!requireKey(value, 'port') || !requireKey(value, 'env') || !requireKey(value, 'args')) return null;
+	const dir = parseDir(value.dir);
+	const exec = text(value.exec, 256);
+	const args = parseArgs(value.args);
+	const run_as = text(value.run_as, 32);
+	const env = parseEnv(value.env);
+	const port = parseProgramPort(value.port);
+	if (!dir || !exec || !args || !run_as || run_as === 'root' || !RUN_AS.test(run_as) || !env || port === undefined) return null;
+	if (value.restart !== 'on-failure' && value.restart !== 'no') return null;
+	return { dir, exec, args, shell: value.shell, run_as, env, port, restart: value.restart };
+}
+
+function parseMyActions(value: unknown): CatalogAction[] | null {
+	if (!Array.isArray(value) || value.length > CATALOG_ACTIONS.size) return null;
+	const actions: CatalogAction[] = [];
+	for (const item of value) {
+		if (typeof item !== 'string' || !CATALOG_ACTIONS.has(item as CatalogAction) || actions.includes(item as CatalogAction)) {
+			return null;
+		}
+		actions.push(item as CatalogAction);
+	}
+	return actions;
+}
+
+export function parseCatalogEntry(value: unknown): CatalogEntry | null {
+	if (!isRecord(value) || value.kind !== 'program') return null;
+	const id = text(value.id, 36);
+	const project_id = text(value.project_id, 36);
+	const name = text(value.name, 48);
+	const spec = parseProgramSpec(value.spec);
+	const spec_hash = text(value.spec_hash, 64);
+	const command_display = commandDisplay(value.command_display);
+	const created_by = text(value.created_by, 36);
+	const created_at = timestamp(value.created_at);
+	const updated_at = timestamp(value.updated_at);
+	const my_actions = parseMyActions(value.my_actions);
+	if (!id || !isUuid(id) || !project_id || !isUuid(project_id) || !name || !CATALOG_NAME.test(name)) return null;
+	if (!spec || !spec_hash || !SPEC_HASH.test(spec_hash) || !command_display) return null;
+	if (!created_by || !isUuid(created_by) || !created_at || !updated_at || !my_actions) return null;
+	return { id, project_id, name, kind: 'program', spec, spec_hash, command_display, created_by, created_at, updated_at, my_actions };
+}
+
+function parseGrantActions(value: unknown): CatalogGrantAction[] | null {
+	if (!Array.isArray(value) || value.length === 0 || value.length > GRANT_ACTIONS.length) return null;
+	const actions: CatalogGrantAction[] = [];
+	for (const item of value) {
+		if (typeof item !== 'string' || !GRANT_ACTION_SET.has(item as CatalogGrantAction) || actions.includes(item as CatalogGrantAction)) {
+			return null;
+		}
+		actions.push(item as CatalogGrantAction);
+	}
+	return actions;
+}
+
+function parseGrantSubject(value: unknown): string | null {
+	const subject = text(value, 48);
+	if (!subject) return null;
+	if (subject === 'role:viewer' || subject === 'role:admin') return subject;
+	if (!subject.startsWith('user:')) return null;
+	const id = subject.slice('user:'.length);
+	if (!isUuid(id)) return null;
+	return subject;
+}
+
+export function parseCatalogGrant(value: unknown): CatalogGrant | null {
+	if (!isRecord(value)) return null;
+	const subject = parseGrantSubject(value.subject);
+	const actions = parseGrantActions(value.actions);
+	if (!subject || !actions) return null;
+	return { subject, actions };
+}
+
+/** Duplicate subjects, an empty action list, or more than 100 grants fail the whole payload. */
+export function parseCatalogGrants(payload: unknown): CatalogGrant[] | null {
+	if (!isRecord(payload) || !Array.isArray(payload.grants) || payload.grants.length > GRANT_LIST_CAP) return null;
+	const grants: CatalogGrant[] = [];
+	const seen = new Set<string>();
+	for (const item of payload.grants) {
+		const grant = parseCatalogGrant(item);
+		if (!grant || seen.has(grant.subject)) return null;
+		seen.add(grant.subject);
+		grants.push(grant);
+	}
+	return grants;
+}
+
+export function parseCatalogPreview(value: unknown): CatalogPreview | null {
+	if (!isRecord(value) || !requireKey(value, 'env') || !requireKey(value, 'args')) return null;
+	const exec = text(value.exec, 256);
+	const args = parseArgs(value.args);
+	const env = parseEnv(value.env);
+	const command_display = commandDisplay(value.command_display);
+	if (!exec || !args || !env || !command_display) return null;
+	return { exec, args, env, command_display };
+}
+
+export function parseApproval(value: unknown): Approval | null {
+	if (!isRecord(value) || typeof value.shell !== 'boolean') return null;
+	if (!requireKey(value, 'approved_by') || !requireKey(value, 'approved_at')) return null;
+	if (!requireKey(value, 'exec') || !requireKey(value, 'args') || !requireKey(value, 'env')) return null;
+	const entry_id = text(value.entry_id, 36);
+	const entry_name = text(value.entry_name, 48);
+	const project_id = text(value.project_id, 36);
+	const project_name = text(value.project_name, 80);
+	const host_id = text(value.host_id, 36);
+	const spec_hash = text(value.spec_hash, 64);
+	const command_display = commandDisplay(value.command_display);
+	const exec = text(value.exec, 256);
+	const args = parseArgs(value.args);
+	const env = parseEnv(value.env);
+	const dir = parseDir(value.dir);
+	const run_as = text(value.run_as, 32);
+	const requested_by = text(value.requested_by, 36);
+	const requested_at = timestamp(value.requested_at);
+	const approved_by = optionalUuid(value.approved_by);
+	const approved_at = optionalText(value.approved_at, 64);
+	if (!entry_id || !isUuid(entry_id) || !entry_name || !CATALOG_NAME.test(entry_name)) return null;
+	if (!project_id || !isUuid(project_id) || !project_name || !host_id || !isUuid(host_id)) return null;
+	if (!spec_hash || !SPEC_HASH.test(spec_hash) || !command_display || !exec || !args || !env || !dir) return null;
+	if (!run_as || run_as === 'root' || !RUN_AS.test(run_as) || !requested_by || !isUuid(requested_by) || !requested_at) return null;
+	if (approved_by === undefined || approved_at === undefined) return null;
+	if (value.status !== 'pending' && value.status !== 'approved') return null;
+	return {
+		entry_id,
+		entry_name,
+		project_id,
+		project_name,
+		host_id,
+		spec_hash,
+		command_display,
+		exec,
+		args,
+		env,
+		dir,
+		run_as,
+		shell: value.shell,
+		status: value.status,
+		requested_by,
+		requested_at,
+		approved_by,
+		approved_at
+	};
+}
+
+export function parseProgramStatus(value: unknown): ProgramStatus | null {
+	if (!isRecord(value)) return null;
+	if (!requireKey(value, 'main_pid') || !requireKey(value, 'started_at') || !requireKey(value, 'ports')) return null;
+	const unit = text(value.unit, 200);
+	const active_state = text(value.active_state, 64);
+	const sub_state = text(value.sub_state, 64);
+	const started_at = optionalText(value.started_at, 64);
+	const ports = parsePorts(value.ports);
+	if (!unit || !active_state || !sub_state || started_at === undefined || !ports) return null;
+	let main_pid: number | null;
+	if (value.main_pid == null) main_pid = null;
+	else if (typeof value.main_pid !== 'number' || !Number.isSafeInteger(value.main_pid) || value.main_pid < 0) return null;
+	else main_pid = value.main_pid;
+	return { unit, active_state, sub_state, main_pid, started_at, ports };
+}
+
+export function parseProgramLogs(value: unknown): ProgramLogs | null {
+	if (!isRecord(value) || typeof value.truncated !== 'boolean' || !Array.isArray(value.lines)) return null;
+	const unit = text(value.unit, 200);
+	if (!unit) return null;
+	const capped = value.lines.slice(0, LOG_LINE_CAP);
+	const lines: string[] = [];
+	for (const item of capped) {
+		if (typeof item !== 'string') return null;
+		lines.push(displayText(item, LOG_LINE_MAX));
+	}
+	return { unit, lines, truncated: value.truncated || value.lines.length > LOG_LINE_CAP };
+}
+
+export type CatalogList = { items: CatalogEntry[]; omitted: number; truncated: boolean };
+
+/** One catalog page. A bad row is left out. A `next_cursor` marks the list truncated. */
+export function parseCatalogList(payload: unknown): CatalogList | null {
+	const page = parseListPayload(payload);
+	if (!page) return null;
+	return collectRows(page.raw, page.next != null, parseCatalogEntry);
+}
+
+export type ApprovalList = { items: Approval[]; omitted: number; truncated: boolean };
+
+export function parseApprovalList(payload: unknown): ApprovalList | null {
+	const page = parseListPayload(payload);
+	if (!page) return null;
+	return collectRows(page.raw, page.next != null, parseApproval);
+}
+
+function collectRows<T>(raw: unknown[], truncated: boolean, parse: (value: unknown) => T | null): { items: T[]; omitted: number; truncated: boolean } {
+	const capped = raw.slice(0, ENTRY_CAP);
+	let omitted = raw.length - capped.length;
+	const items: T[] = [];
+	for (const item of capped) {
+		const parsed = parse(item);
+		if (parsed) items.push(parsed);
+		else omitted += 1;
+	}
+	return { items, omitted, truncated: truncated || raw.length > ENTRY_CAP };
 }

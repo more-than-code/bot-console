@@ -1,7 +1,57 @@
-import type { CreatedJoin, InviteRole, ProbeView } from '$lib/api-types';
+import type {
+	CatalogGrant,
+	CatalogPreview,
+	CatalogRestart,
+	CreatedJoin,
+	InviteRole,
+	ProbeView,
+	ProgramLogs,
+	ProgramStatus
+} from '$lib/api-types';
 import { nextFormDialog, type DialogState } from '$lib/dialog-open';
 
-export type ProjectScope = 'hosts' | 'services' | 'members' | 'tokens' | 'settings';
+export type ProjectScope = 'hosts' | 'services' | 'catalog' | 'members' | 'tokens' | 'settings';
+
+export type CatalogRunKind = 'run' | 'stop' | 'restart' | 'logs';
+
+export type CatalogDraft = {
+	name: string;
+	command: string;
+	shell: boolean;
+	dir: string;
+	runAs: string;
+	port: string;
+	restart: CatalogRestart;
+	env: Array<{ key: string; value: string }>;
+};
+
+/** Create or edit dialog after a preview or a failed save. */
+export type CatalogEditorState = {
+	mode: 'create' | 'edit';
+	name: string | null;
+	draft: CatalogDraft;
+	preview: CatalogPreview | null;
+	previewMessage: string | null;
+	message: string | null;
+};
+
+/** Run, stop, restart, or logs dialog. A new `resultId` opens it again. */
+export type CatalogRunState = {
+	name: string;
+	kind: CatalogRunKind;
+	resultId: string;
+	status: ProgramStatus | null;
+	logs: ProgramLogs | null;
+	message: string | null;
+};
+
+/** Permissions dialog. `loaded` is false when the grant list could not be read. */
+export type CatalogPermissionsState = {
+	name: string;
+	grants: CatalogGrant[];
+	message: string | null;
+	loaded: boolean;
+};
 
 export type ProjectActionData = {
 	scope: ProjectScope;
@@ -16,6 +66,9 @@ export type ProjectActionData = {
 	inviteUrl?: string;
 	inviteRole?: InviteRole;
 	inviteMessage?: string;
+	catalogEditor?: CatalogEditorState;
+	catalogAction?: CatalogRunState;
+	permissions?: CatalogPermissionsState;
 };
 
 export type RenameOpenState = DialogState;

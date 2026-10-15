@@ -20,6 +20,7 @@
 	import { canRenameService, serviceLabel } from '$lib/service-label';
 	import { serverHostHiddenFields } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
+	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
@@ -158,6 +159,9 @@
 		<tr id={serviceDomId(service.id)}>
 			<td class="p-2 align-middle">
 				<span class="mr-2">{serviceLabel(service)}</span>
+				{#if service.catalog_entry}
+					<Badge variant="secondary">catalog</Badge>
+				{/if}
 				{#if renameAllowed(service)}
 					<RenameService
 						action={actionUrlFrom(page.url, 'rename')}

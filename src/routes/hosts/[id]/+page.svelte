@@ -5,6 +5,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { METRIC_REFRESH_MS } from '$lib/host-view';
+	import CatalogApprovals from './CatalogApprovals.svelte';
 	import OverviewTab from './OverviewTab.svelte';
 	import ProcessesTab from './ProcessesTab.svelte';
 
@@ -78,6 +79,14 @@
 			processes={data.processes}
 			message={data.processesMessage}
 			serviceLinks={data.serviceLinks}
+		/>
+	{/if}
+	{#if data.canApproveCatalog}
+		<CatalogApprovals
+			approvals={data.approvals ?? []}
+			omitted={data.approvalsOmitted ?? 0}
+			truncated={data.approvalsTruncated ?? false}
+			message={data.approvalsMessage ?? null}
 		/>
 	{/if}
 {/if}

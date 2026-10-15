@@ -12,7 +12,9 @@ const RULES: Array<{ id: string; pattern: RegExp }> = [
 	{ id: 'alert', pattern: /role="alert"/ },
 	{ id: 'confirm', pattern: /confirm\(/ },
 	{ id: 'status-text', pattern: /StatusText/ },
-	{ id: 'heading', pattern: /<h1\b/ }
+	{ id: 'heading', pattern: /<h1\b/ },
+	// The shared Input binds value, which Svelte forbids on a checkbox (it throws on mount). Use Checkbox.
+	{ id: 'checkbox-input', pattern: /type="checkbox"/ }
 ];
 
 /** Line scan so a violation names the file and line that reintroduced it. */
@@ -209,4 +211,11 @@ test('colour, style, and raw-control rules each flag a fixture', () => {
 		[]
 	);
 	assert.deepEqual(scanRowActionLabels('<Button type="submit">Create project</Button>'), []);
+});
+
+test('a checkbox built from Input is flagged', () => {
+	assert.deepEqual(
+		scanSvelte('<Input type="checkbox" name="shell" />', 'src/routes/fixture.svelte').map((item) => item.rule),
+		['checkbox-input']
+	);
 });
