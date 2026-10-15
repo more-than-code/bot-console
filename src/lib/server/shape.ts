@@ -323,11 +323,12 @@ export function parseService(value: unknown): ServiceSummary | null {
 	if (value.source !== 'discovered' && value.source !== 'declared' && value.source !== 'owned') return null;
 	if (value.kind !== 'container' && value.kind !== 'systemd' && value.kind !== 'process') return null;
 	const last_seen_at = optionalText(value.last_seen_at, 64);
+	const gone_at = optionalText(value.gone_at, 64);
 	const display_name = flexibleName(value.display_name, 64);
 	const owner_user = flexibleName(value.owner_user, 80);
 	const project_id = optionalUuid(value.project_id);
 	const host_id = optionalUuid(value.host_id);
-	if (last_seen_at === undefined || display_name === undefined || owner_user === undefined) return null;
+	if (last_seen_at === undefined || gone_at === undefined || display_name === undefined || owner_user === undefined) return null;
 	if (project_id === undefined || host_id === undefined) return null;
 	const catalog_entry = parseCatalogEntryName(value);
 	if (catalog_entry === undefined) return null;
@@ -339,6 +340,7 @@ export function parseService(value: unknown): ServiceSummary | null {
 		ports,
 		health,
 		last_seen_at,
+		gone_at,
 		display_name,
 		owner_user,
 		project_id,

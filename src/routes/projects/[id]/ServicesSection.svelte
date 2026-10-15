@@ -18,7 +18,15 @@
 		showProjectColumn
 	} from '$lib/host-view';
 	import { canRenameService, serviceLabel } from '$lib/service-label';
-	import { serverHostHiddenFields } from '$lib/table';
+	import {
+		SERVICE_SHOW_LABEL,
+		SERVICE_SHOWS,
+		discoveredListenersHref,
+		serviceRowStatus,
+		serviceShow,
+		showDeploybotEmpty
+	} from '$lib/service-view';
+	import { readSearch, serverHostHiddenFields } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -63,17 +71,35 @@
 	const showProject = $derived(showProjectColumn(projectName, rows));
 	const columns = $derived(serviceColumns(showProject));
 	const serviceHosts = $derived(hosts.filter((host) => serviceHostReachable(host)));
-	const hostHidden = $derived(serverHostHiddenFields(page.url.searchParams, 'services'));
+	// `show` is the select's own field. Copying it from the URL would submit the old value beside the new one.
+	const hostHidden = $derived(
+		serverHostHiddenFields(page.url.searchParams, 'services').filter((field) => field.name !== 'show')
+	);
 	const selectedHost = $derived(page.url.searchParams.get('services.host'));
 	const hostChosen = $derived(serviceHosts.some((host) => host.id === selectedHost));
+	const showFromUrl = $derived(serviceShow(page.url.searchParams.get('show')));
 	const probed = $derived(rows.find((row) => row.id === probeServiceId) ?? null);
 	let hostValue = $state(untrack(() => (hostChosen && selectedHost ? selectedHost : 'all')));
+	let showValue = $state<string>(untrack(() => serviceShow(page.url.searchParams.get('show')).show));
 	const hostLabel = $derived(
 		hostValue === 'all' ? 'All hosts' : (serviceHosts.find((host) => host.id === hostValue)?.name ?? 'All hosts')
+	);
+	const showLabel = $derived(SERVICE_SHOW_LABEL[serviceShow(showValue).show]);
+	const discoveredHref = $derived(discoveredListenersHref(page.url));
+	const deploybotEmpty = $derived(
+		showDeploybotEmpty({
+			show: showFromUrl.show,
+			search: readSearch(page.url.searchParams.get('services.q')),
+			message
+		})
 	);
 
 	$effect(() => {
 		hostValue = hostChosen && selectedHost ? selectedHost : 'all';
+	});
+
+	$effect(() => {
+		showValue = showFromUrl.show;
 	});
 
 	function ports(values: number[]): string {
@@ -127,16 +153,30 @@
 		<Input type="hidden" name={field.name} value={field.value} />
 	{/each}
 	<Input type="hidden" name="services.host" value={hostValue === 'all' ? '' : hostValue} />
-	<div class="grid min-w-0 flex-1 gap-1.5 sm:max-w-xs">
+	<Input type="hidden" name="show" value={serviceShow(showValue).show} />
+	<div class="grid min-w-0 basis-full gap-1.5 sm:max-w-xs sm:basis-0 sm:flex-1">
 		<Label for="services-host">Host</Label>
 		<Select.Root type="single" bind:value={hostValue}>
-			<Select.Trigger id="services-host" class="w-full">
-				<Select.Value placeholder="All hosts">{hostLabel}</Select.Value>
+			<Select.Trigger id="services-host" class="w-full min-w-0">
+				<Select.Value class="min-w-0 truncate" placeholder="All hosts">{hostLabel}</Select.Value>
 			</Select.Trigger>
 			<Select.Content>
 				<Select.Item value="all">All hosts</Select.Item>
 				{#each serviceHosts as host (host.id)}
 					<Select.Item value={host.id}>{host.name}</Select.Item>
+				{/each}
+			</Select.Content>
+		</Select.Root>
+	</div>
+	<div class="grid min-w-0 basis-full gap-1.5 sm:max-w-sm sm:basis-0 sm:flex-1">
+		<Label for="services-show">Show</Label>
+		<Select.Root type="single" bind:value={showValue}>
+			<Select.Trigger id="services-show" class="w-full min-w-0">
+				<Select.Value class="min-w-0 truncate" placeholder="deploybot services">{showLabel}</Select.Value>
+			</Select.Trigger>
+			<Select.Content>
+				{#each SERVICE_SHOWS as option (option)}
+					<Select.Item value={option}>{SERVICE_SHOW_LABEL[option]}</Select.Item>
 				{/each}
 			</Select.Content>
 		</Select.Root>
@@ -148,13 +188,21 @@
 	{columns}
 	id="services"
 	labelledBy="services-heading"
-	empty="No services reported."
+	empty={deploybotEmpty ? 'No services run by deploybot yet.' : 'No services reported.'}
 	rowKey={(row) => row.id}
 	defaultSort={SERVICE_DEFAULT_SORT}
 	defaultDir={SERVICE_DEFAULT_DIR}
 	searchLabel="Search name, host, kind, user, or port"
 	server={{ total, prevCursor, nextCursor }}
 >
+	{#snippet emptyExtra()}
+		{#if deploybotEmpty}
+			{' '}<a
+				class="text-primary underline underline-offset-4 rounded-sm outline-none focus-visible:ring-3 focus-visible:ring-ring"
+				href={discoveredHref}>Show discovered listeners</a
+			>
+		{/if}
+	{/snippet}
 	{#snippet row(service)}
 		<tr id={serviceDomId(service.id)}>
 			<td class="p-2 align-middle">
@@ -179,7 +227,7 @@
 			{/if}
 			<td class="p-2 align-middle">{service.kind}</td>
 			<td class="p-2 align-middle font-mono">{ports(service.ports)}</td>
-			<td class="p-2 align-middle"><StatusBadge status={service.health?.status ?? 'unknown'} /></td>
+			<td class="p-2 align-middle"><StatusBadge status={serviceRowStatus(service)} /></td>
 			<td class="p-2 align-middle">{formatWhen(service.last_seen_at)}</td>
 			<td class="p-2 align-middle whitespace-normal">
 				{#if service.checksMessage}

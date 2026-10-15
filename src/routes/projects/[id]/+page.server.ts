@@ -2,6 +2,7 @@ import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
 import type { CatalogEntry, Host, Invite, JoinToken, Member, ProjectService, ProjectServiceRow } from '$lib/api-types';
 import { catalogForCaller, isCatalogName } from '$lib/catalog';
 import { SERVICE_DEFAULT_DIR, SERVICE_DEFAULT_SORT, serviceColumns, serviceHostReachable } from '$lib/host-view';
+import { serviceShow } from '$lib/service-view';
 import type { CatalogPermissionsState, ProjectScope } from '$lib/project-action';
 import { ApiError, actionFailure, apiFetch, apiList, loadFailure } from '$lib/server/api';
 import {
@@ -98,6 +99,7 @@ async function loadProjectServices(
 	if (query.cursorDropped) notices.push(CURSOR_DROPPED);
 	try {
 		const params = serverApiParams(apiQuery, SERVICES_LIMIT);
+		params.set('view', serviceShow(event.url.searchParams.get('show')).view);
 		const payload = await apiFetch(event, `/v1/projects/${projectId}/services?${params.toString()}`);
 		const page = parseServicePage(payload);
 		if (!page) return { ...noServices, servicesMessage: 'The API returned an unexpected response.' };

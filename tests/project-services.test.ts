@@ -116,6 +116,13 @@ test('shape keeps v1.2 names and fails a closed project-services envelope', () =
 	assert.equal(old?.owner_user, null);
 	assert.equal(old?.project_id, null);
 	assert.equal(old?.host_id, null);
+	assert.equal(old?.gone_at, null);
+	assert.equal(parseService(baseService({ gone_at: null }))?.gone_at, null);
+	assert.equal(parseService(baseService({ gone_at: '2026-10-15T14:00:00Z' }))?.gone_at, '2026-10-15T14:00:00Z');
+	assert.equal(parseService(baseService({ gone_at: 1 })), null);
+	assert.equal(parseService(baseService({ gone_at: true })), null);
+	assert.equal(parseService(baseService({ gone_at: { at: '2026-10-15T14:00:00Z' } })), null);
+	assert.equal(parseService(baseService({ gone_at: '2026-10-15T14:00:00Z\u0007' })), null);
 
 	assert.equal(parseService(baseService({ display_name: 1 })), null);
 	assert.equal(parseService(baseService({ project_id: 'not-a-uuid' })), null);
@@ -875,6 +882,80 @@ describe('project services', { concurrency: false }, () => {
 			assert.equal(html.includes(msg), true);
 		}
 	});
+
+	test('the services load sends view from show and falls back to deploybot', async () => {
+		const cases = [
+			['', 'deploybot'],
+			['show=deploybot', 'deploybot'],
+			['show=discovered', 'deploybot_and_discovered'],
+			['show=all', 'all'],
+			['show=nope', 'deploybot'],
+			['show=deploybot_and_discovered', 'deploybot']
+		] as const;
+		for (const [query, view] of cases) {
+			const calls = installFetch((call) =>
+				shell(call, () => envelope({ items: [], total: 0, next_cursor: null, prev_cursor: null }))
+			);
+			const qs = query ? `?tab=services&${query}` : '?tab=services';
+			await projectLoad(
+				fakeEvent({
+					url: `http://console.example/projects/${PROJECT.id}${qs}`,
+					session: TOKEN,
+					user: USER,
+					projects: [PROJECT],
+					params: { id: PROJECT.id }
+				}).event as never
+			);
+			const listed = serviceList(calls);
+			assert.ok(listed, query || '(default)');
+			assert.equal(listed.url.searchParams.get('view'), view, query || '(default)');
+		}
+	});
+
+	test('page 2 of the default view sends view with the table query', async () => {
+		const calls = installFetch((call) =>
+			shell(call, () => envelope({ items: [projectItem()], total: 40, next_cursor: 'n', prev_cursor: 'p' }))
+		);
+		await projectLoad(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=services&services.q=api&services.host=${HOST_ID}&services.sort=status&services.dir=desc&services.cursor=abc`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id }
+			}).event as never
+		);
+		const listed = serviceList(calls);
+		assert.ok(listed);
+		assert.equal(listed.url.searchParams.get('view'), 'deploybot');
+		assert.equal(listed.url.searchParams.get('q'), 'api');
+		assert.equal(listed.url.searchParams.get('host_id'), HOST_ID);
+		assert.equal(listed.url.searchParams.get('sort'), 'status');
+		assert.equal(listed.url.searchParams.get('dir'), 'desc');
+		assert.equal(listed.url.searchParams.get('cursor'), 'abc');
+	});
+
+	test('gone_at from the list payload reaches the loaded row', async () => {
+		const gone = '2026-10-15T14:00:00Z';
+		installFetch((call) =>
+			shell(call, () =>
+				envelope({ items: [projectItem({ gone_at: gone })], total: 1, next_cursor: null, prev_cursor: null })
+			)
+		);
+		const data = pageData(
+			await projectLoad(
+				fakeEvent({
+					url: `http://console.example/projects/${PROJECT.id}?tab=services`,
+					session: TOKEN,
+					user: USER,
+					projects: [PROJECT],
+					params: { id: PROJECT.id }
+				}).event as never
+			)
+		);
+		assert.equal(data.services[0]?.gone_at, gone);
+		assert.equal(data.servicesMessage, null);
+	});
 });
 
 function serviceRow(projectName: string, overrides: Partial<ProjectServiceRow> = {}): ProjectServiceRow {
@@ -886,6 +967,7 @@ function serviceRow(projectName: string, overrides: Partial<ProjectServiceRow> =
 		ports: [80],
 		health: { status: 'up', last_checked_at: null, latency_ms: 1 },
 		last_seen_at: null,
+		gone_at: null,
 		display_name: 'Widget',
 		owner_user: 'ada',
 		project_id: PROJECT.id,

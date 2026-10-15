@@ -993,6 +993,7 @@ function serviceProps(catalogEntry: string | null) {
 		ports: [3031],
 		health: null,
 		last_seen_at: null,
+		gone_at: null,
 		display_name: null,
 		owner_user: 'joe',
 		project_id: PROJECT.id,

@@ -38,7 +38,8 @@
 		defaultSort = null,
 		defaultDir = 'asc',
 		searchLabel = '',
-		server = null
+		server = null,
+		emptyExtra
 	}: {
 		rows: readonly Row[];
 		columns: Column<Row>[];
@@ -47,6 +48,7 @@
 		labelledBy: string;
 		empty: string;
 		row: Snippet<[Row]>;
+		emptyExtra?: Snippet;
 		/** Keeps form controls on the same record when the page or sort changes. */
 		rowKey?: (row: Row) => string | number;
 		defaultSort?: string | null;
@@ -125,7 +127,7 @@
 	/>
 {/if}
 {#if shown.length === 0}
-	<p class="text-muted-foreground text-sm">{empty}</p>
+	<p class="text-muted-foreground text-sm">{empty}{#if emptyExtra}{@render emptyExtra()}{/if}</p>
 {:else}
 	<Table.Root aria-labelledby={labelledBy}>
 		<Table.Header>

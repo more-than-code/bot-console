@@ -206,6 +206,8 @@ export type ServiceSummary = {
 	health: Health | null;
 	/** From the service payload already returned by the list. Missing becomes null. */
 	last_seen_at: string | null;
+	/** Set when the host's latest services report omitted this row. Null when the row was in that report. */
+	gone_at: string | null;
 	/** Person-set name. Missing or blank becomes null. */
 	display_name: string | null;
 	/** Account that owns the listening socket. Missing becomes null. */
