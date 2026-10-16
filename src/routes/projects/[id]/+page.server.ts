@@ -191,99 +191,51 @@ export const load: PageServerLoad = async (event) => {
 	const canOwner = roleAtLeast(role, 'owner');
 	const tab = tabOf(event.url.searchParams.get('tab'), canAdmin);
 
-	let hosts: Host[] = [];
-	let hostsOmitted = 0;
-	let hostsTruncated = false;
-	let hostsMessage: string | null = null;
-	try {
-		const list = await apiList(event, `/v1/projects/${id}/hosts`, parseHost);
-		hosts = list.items;
-		hostsOmitted = list.omitted;
-		hostsTruncated = list.truncated;
-	} catch (err) {
-		hostsMessage = loadFailure(err).message;
-	}
+	// Each tab loads only what it shows, and independent calls run together.
+	// Services is the one call that waits, because it needs the host list.
+	const hostsLoad =
+		tab === 'hosts' || tab === 'services' || tab === 'catalog'
+			? loadList(event, `/v1/projects/${id}/hosts`, parseHost)
+			: Promise.resolve(emptyList<Host>());
+	const servicesLoad =
+		tab === 'services'
+			? hostsLoad.then((list) => loadProjectServices(event, id, new Set(list.items.filter(serviceHostReachable).map((host) => host.id))))
+			: Promise.resolve(noServices);
+	const [hostList, memberList, tokenList, inviteList, services, catalogLoad, settings] = await Promise.all([
+		hostsLoad,
+		tab === 'members' || tab === 'catalog' ? loadList(event, `/v1/projects/${id}/members`, parseMember) : emptyList<Member>(),
+		tab === 'tokens' && canAdmin ? loadList(event, `/v1/projects/${id}/join-tokens`, parseJoinToken) : emptyList<JoinToken>(),
+		tab === 'members' && canAdmin ? loadList(event, `/v1/projects/${id}/invites`, parseInvite) : emptyList<Invite>(),
+		servicesLoad,
+		tab === 'catalog' ? loadCatalog(event, id, canOwner) : null,
+		tab === 'settings' && canAdmin ? loadProjectSettings(event, id) : null
+	]);
 
-	let members: Member[] = [];
-	let membersOmitted = 0;
-	let membersTruncated = false;
-	let membersMessage: string | null = null;
-	try {
-		const list = await apiList(event, `/v1/projects/${id}/members`, parseMember);
-		members = list.items;
-		membersOmitted = list.omitted;
-		membersTruncated = list.truncated;
-	} catch (err) {
-		membersMessage = loadFailure(err).message;
-	}
-
-	let tokens: JoinToken[] = [];
-	let tokensOmitted = 0;
-	let tokensTruncated = false;
-	let tokensMessage: string | null = null;
-	if (canAdmin) {
-		try {
-			const list = await apiList(event, `/v1/projects/${id}/join-tokens`, parseJoinToken);
-			tokens = list.items;
-			tokensOmitted = list.omitted;
-			tokensTruncated = list.truncated;
-		} catch (err) {
-			tokensMessage = loadFailure(err).message;
-		}
-	}
-
-	let invites: Invite[] = [];
-	let invitesOmitted = 0;
-	let invitesTruncated = false;
-	let invitesMessage: string | null = null;
-	if (canAdmin) {
-		try {
-			const list = await apiList(event, `/v1/projects/${id}/invites`, parseInvite);
-			invites = list.items;
-			invitesOmitted = list.omitted;
-			invitesTruncated = list.truncated;
-		} catch (err) {
-			invitesMessage = loadFailure(err).message;
-		}
-	}
-
-	const reachableHostIds = new Set(hosts.filter(serviceHostReachable).map((host) => host.id));
-	const services = tab === 'services' ? await loadProjectServices(event, id, reachableHostIds) : noServices;
-
-	let catalog: CatalogEntry[] = [];
-	let catalogOmitted = 0;
-	let catalogTruncated = false;
-	let catalogMessage: string | null = null;
-	let permissions: CatalogPermissionsState | null = null;
-	if (tab === 'catalog') {
-		try {
-			const parsed = parseCatalogList(await apiFetch(event, `/v1/projects/${id}/catalog`));
-			if (!parsed) catalogMessage = 'The API returned an unexpected response.';
-			else {
-				catalog = catalogForCaller(parsed.items, canOwner);
-				catalogOmitted = parsed.omitted;
-				catalogTruncated = parsed.truncated;
-			}
-		} catch (err) {
-			catalogMessage = loadFailure(err).message;
-		}
-		const requested = event.url.searchParams.get('permissions');
-		if (canOwner && requested && isCatalogName(requested)) {
-			permissions = await loadPermissions(event, id, requested);
-		}
-	}
-
-	let envSets: EnvSet[] = [];
-	let envSetsMessage: string | null = null;
-	let registries: Registry[] = [];
-	let registriesMessage: string | null = null;
-	if (tab === 'settings' && canAdmin) {
-		const settings = await loadProjectSettings(event, id);
-		envSets = settings.envSets;
-		envSetsMessage = settings.envSetsMessage;
-		registries = settings.registries;
-		registriesMessage = settings.registriesMessage;
-	}
+	const hosts = hostList.items;
+	const hostsOmitted = hostList.omitted;
+	const hostsTruncated = hostList.truncated;
+	const hostsMessage = hostList.message;
+	const members = memberList.items;
+	const membersOmitted = memberList.omitted;
+	const membersTruncated = memberList.truncated;
+	const membersMessage = memberList.message;
+	const tokens = tokenList.items;
+	const tokensOmitted = tokenList.omitted;
+	const tokensTruncated = tokenList.truncated;
+	const tokensMessage = tokenList.message;
+	const invites = inviteList.items;
+	const invitesOmitted = inviteList.omitted;
+	const invitesTruncated = inviteList.truncated;
+	const invitesMessage = inviteList.message;
+	const catalog = catalogLoad?.catalog ?? [];
+	const catalogOmitted = catalogLoad?.catalogOmitted ?? 0;
+	const catalogTruncated = catalogLoad?.catalogTruncated ?? false;
+	const catalogMessage = catalogLoad?.catalogMessage ?? null;
+	const permissions = catalogLoad?.permissions ?? null;
+	const envSets = settings?.envSets ?? [];
+	const envSetsMessage = settings?.envSetsMessage ?? null;
+	const registries = settings?.registries ?? [];
+	const registriesMessage = settings?.registriesMessage ?? null;
 
 	return present(event, {
 		project,
@@ -320,6 +272,44 @@ export const load: PageServerLoad = async (event) => {
 		...services
 	});
 };
+
+type ListLoad<T> = { items: T[]; omitted: number; truncated: boolean; message: string | null };
+
+function emptyList<T>(): ListLoad<T> {
+	return { items: [], omitted: 0, truncated: false, message: null };
+}
+
+/** One section's list. A failure becomes the section's message; a redirect or HTTP error still throws. */
+async function loadList<T>(event: RequestEvent, path: string, parse: (value: unknown) => T | null): Promise<ListLoad<T>> {
+	try {
+		return { ...(await apiList(event, path, parse)), message: null };
+	} catch (err) {
+		return { ...emptyList<T>(), message: loadFailure(err).message };
+	}
+}
+
+/** The catalog list and, when an owner asked for it, one entry's permissions, fetched together. */
+async function loadCatalog(event: RequestEvent, id: string, canOwner: boolean) {
+	const requested = event.url.searchParams.get('permissions');
+	const [listed, permissions] = await Promise.all([
+		apiFetch(event, `/v1/projects/${id}/catalog`).then(
+			(payload) => ({ parsed: parseCatalogList(payload), message: null }),
+			(err) => ({ parsed: null, message: loadFailure(err).message })
+		),
+		canOwner && requested && isCatalogName(requested) ? loadPermissions(event, id, requested) : null
+	]);
+	const failed = listed.message ?? (listed.parsed ? null : 'The API returned an unexpected response.');
+	if (failed || !listed.parsed) {
+		return { catalog: [], catalogOmitted: 0, catalogTruncated: false, catalogMessage: failed, permissions };
+	}
+	return {
+		catalog: catalogForCaller(listed.parsed.items, canOwner),
+		catalogOmitted: listed.parsed.omitted,
+		catalogTruncated: listed.parsed.truncated,
+		catalogMessage: null,
+		permissions
+	};
+}
 
 async function loadPermissions(event: RequestEvent, id: string, name: string): Promise<CatalogPermissionsState> {
 	try {

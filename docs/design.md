@@ -30,6 +30,7 @@ Steps 2 and 3 landed together. The console no longer reads Postgres. Host overvi
 ## New pages
 
 - **Projects:** list, create (the creator becomes owner), rename and delete (owner).
+- **Project page loading:** each tab fetches only the lists it shows (Hosts: hosts; Services: hosts, then services; Catalog: hosts, members, catalog; Members: members, invites; Join tokens: join tokens; Settings: env sets, registries), after the project itself. Calls that do not depend on each other run in parallel; only Services waits for the host list. A failed list becomes that section's message.
 - **Members:** list; admins add, remove, and change viewer/admin roles; the owner transfers ownership. Admin+ creates an invite link (viewer or admin, expiry 1, 7, or 30 days, uses 1, 5, or 25). The url is shown once in that dialog and is not put in the page URL, a cookie, or a log. Closing the dialog clears it; opening the dialog again shows the empty form. A url is shown only when its origin is this console's origin and its path is `/invite/<token>`. Pending invites list role, creator, expiry, uses, and status, and revoke with an icon-only Ban action.
 - **Hosts:** per project: status (online, offline, or asleep for `always_on=false`), last seen, agent version; admin+ revokes a credential.
 - **Join host:** admin+ creates a join token and sees it **once**, with the install command. The page never shows the token again.

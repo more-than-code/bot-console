@@ -172,6 +172,59 @@ describe('project services', { concurrency: false }, () => {
 		return calls.find((call) => call.url.pathname === `/v1/projects/${PROJECT.id}/services`);
 	}
 
+	test('each tab fetches only what it shows, and independent calls overlap', async () => {
+		const id = PROJECT.id;
+		let inFlight = 0;
+		let maxInFlight = 0;
+		const respond = async (call: FetchCall): Promise<Response> => {
+			if (call.url.pathname === `/v1/projects/${id}`) return envelope(PROJECT);
+			inFlight += 1;
+			maxInFlight = Math.max(maxInFlight, inFlight);
+			await new Promise((resolve) => setTimeout(resolve, 5));
+			inFlight -= 1;
+			if (call.url.pathname === `/v1/projects/${id}/services`) {
+				return envelope({ items: [], total: 0, next_cursor: null, prev_cursor: null });
+			}
+			if (call.url.pathname === `/v1/projects/${id}/hosts`) return envelope({ items: [HOST], next_cursor: null });
+			return envelope({ items: [], next_cursor: null });
+		};
+		const expected: Record<string, string[]> = {
+			hosts: ['hosts'],
+			services: ['hosts', 'services'],
+			catalog: ['catalog', 'hosts', 'members'],
+			members: ['invites', 'members'],
+			tokens: ['join-tokens'],
+			settings: ['env-sets', 'registries']
+		};
+		const overlap: Record<string, number> = {};
+		for (const [tab, want] of Object.entries(expected)) {
+			maxInFlight = 0;
+			const calls = installFetch(respond);
+			const data = pageData(
+				await projectLoad(
+					fakeEvent({
+						url: `http://console.example/projects/${id}?tab=${tab}`,
+						session: TOKEN,
+						user: USER,
+						projects: [PROJECT],
+						params: { id }
+					}).event as never
+				)
+			);
+			assert.equal(data.tab, tab);
+			const sections = calls
+				.map((call) => call.url.pathname)
+				.filter((path) => path !== `/v1/projects/${id}`)
+				.map((path) => path.slice(`/v1/projects/${id}/`.length))
+				.sort();
+			assert.deepEqual(sections, want, tab);
+			overlap[tab] = maxInFlight;
+		}
+		assert.equal(overlap.catalog, 3);
+		assert.equal(overlap.members, 2);
+		assert.equal(overlap.services, 1);
+	});
+
 	test('the services load maps each query param onto the API url', async () => {
 		const host = HOST_ID;
 		const calls = installFetch((call) =>
