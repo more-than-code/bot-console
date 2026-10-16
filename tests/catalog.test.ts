@@ -476,6 +476,17 @@ describe('catalog', { concurrency: false }, () => {
 		assert.equal(plain.includes('>catalog<'), false);
 	});
 
+	test('the services filters apply when a select changes, with no Apply button', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+		const body = decode(render(ServicesSection, { props: serviceProps(null) }).body);
+		assert.equal(body.includes('>Apply<'), false);
+		// The change handler runs only in the browser, so check its wiring in the source.
+		const section = readFileSync(new URL('../src/routes/projects/[id]/ServicesSection.svelte', import.meta.url), 'utf8');
+		assert.match(section, /bind:value=\{hostValue\} onValueChange=\{applyFilters\}/);
+		assert.match(section, /bind:value=\{showValue\} onValueChange=\{applyFilters\}/);
+		assert.match(section, /await tick\(\);\s*filterForm\?\.requestSubmit\(\);/);
+	});
+
 	test('the new service button is owner-only', () => {
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 		const owner = render(ProjectPage, { props: { data: projectData(true) as never, form: null } }).body;

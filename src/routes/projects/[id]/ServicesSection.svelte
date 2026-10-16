@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import Activity from '@lucide/svelte/icons/activity';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import type { Host, ProbeView, ProjectServiceRow } from '$lib/api-types';
@@ -30,7 +30,6 @@
 	import { readSearch, serverHostHiddenFields } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -103,6 +102,14 @@
 		showValue = showFromUrl.show;
 	});
 
+	let filterForm = $state<HTMLFormElement | null>(null);
+
+	// A filter applies as soon as it changes. Wait for the hidden fields to take the new value first.
+	async function applyFilters() {
+		await tick();
+		filterForm?.requestSubmit();
+	}
+
 	function ports(values: number[]): string {
 		return values.length ? values.join(', ') : 'n/a';
 	}
@@ -149,7 +156,7 @@
 {#if omitted > 0}
 	<p class="text-muted-foreground mb-2 text-sm">{omitted} more {omitted === 1 ? 'row' : 'rows'} left out.</p>
 {/if}
-<form class="mb-3 flex min-w-0 flex-wrap items-end gap-2" method="GET" action={page.url.pathname}>
+<form class="mb-3 flex min-w-0 flex-wrap items-end gap-2" method="GET" action={page.url.pathname} bind:this={filterForm}>
 	{#each hostHidden as field (field.name)}
 		<Input type="hidden" name={field.name} value={field.value} />
 	{/each}
@@ -157,7 +164,7 @@
 	<Input type="hidden" name="show" value={serviceShow(showValue).show} />
 	<div class="grid min-w-0 basis-full gap-1.5 sm:max-w-xs sm:basis-0 sm:flex-1">
 		<Label for="services-host">Host</Label>
-		<Select.Root type="single" bind:value={hostValue}>
+		<Select.Root type="single" bind:value={hostValue} onValueChange={applyFilters}>
 			<Select.Trigger id="services-host" class="w-full min-w-0">
 				<Select.Value class="min-w-0 truncate" placeholder="All hosts">{hostLabel}</Select.Value>
 			</Select.Trigger>
@@ -171,7 +178,7 @@
 	</div>
 	<div class="grid min-w-0 basis-full gap-1.5 sm:max-w-sm sm:basis-0 sm:flex-1">
 		<Label for="services-show">Show</Label>
-		<Select.Root type="single" bind:value={showValue}>
+		<Select.Root type="single" bind:value={showValue} onValueChange={applyFilters}>
 			<Select.Trigger id="services-show" class="w-full min-w-0">
 				<Select.Value class="min-w-0 truncate" placeholder="deploybot services">{showLabel}</Select.Value>
 			</Select.Trigger>
@@ -182,7 +189,6 @@
 			</Select.Content>
 		</Select.Root>
 	</div>
-	<Button type="submit" variant="outline">Apply</Button>
 </form>
 <DataTable
 	{rows}
