@@ -35,13 +35,19 @@
 	} = $props();
 
 	let dotenv = $state('');
+	let setName = $state('');
+	let savedSet = $state<string | null>(null);
 	let token = $state('');
 
-	function clearPaste() {
-		return async ({ update }: { update: () => Promise<void> }) => {
+	function clearPaste({ formData }: { formData: FormData }) {
+		const name = String(formData.get('set') ?? '');
+		return async ({ update, result }: { update: () => Promise<void>; result: { type: string } }) => {
 			await clearSecretField((value) => {
 				dotenv = value;
 			}, update);
+			// A save ends in a redirect. Say so, and clear the name so the next paste starts empty.
+			savedSet = result.type === 'redirect' ? name : null;
+			if (savedSet) setName = '';
 			document.getElementById('env-set-error')?.focus();
 		};
 	}
@@ -146,7 +152,7 @@
 			<form method="POST" action={actionUrlFrom(page.url, 'saveEnvSet')} class="grid gap-3" use:enhance={clearPaste}>
 				<Label class="grid gap-1.5" for="env-set-name">
 					Set name
-					<Input id="env-set-name" name="set" required maxlength={48} autocomplete="off" spellcheck="false" />
+					<Input id="env-set-name" name="set" bind:value={setName} required maxlength={48} autocomplete="off" spellcheck="false" />
 				</Label>
 				<Label class="grid gap-1.5" for="env-set-dotenv">
 					Dotenv
@@ -162,6 +168,9 @@
 						aria-describedby={settingsField === 'dotenv' && message ? 'env-set-error' : undefined}
 					/>
 				</Label>
+				{#if savedSet && !(settingsField === 'dotenv' && message)}
+					<Notice kind="success">Saved env set {savedSet}.</Notice>
+				{/if}
 				{#if settingsField === 'dotenv' && message}
 					<div id="env-set-error" tabindex="-1" class="max-w-full min-w-0 break-words focus-visible:ring-3 focus-visible:ring-ring">
 						<Notice kind="error">{message}</Notice>

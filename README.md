@@ -55,7 +55,7 @@ In dev (umbrella decision D33) the console runs on Joe's Mac with `pnpm dev` on 
 | `/` | 303 redirect to `/projects`. |
 | `/signin` | Google sign-in. |
 | `/projects` | List and create projects. |
-| `/projects/[id]` | Hosts (default), Services, Catalog, members, join tokens, and settings. Admin+ manages env sets and registries. Rename and delete stay with the owner. Each host links to `/hosts/[id]`. Breadcrumb: Projects › {project}. |
+| `/projects/[id]` | Hosts (default), Services, Catalog, members, join tokens, and settings. Admin+ manages env sets and registries. Saving an env set clears the name and dotenv fields and says "Saved env set <name>." Rename and delete stay with the owner. Each host links to `/hosts/[id]`. Breadcrumb: Projects › {project}. |
 | `/hosts/[id]` | Tabs `?tab=overview\|processes` (default overview). `?tab=services` redirects to the project Services tab for this host when the caller is a member of the owning project, or of one of the first 20 session projects that list the host. An admin or owner of the owning project also sees catalog approvals. Breadcrumb: Projects › {project} › {host}. |
 | `/device` | Approve or deny a device code for the signed-in user. |
 | `/oauth/consent` | Allow or deny an MCP sign-in request. Signed out, redirects to `/signin?next=` this URL. |

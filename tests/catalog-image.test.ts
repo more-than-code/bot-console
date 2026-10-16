@@ -780,6 +780,14 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(form.includes('admin_deploy'), false);
 	});
 
+	test('a saved env set is announced and its name field is cleared', () => {
+		// The enhance callback runs only in the browser, so check its wiring in the source.
+		const settings = readFileSync(new URL('../src/routes/projects/[id]/SettingsSection.svelte', import.meta.url), 'utf8');
+		assert.match(settings, /id="env-set-name" name="set" bind:value=\{setName\}/);
+		assert.match(settings, /savedSet = result\.type === 'redirect' \? name : null;\s*if \(savedSet\) setName = '';/);
+		assert.match(settings, /<Notice kind="success">Saved env set \{savedSet\}\.<\/Notice>/);
+	});
+
 	test('the delete confirmation names what keeps running for each entry kind', () => {
 		// The dialog body renders only when open, so check the source as dialog-open.test.ts does.
 		const section = readFileSync(new URL('../src/routes/projects/[id]/CatalogSection.svelte', import.meta.url), 'utf8');
