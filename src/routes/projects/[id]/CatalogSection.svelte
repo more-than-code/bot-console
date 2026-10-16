@@ -157,6 +157,7 @@
 							{entry}
 							saveAction={actionUrlFrom(page.url, 'catalogUpdate')}
 							setsAction={actionUrlFrom(page.url, 'catalogEnvSets')}
+							filesAction={actionUrlFrom(page.url, 'catalogFiles')}
 							revealed={imageEditor?.mode === 'edit' && imageEditor.name === entry.name}
 							editor={imageEditor?.mode === 'edit' && imageEditor.name === entry.name ? imageEditor : null}
 						/>

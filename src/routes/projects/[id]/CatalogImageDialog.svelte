@@ -18,6 +18,7 @@
 		entry = null,
 		saveAction,
 		setsAction,
+		filesAction,
 		revealed = false,
 		editor = null
 	}: {
@@ -25,6 +26,7 @@
 		entry?: ImageEntry | null;
 		saveAction: string;
 		setsAction: string;
+		filesAction: string;
 		revealed?: boolean;
 		editor?: ImageEditorState | null;
 	} = $props();
@@ -36,6 +38,11 @@
 	let setsStatus = $state<'loading' | 'ready' | 'error'>('loading');
 	let fetched = $state(false);
 	let setsForm = $state<HTMLFormElement | null>(null);
+	let files = $state<Array<{ name: string }>>([]);
+	let filesMessage = $state<string | null>(null);
+	let filesStatus = $state<'loading' | 'ready' | 'error'>('loading');
+	let filesFetched = $state(false);
+	let filesForm = $state<HTMLFormElement | null>(null);
 
 	$effect(() => {
 		const next = imageEditorDialog(untrack(() => ({ open, sawFailure })), revealed ? 'failure' : '');
@@ -56,11 +63,22 @@
 			setsStatus = 'loading';
 			setsMessage = null;
 			sets = [];
+			filesFetched = false;
+			filesStatus = 'loading';
+			filesMessage = null;
+			files = [];
 			return;
 		}
 		if (!browser || fetched || setsForm == null) return;
 		fetched = true;
 		setsForm.requestSubmit();
+	});
+
+	// File names only. Content is never on this post.
+	$effect(() => {
+		if (!open || !browser || filesFetched || filesForm == null) return;
+		filesFetched = true;
+		filesForm.requestSubmit();
 	});
 
 	function takeSets(data: Record<string, unknown> | null | undefined) {
@@ -79,6 +97,24 @@
 		setsMessage = null;
 		setsStatus = 'loading';
 		setsForm?.requestSubmit();
+	}
+
+	function takeFiles(data: Record<string, unknown> | null | undefined) {
+		if (!data || !('catalogFiles' in data)) {
+			filesStatus = 'error';
+			filesMessage = 'Files could not be loaded.';
+			return;
+		}
+		const next = data.catalogFiles;
+		files = Array.isArray(next) ? (next as Array<{ name: string }>) : [];
+		filesMessage = typeof data.catalogFilesMessage === 'string' ? data.catalogFilesMessage : null;
+		filesStatus = filesMessage ? 'error' : 'ready';
+	}
+
+	function retryFiles() {
+		filesMessage = null;
+		filesStatus = 'loading';
+		filesForm?.requestSubmit();
 	}
 </script>
 
@@ -114,7 +150,18 @@
 					};
 				}}
 			></form>
-			<CatalogImageForm {mode} {entry} {saveAction} {sets} {setsMessage} {setsStatus} {retrySets} {editor} onSettled={settle}>
+			<form
+				bind:this={filesForm}
+				method="POST"
+				action={filesAction}
+				class="hidden"
+				use:enhance={() => {
+					return async ({ result }) => {
+						if (result.type === 'success' || result.type === 'failure') takeFiles(result.data as Record<string, unknown>);
+					};
+				}}
+			></form>
+			<CatalogImageForm {mode} {entry} {saveAction} {sets} {setsMessage} {setsStatus} {retrySets} {files} {filesMessage} {filesStatus} {retryFiles} {editor} onSettled={settle}>
 				{#snippet cancel()}
 					<Dialog.Close type="button">Cancel</Dialog.Close>
 				{/snippet}

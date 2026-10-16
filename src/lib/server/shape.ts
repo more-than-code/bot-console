@@ -16,6 +16,7 @@ import type {
 	HostPrograms,
 	HostStatus,
 	ImageDeploy,
+	ImageFileMount,
 	ImageLogs,
 	ImageOutcome,
 	ImagePort,
@@ -38,6 +39,8 @@ import type {
 	ProgramSpec,
 	ProgramStatus,
 	Project,
+	ProjectFile,
+	ProjectFileContent,
 	ProjectService,
 	Registry,
 	ServiceSummary,
@@ -46,7 +49,7 @@ import type {
 	User
 } from '../api-types';
 import { CATALOG_NAME, ENV_KEY, GRANT_ACTIONS, RUN_AS, SPEC_HASH } from '../catalog';
-import { cleanImageUser, cleanVolumeTarget, isConfirmationId, isRegistryHost, isSetName, redactAssignments } from '../image-spec';
+import { cleanFileTarget, cleanImageUser, cleanVolumeTarget, fileTargetNests, isConfirmationId, isFileName, isRegistryHost, isSetName, redactAssignments } from '../image-spec';
 import { isRole } from './roles';
 import { acceptedInstallCommand, acceptedInviteUrl, consentRedirect, isJoinToken, isOauthRequestId, isUuid } from './validate';
 
@@ -207,8 +210,9 @@ export function parseHostPrograms(value: unknown): HostPrograms | null {
 	if (LINE_BREAK.test(value.policy_hash)) return null;
 	const images = reportedBool(value, 'images');
 	const docker = reportedBool(value, 'docker');
-	if (images === null || docker === null) return null;
-	return { enabled: value.enabled, run_as, allow_shell: value.allow_shell, policy_hash: value.policy_hash, images, docker };
+	const files = reportedBool(value, 'files');
+	if (images === null || docker === null || files === null) return null;
+	return { enabled: value.enabled, run_as, allow_shell: value.allow_shell, policy_hash: value.policy_hash, images, docker, files };
 }
 
 /** Missing or null is false. A present non-boolean is not a policy. */
@@ -1070,6 +1074,24 @@ function parseSecretEnv(value: unknown): Record<string, string> | null {
 	return secret;
 }
 
+/** Absent `files` is `[]`. A present value that is not a rule-13 list fails the spec. */
+function parseImageFiles(value: unknown, volumeTargets: readonly string[]): ImageFileMount[] | null {
+	if (!Array.isArray(value) || value.length > 16) return null;
+	const files: ImageFileMount[] = [];
+	const names = new Set<string>();
+	const targets = new Set<string>(volumeTargets);
+	for (const item of value) {
+		if (!isRecord(item) || typeof item.file !== 'string' || !isFileName(item.file) || names.has(item.file)) return null;
+		const target = cleanFileTarget(typeof item.target === 'string' ? item.target : '');
+		if (!target || targets.has(target)) return null;
+		if (volumeTargets.some((other) => fileTargetNests(target, other))) return null;
+		names.add(item.file);
+		targets.add(target);
+		files.push({ file: item.file, target });
+	}
+	return files;
+}
+
 function parseImageVolumes(value: unknown): ImageVolume[] | null {
 	if (!Array.isArray(value) || value.length > 8) return null;
 	const volumes: ImageVolume[] = [];
@@ -1097,6 +1119,13 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 	const secret_env = parseSecretEnv(value.secret_env);
 	const volumes = parseImageVolumes(value.volumes);
 	if (!image || command === undefined || entrypoint === undefined || !ports || !env || !env_sets || !secret_env || !volumes) return null;
+	let files: ImageFileMount[];
+	if (!Object.hasOwn(value, 'files')) files = [];
+	else {
+		const parsed = parseImageFiles(value.files, volumes.map((volume) => volume.target));
+		if (!parsed) return null;
+		files = parsed;
+	}
 	if (value.restart !== 'no' && value.restart !== 'on-failure' && value.restart !== 'unless-stopped') return null;
 	const restart: ImageRestart = value.restart;
 	if (workload === 'job' && restart !== 'no') return null;
@@ -1121,6 +1150,7 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 		env_sets,
 		secret_env,
 		volumes,
+		files,
 		restart,
 		user: value.user,
 		healthy_after_sec: healthy,
@@ -1311,6 +1341,53 @@ export function parseEnvSetList(payload: unknown): { items: EnvSet[]; omitted: n
 		}
 	}
 	return { items, omitted };
+}
+
+/** A project file row. Secret `sha256` is null. A plain file's digest is 64 hex digits. Content is dropped. */
+export function parseProjectFile(value: unknown): ProjectFile | null {
+	if (!isRecord(value) || typeof value.is_secret !== 'boolean' || !Object.hasOwn(value, 'sha256')) return null;
+	const name = text(value.name, 64);
+	const updated_at = timestamp(value.updated_at);
+	const updated_by = text(value.updated_by, 36);
+	const size = boundedInt(value.size, 1, 65536);
+	if (!name || !isFileName(name) || !updated_at || !updated_by || !isUuid(updated_by) || size == null) return null;
+	let sha256: string | null;
+	if (value.is_secret) {
+		if (value.sha256 !== null) return null;
+		sha256 = null;
+	} else if (typeof value.sha256 !== 'string' || !SPEC_HASH.test(value.sha256)) return null;
+	else sha256 = value.sha256;
+	return { name, is_secret: value.is_secret, size, sha256, updated_at, updated_by };
+}
+
+/** A plain file with content. The byte length must match `size`. A NUL or a secret digest fails. */
+export function parseProjectFileContent(value: unknown): ProjectFileContent | null {
+	if (!isRecord(value) || typeof value.content !== 'string') return null;
+	if (value.content.length === 0 || value.content.includes('\0')) return null;
+	const sizeBytes = utf8.encode(value.content).byteLength;
+	const size = boundedInt(value.size, 1, 65536);
+	if (size == null || size !== sizeBytes || sizeBytes > 65536) return null;
+	if (typeof value.sha256 !== 'string' || !SPEC_HASH.test(value.sha256)) return null;
+	const name = text(value.name, 64);
+	const updated_at = timestamp(value.updated_at);
+	const updated_by = text(value.updated_by, 36);
+	if (!name || !isFileName(name) || !updated_at || !updated_by || !isUuid(updated_by)) return null;
+	return { name, content: value.content, size, sha256: value.sha256, updated_at, updated_by };
+}
+
+/** The whole list fails closed. A bad row is not dropped. */
+export function parseProjectFileList(payload: unknown): { items: ProjectFile[] } | null {
+	const page = parseListPayload(payload);
+	if (!page || page.raw.length > 64) return null;
+	const items: ProjectFile[] = [];
+	const seen = new Set<string>();
+	for (const item of page.raw) {
+		const row = parseProjectFile(item);
+		if (!row || seen.has(row.name)) return null;
+		seen.add(row.name);
+		items.push(row);
+	}
+	return { items };
 }
 
 export function parseRegistry(value: unknown): Registry | null {

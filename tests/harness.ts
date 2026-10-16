@@ -97,12 +97,21 @@ export function envelope(payload: unknown, status = 200, code = 'ok', msg = ''):
 	});
 }
 
+function formBody(form: Record<string, string | readonly string[]>): URLSearchParams {
+	const params = new URLSearchParams();
+	for (const [key, value] of Object.entries(form)) {
+		if (typeof value === 'string') params.append(key, value);
+		else for (const item of value) params.append(key, item);
+	}
+	return params;
+}
+
 export function fakeEvent(input: {
 	url: string;
 	method?: string;
 	session?: string;
 	oauth?: string;
-	form?: Record<string, string>;
+	form?: Record<string, string | readonly string[]>;
 	params?: Record<string, string>;
 	user?: User | null;
 	projects?: Project[];
@@ -125,7 +134,7 @@ export function fakeEvent(input: {
 	const request = new Request(input.url, {
 		method,
 		headers,
-		body: input.form ? new URLSearchParams(input.form) : undefined
+		body: input.form ? formBody(input.form) : undefined
 	});
 	const event = {
 		url: new URL(input.url),

@@ -1,6 +1,6 @@
 import { error, fail, isHttpError, isRedirect, redirect, type RequestEvent } from '@sveltejs/kit';
 import { randomUUID } from 'node:crypto';
-import { ENV_KEY, isCatalogName, isIdempotencyKey } from '$lib/catalog';
+import { ENV_KEY, byteLength, isCatalogName, isIdempotencyKey } from '$lib/catalog';
 import {
 	STILL_RUNNING,
 	deployTimeoutMs,
@@ -9,6 +9,7 @@ import {
 	imageRequestBody,
 	imageSpecFromDraft,
 	isConfirmationId,
+	isFileName,
 	isFullDigest,
 	isRegistryHost,
 	isSetName,
@@ -17,7 +18,7 @@ import {
 	type ImageDraft,
 	type KnownSet
 } from '$lib/image-spec';
-import type { EnvSet, Registry } from '$lib/api-types';
+import type { EnvSet, ProjectFile, Registry } from '$lib/api-types';
 import type { ImageDeployState, ImageEditorState } from '$lib/project-action';
 import { ApiError, apiFetch } from '$lib/server/api';
 import { formText } from '$lib/server/form';
@@ -27,6 +28,9 @@ import {
 	parseDeployPayload,
 	parseEnvSetList,
 	parseImageDeployList,
+	parseProjectFile,
+	parseProjectFileContent,
+	parseProjectFileList,
 	parseRegistry,
 	parseRegistryList,
 	parseRemovePayload
@@ -36,6 +40,7 @@ import { backTo } from '$lib/url';
 
 const UNEXPECTED = 'The API returned an unexpected response.';
 const DOTENV_MAX = 256 * 1024;
+const FILE_MAX = 64 * 1024;
 
 function projectIdOf(params: { id?: string }): string {
 	if (!params.id || !isUuid(params.id)) error(404, 'Not found');
@@ -343,9 +348,31 @@ function dotenvSecrets(dotenv: string): string[] {
 	return secrets;
 }
 
-function settingsFailure(event: RequestEvent, status: number, message: string, settingsField: 'dotenv' | 'token' | null = null) {
+function settingsFailure(event: RequestEvent, status: number, message: string, settingsField: 'dotenv' | 'token' | 'file' | null = null) {
 	const text = settingsField ? `${message} ${PASTE_AGAIN}` : message;
 	return fail(status, present(event, { scope: 'settings' as const, message: text, settingsField }));
+}
+
+function fileSecrets(content: string): string[] {
+	const secrets = content === '' ? [] : [content];
+	for (const line of content.split('\n')) {
+		const value = line.trim();
+		if (value.length >= 8) secrets.push(value);
+	}
+	return secrets;
+}
+
+/** Redact the uncut API message, then apply the 500-character cap. `readEnvelope` has already capped `ApiError.msg`. */
+function shownFileError(err: unknown, content: string): string {
+	const full = err instanceof ApiError ? err.fullMsg : 'The API is unavailable.';
+	if (!(err instanceof ApiError)) console.error('bot api request failed');
+	const redacted = redactSubmitted(full, fileSecrets(content));
+	return redacted.length > 500 ? redacted.slice(0, 500) : redacted;
+}
+
+function filePath(id: string, name: string): string | null {
+	if (!isFileName(name)) return null;
+	return `/v1/projects/${id}/files/${encodeURIComponent(name)}`;
 }
 
 export async function saveEnvSet(event: RequestEvent) {
@@ -446,25 +473,106 @@ export async function deleteRegistry(event: RequestEvent) {
 	}
 }
 
+export async function catalogFiles(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	try {
+		const list = parseProjectFileList(await apiFetch(event, `/v1/projects/${id}/files`));
+		if (!list) return fail(502, present(event, { scope: 'catalog' as const, catalogFiles: [], catalogFilesMessage: UNEXPECTED }));
+		const catalogFiles = list.items.map((file) => ({ name: file.name }));
+		return present(event, { scope: 'catalog' as const, catalogFiles, catalogFilesMessage: null });
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return fail(apiStatus(err), present(event, { scope: 'catalog' as const, catalogFiles: [], catalogFilesMessage: apiMessage(err) }));
+	}
+}
+
+export async function saveProjectFile(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const form = await event.request.formData();
+	const name = formText(form, 'name').trim();
+	const content = formText(form, 'content');
+	const secret = formText(form, 'secret') !== '0';
+	const path = filePath(id, name);
+	if (!path) return settingsFailure(event, 400, 'File names use lowercase letters, digits, dots, underscores, and hyphens.', 'file');
+	if (content.length === 0 || content.includes('\0') || byteLength(content) > FILE_MAX) {
+		return settingsFailure(event, 400, 'Paste a text file of 1 to 64 KiB, with no NUL.', 'file');
+	}
+	try {
+		const payload = await apiFetch(event, path, { method: 'PUT', body: JSON.stringify({ content, secret }) });
+		if (!parseProjectFile(payload)) return settingsFailure(event, 502, UNEXPECTED, 'file');
+		redirect(303, backTo(event.url));
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return settingsFailure(event, apiStatus(err), shownFileError(err, content), 'file');
+	}
+}
+
+export async function viewProjectFile(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const name = formText(await event.request.formData(), 'name').trim();
+	const path = filePath(id, name);
+	if (!path) return settingsFailure(event, 400, 'That file is not valid.');
+	try {
+		const file = parseProjectFileContent(await apiFetch(event, path));
+		if (!file) return settingsFailure(event, 502, UNEXPECTED);
+		return present(event, { scope: 'settings' as const, viewedFile: { name: file.name, content: file.content } });
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return settingsFailure(event, apiStatus(err), apiMessage(err));
+	}
+}
+
+export async function deleteProjectFile(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const name = formText(await event.request.formData(), 'name').trim();
+	const path = filePath(id, name);
+	if (!path) return settingsFailure(event, 400, 'That file is not valid.');
+	try {
+		await apiFetch(event, path, { method: 'DELETE' });
+		redirect(303, backTo(event.url));
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return fail(apiStatus(err), present(event, { scope: 'settings' as const, message: apiMessage(err), settingsName: name }));
+	}
+}
+
 export async function loadProjectSettings(event: RequestEvent, id: string): Promise<{
 	envSets: EnvSet[];
 	envSetsMessage: string | null;
 	registries: Registry[];
 	registriesMessage: string | null;
+	files: ProjectFile[];
+	filesMessage: string | null;
 }> {
-	const env = await readEnvSets(event, id);
-	const registries = await readRegistries(event, id);
+	const [env, registries, files] = await Promise.all([readEnvSets(event, id), readRegistries(event, id), readProjectFiles(event, id)]);
 	return {
 		envSets: env.items,
 		envSetsMessage: env.message,
 		registries: registries.items,
-		registriesMessage: registries.message
+		registriesMessage: registries.message,
+		files: files.items,
+		filesMessage: files.message
 	};
 }
 
 async function readEnvSets(event: RequestEvent, id: string) {
 	try {
 		const list = parseEnvSetList(await apiFetch(event, `/v1/projects/${id}/env-sets`));
+		if (!list) return { items: [], message: UNEXPECTED };
+		return { items: list.items, message: null };
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return { items: [], message: apiMessage(err) };
+	}
+}
+
+async function readProjectFiles(event: RequestEvent, id: string) {
+	try {
+		const list = parseProjectFileList(await apiFetch(event, `/v1/projects/${id}/files`));
 		if (!list) return { items: [], message: UNEXPECTED };
 		return { items: list.items, message: null };
 	} catch (err) {

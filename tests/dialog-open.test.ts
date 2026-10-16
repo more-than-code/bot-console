@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { formDialogOutcome, nextFormDialog, nextInviteSecret, type InviteSecretState } from '../src/lib/dialog-open.ts';
+import { confirmAfterAction, formDialogOutcome, nextConfirmDialog, nextFormDialog, nextInviteSecret, type InviteSecretState } from '../src/lib/dialog-open.ts';
 
 test('a form dialog opens from the trigger, forces open on a new failure, and closes on success', () => {
 	assert.deepEqual(nextFormDialog({ open: true, sawFailure: false }, 'idle'), {
@@ -106,10 +106,31 @@ test('rename and confirm dialogs settle with the same rule', () => {
 	const confirmForm = readFileSync(new URL('../src/lib/components/ConfirmForm.svelte', import.meta.url), 'utf8');
 	assert.match(rename, /nextFormDialog/);
 	assert.match(rename, /onSettled=\{settle\}/);
-	assert.match(confirm, /nextFormDialog/);
+	assert.match(confirm, /confirmAfterAction\(\{ open, sawFailure \}, resultType, closeOnFailure\)/);
+	assert.equal(confirm.includes('import { confirmAfterAction'), true);
+	assert.deepEqual(confirmAfterAction({ open: true, sawFailure: false }, 'failure', true), {
+		open: false,
+		sawFailure: false,
+		resetDraft: false
+	});
+	assert.deepEqual(confirmAfterAction({ open: true, sawFailure: false }, 'failure', false), {
+		open: true,
+		sawFailure: true,
+		resetDraft: false
+	});
+	assert.deepEqual(nextConfirmDialog({ open: true, sawFailure: false }, 'failure', true), {
+		open: false,
+		sawFailure: false,
+		resetDraft: false
+	});
+	assert.deepEqual(nextConfirmDialog({ open: true, sawFailure: false }, 'failure'), {
+		open: true,
+		sawFailure: true,
+		resetDraft: false
+	});
 	assert.match(confirm, /bind:open/);
 	assert.match(confirm, /bind:typed/);
 	assert.match(confirm, /onSettled=\{settle\}/);
 	assert.match(renameForm, /formDialogOutcome\(result\.type\)/);
-	assert.match(confirmForm, /formDialogOutcome\(result\.type\)/);
+	assert.match(confirmForm, /onSettled\?\.\(result\.type\)/);
 });

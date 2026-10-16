@@ -2,7 +2,6 @@
 	import { enhance } from '$app/forms';
 	import type { Snippet } from 'svelte';
 	import { confirmSubmitDisabled } from '$lib/confirm';
-	import { formDialogOutcome, type DialogOutcome } from '$lib/dialog-open';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -30,7 +29,7 @@
 		/** Visible text the user must type. Nothing hidden carries `expected`. */
 		typeToConfirm?: TypeToConfirm | null;
 		typed?: string;
-		onSettled?: (outcome: DialogOutcome) => void | Promise<void>;
+		onSettled?: (resultType: string) => void | Promise<void>;
 		cancel?: Snippet;
 	} = $props();
 
@@ -44,7 +43,7 @@
 	use:enhance={() => {
 		return async ({ result, update }) => {
 			await update();
-			await onSettled?.(formDialogOutcome(result.type));
+			await onSettled?.(result.type);
 		};
 	}}
 >

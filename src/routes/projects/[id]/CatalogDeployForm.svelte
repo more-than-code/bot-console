@@ -11,7 +11,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import type { Host, ImageDeploy, ImageEntry } from '$lib/api-types';
-	import { imageHostBlockReason, isCatalogHost, reuseIdempotencyKey } from '$lib/catalog';
+	import { imageFilesBlockReason, imageHostBlockReason, isCatalogHost, reuseIdempotencyKey } from '$lib/catalog';
 	import { formatWhen } from '$lib/format';
 	import { applyHistoryResponse, historyAfterSwitch, historyFetch, historyNotice, nextHistory, nextIdempotencyKey, nextRollbackKey, rollbackDigests, shortDigest } from '$lib/image-spec';
 	import type { ImageDeployState } from '$lib/project-action';
@@ -71,6 +71,7 @@
 	const selectedHost = $derived(eligible.find((host) => host.id === hostId) ?? null);
 	const hostLabel = $derived(selectedHost?.name ?? '');
 	const containerBlocked = $derived(selectedHost != null && imageHostBlockReason(selectedHost) != null);
+	const filesBlocked = $derived(selectedHost != null && imageFilesBlockReason(selectedHost, entry.spec.files.length > 0) != null);
 	const notice = $derived(historyNotice({ hostCount: eligible.length, pending: historyPending, ready: historyReady, count: history.length }));
 	const targets = $derived(entry.spec.kind === 'job' ? [] : rollbackDigests(history));
 	const digest = $derived(shortDigest(result?.outcome?.digest ?? result?.status?.digest));
@@ -251,8 +252,12 @@
 		<Input type="hidden" name="host_id" value={hostId} />
 		{#each eligible as host (host.id)}
 			{@const reason = imageHostBlockReason(host)}
+			{@const filesReason = imageFilesBlockReason(host, entry.spec.files.length > 0)}
 			{#if reason}
 				<p class="text-muted-foreground text-sm">{host.name}: {reason}</p>
+			{/if}
+			{#if filesReason}
+				<p class="text-muted-foreground text-sm">{host.name}: {filesReason}</p>
 			{/if}
 		{/each}
 	</div>
@@ -288,7 +293,7 @@
 		<pre class="bg-muted max-h-40 overflow-auto rounded-lg p-2 font-mono text-xs whitespace-pre-wrap" aria-label="Deploy log">{result.lines.join('\n')}</pre>
 	{/if}
 	<div class="flex flex-wrap items-center gap-2">
-		<Button type="submit" disabled={submitting || hostId === '' || containerBlocked}>{actionLabel}</Button>
+		<Button type="submit" disabled={submitting || hostId === '' || containerBlocked || filesBlocked}>{actionLabel}</Button>
 		{#if cancel}
 			{@render cancel()}
 		{/if}

@@ -12,6 +12,7 @@
 	import type { ImageEntry } from '$lib/api-types';
 	import {
 		SUGGESTED_MEMORY_MB,
+		applyDockerPaste,
 		blankImageDraft,
 		dockerRunPreview,
 		imageSpecFromDraft,
@@ -30,6 +31,10 @@
 		setsMessage = null,
 		setsStatus = 'loading',
 		retrySets,
+		files = [],
+		filesMessage = null,
+		filesStatus = 'loading',
+		retryFiles,
 		editor = null,
 		onSettled,
 		cancel
@@ -41,6 +46,10 @@
 		setsMessage?: string | null;
 		setsStatus?: 'loading' | 'ready' | 'error';
 		retrySets?: () => void;
+		files?: Array<{ name: string }>;
+		filesMessage?: string | null;
+		filesStatus?: 'loading' | 'ready' | 'error';
+		retryFiles?: () => void;
 		editor?: ImageEditorState | null;
 		onSettled?: (outcome: DialogOutcome) => void | Promise<void>;
 		cancel?: Snippet;
@@ -62,6 +71,7 @@
 				return { key, set: reference.slice(0, dot), name: reference.slice(dot + 1) };
 			}),
 			volumes: spec.volumes.map((volume) => ({ name: volume.name, target: volume.target, readOnly: volume.read_only })),
+			files: spec.files.map((file) => ({ file: file.file, target: file.target })),
 			restart: spec.kind === 'job' ? 'no' : spec.restart,
 			user: spec.user,
 			healthyAfter: spec.kind === 'service' ? String(spec.healthy_after_sec) : '',
@@ -92,6 +102,13 @@
 		for (const name of draft.envSets) names.add(name);
 		return [...names].sort();
 	});
+	const fileOptions = $derived.by(() => {
+		const names = new Set(files.map((file) => file.name));
+		for (const row of draft.files) {
+			if (row.file !== '') names.add(row.file);
+		}
+		return [...names].sort();
+	});
 	const previewLine = $derived.by(() => {
 		const setKeys = draft.envSets.flatMap((name) => sets.find((set) => set.name === name)?.keys ?? []);
 		const memory = /^[0-9]+$/.test(draft.memoryMb.trim()) ? Number(draft.memoryMb.trim()) : null;
@@ -108,6 +125,9 @@
 			volumes: draft.volumes
 				.filter((volume) => volume.name.trim() !== '' && volume.target.trim() !== '')
 				.map((volume) => ({ name: volume.name.trim(), target: volume.target.trim(), readOnly: volume.readOnly })),
+			files: draft.files
+				.filter((file) => file.file.trim() !== '' && file.target.trim() !== '')
+				.map((file) => ({ file: file.file.trim(), target: file.target.trim() })),
 			restart: draft.workload === 'job' ? 'no' : draft.restart,
 			user: draft.user.trim(),
 			memoryMb: memory
@@ -135,6 +155,12 @@
 		return [...keys];
 	}
 
+	function optionsFor(current: string): string[] {
+		const names = new Set(files.map((file) => file.name));
+		if (current !== '' && !names.has(current)) names.add(current);
+		return [...names].sort();
+	}
+
 	function toggleSet(name: string, checked: boolean) {
 		if (checked) {
 			if (!draft.envSets.includes(name)) draft.envSets = [...draft.envSets, name];
@@ -153,15 +179,7 @@
 		paste = '';
 		pasteNote = null;
 		unsupported = parsed.unsupported;
-		const next = parsed.draft;
-		draft.image = next.image ?? draft.image;
-		draft.command = next.command && next.command.length > 0 ? next.command : [''];
-		draft.entrypoint = next.entrypoint && next.entrypoint.length > 0 ? next.entrypoint : draft.entrypoint;
-		draft.ports = next.ports ?? [];
-		draft.env = next.env ?? [];
-		draft.volumes = next.volumes ?? [];
-		if (next.restart) draft.restart = next.restart;
-		if (next.user != null) draft.user = next.user;
+		draft = applyDockerPaste(draft, parsed);
 	}
 
 	function invalid(name: string): boolean {
@@ -180,7 +198,8 @@
 	class="grid gap-3"
 	use:enhance={({ cancel }) => {
 		const known = sets.length > 0 ? sets : undefined;
-		const check = imageSpecFromDraft(draft, known, mode === 'create');
+		const knownFiles = filesStatus === 'ready' ? files.map((file) => file.name) : undefined;
+		const check = imageSpecFromDraft(draft, known, mode === 'create', knownFiles);
 		if (!check.ok) {
 			clientField = check.field;
 			clientMessage = check.message;
@@ -369,6 +388,46 @@
 		{/each}
 		<Button type="button" variant="outline" disabled={draft.volumes.length >= 8} onclick={() => (draft.volumes = [...draft.volumes, { name: '', target: '', readOnly: false }])}>Add volume</Button>
 		{@render fieldNotice('volumes')}
+	</div>
+	<div class="grid gap-1.5">
+		<p class="text-sm font-medium">Files</p>
+		{#if filesStatus === 'loading'}
+			<p class="text-muted-foreground text-sm">Loading files…</p>
+		{:else if filesStatus === 'error'}
+			<Notice kind="error">{filesMessage ?? 'Files could not be loaded.'}</Notice>
+			{#if retryFiles}
+				<Button type="button" variant="outline" onclick={retryFiles}>Retry</Button>
+			{/if}
+		{:else if fileOptions.length === 0 && draft.files.length === 0}
+			<p class="text-muted-foreground text-sm">No files yet.</p>
+		{/if}
+		{#each draft.files as row, index (index)}
+			<div class="flex flex-wrap items-center gap-2">
+				<Input type="hidden" name="file_name" value={row.file} />
+				<Label class="sr-only" for="{fieldId}-file-{index}">File {index + 1}</Label>
+				<Select.Root type="single" bind:value={draft.files[index].file}>
+					<Select.Trigger id="{fieldId}-file-{index}" class="w-full min-w-0" aria-invalid={invalid('files') ? true : undefined} aria-describedby={describedBy('files')}>
+						<Select.Value placeholder="Choose a file">{row.file === '' ? 'Choose a file' : row.file}</Select.Value>
+					</Select.Trigger>
+					<Select.Content class="max-w-[calc(100vw-2rem)]">
+						{#each optionsFor(row.file) as name (name)}
+							<Select.Item
+								value={name}
+								label={name}
+								class="h-auto max-w-full min-w-0 whitespace-normal [&>span:last-of-type]:min-w-0 [&>span:last-of-type]:shrink [&>span:last-of-type]:whitespace-normal [&>span:last-of-type]:break-all"
+							>
+								<span class="min-w-0 break-all whitespace-normal">{name}</span>
+							</Select.Item>
+						{/each}
+					</Select.Content>
+				</Select.Root>
+				<Label class="sr-only" for="{fieldId}-file-target-{index}">File target {index + 1}</Label>
+				<Input id="{fieldId}-file-target-{index}" name="file_target" bind:value={draft.files[index].target} maxlength={255} placeholder="/target" spellcheck="false" aria-invalid={invalid('files')} aria-describedby={describedBy('files')} />
+				<Button type="button" variant="outline" aria-label="Remove file {index + 1}" onclick={() => (draft.files = draft.files.filter((_, item) => item !== index))}>Remove</Button>
+			</div>
+		{/each}
+		<Button type="button" variant="outline" disabled={draft.files.length >= 16} onclick={() => (draft.files = [...draft.files, { file: '', target: '' }])}>Add file</Button>
+		{@render fieldNotice('files')}
 	</div>
 	{#if draft.workload === 'service'}
 		<Label class="grid gap-1.5" for="{fieldId}-restart">

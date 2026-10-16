@@ -26,7 +26,9 @@ const TAG = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const NAME_PART = /^[a-z0-9]+(?:(?:[._]|__|[-]*)[a-z0-9]+)*$/;
 const SET_NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
+const FILE_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const VOLUME_NAME = SET_NAME;
+const FILE_ROOTS = ['/proc', '/sys', '/dev'] as const;
 const USER_NAME = /^[a-z_][a-z0-9_-]{0,31}$/;
 const REGISTRY_HOST = /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?$/;
 const CONFIRMATION_ID = /^[A-Za-z0-9_-]{43}$/;
@@ -44,6 +46,7 @@ export type ImageDraft = {
 	envSets: string[];
 	secrets: Array<{ key: string; set: string; name: string }>;
 	volumes: Array<{ name: string; target: string; readOnly: boolean }>;
+	files: Array<{ file: string; target: string }>;
 	restart: ImageRestart;
 	user: string;
 	healthyAfter: string;
@@ -98,6 +101,31 @@ export function cleanVolumeTarget(value: string): string | null {
 	const segments = target.split('/');
 	if (segments.includes('.') || segments.includes('..')) return null;
 	return target;
+}
+
+/** v1.9 file name. `.` and `..` do not match. */
+export function isFileName(value: string): boolean {
+	return FILE_NAME.test(value);
+}
+
+/**
+ * v1.9 rule 13 target: absolute, ≤ 255 bytes, no empty / `.` / `..` segment,
+ * no trailing slash, and not `/`, `/proc`, `/sys`, `/dev`, or under them.
+ */
+export function cleanFileTarget(value: string): string | null {
+	const target = value.trim();
+	if (target === '/' || !target.startsWith('/') || byteLength(target) > 255 || LINE_BREAK.test(target)) return null;
+	const segments = target.split('/');
+	if (segments.slice(1).some((part) => part === '' || part === '.' || part === '..')) return null;
+	for (const root of FILE_ROOTS) {
+		if (target === root || target.startsWith(`${root}/`)) return null;
+	}
+	return target;
+}
+
+/** True when one path is strictly inside the other. Equal paths are not nested. */
+export function fileTargetNests(left: string, right: string): boolean {
+	return left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
 }
 
 function registryHostOk(host: string): boolean {
@@ -223,6 +251,37 @@ function cleanVolumes(rows: ImageDraft['volumes']): { ok: true; volumes: ImageSp
 	return { ok: true, volumes };
 }
 
+function cleanFiles(
+	rows: ImageDraft['files'],
+	volumeTargets: readonly string[],
+	knownFiles?: readonly string[]
+): { ok: true; files: ImageSpec['files'] } | { ok: false; field: string; message: string } {
+	const files: ImageSpec['files'] = [];
+	const names = new Set<string>();
+	const targets = new Set<string>(volumeTargets);
+	for (const row of rows) {
+		const name = row.file.trim();
+		const targetRaw = row.target.trim();
+		if (name === '' && targetRaw === '') continue;
+		if (!isFileName(name)) return fail('files', 'File names use lowercase letters, digits, dots, underscores, and hyphens.');
+		if (names.has(name)) return fail('files', 'Each file can appear once.');
+		if (knownFiles && !knownFiles.includes(name)) return fail('files', `Unknown file ${name}.`);
+		const target = cleanFileTarget(targetRaw);
+		if (!target) {
+			return fail('files', 'A file target must be an absolute path, at most 255 bytes, with no empty, . or .. segment, and not /, /proc, /sys, /dev, or under them.');
+		}
+		if (targets.has(target)) return fail('files', 'Each file and volume target can appear once.');
+		if (volumeTargets.some((other) => fileTargetNests(target, other))) {
+			return fail('files', 'A file target cannot sit inside a volume target, or the other way around.');
+		}
+		names.add(name);
+		targets.add(target);
+		files.push({ file: name, target });
+	}
+	if (files.length > 16) return fail('files', 'At most 16 files.');
+	return { ok: true, files };
+}
+
 function integerIn(raw: string, min: number, max: number): number | null | undefined {
 	const trimmed = raw.trim();
 	if (trimmed === '') return null;
@@ -236,7 +295,12 @@ function integerIn(raw: string, min: number, max: number): number | null | undef
  * Map a container form onto an ImageSpec. Empty command and entrypoint lists become null.
  * A job's restart is always `no`. `public` is false: the API has no allow-public flag.
  */
-export function imageSpecFromDraft(draft: ImageDraft, knownSets?: readonly KnownSet[], includeName = false): ImageCheck {
+export function imageSpecFromDraft(
+	draft: ImageDraft,
+	knownSets?: readonly KnownSet[],
+	includeName = false,
+	knownFiles?: readonly string[]
+): ImageCheck {
 	let name: string | null = null;
 	if (includeName) {
 		if (!isImageEntryName(draft.name)) {
@@ -282,6 +346,8 @@ export function imageSpecFromDraft(draft: ImageDraft, knownSets?: readonly Known
 	}
 	const volumes = cleanVolumes(draft.volumes);
 	if (!volumes.ok) return volumes;
+	const files = cleanFiles(draft.files, volumes.volumes.map((volume) => volume.target), knownFiles);
+	if (!files.ok) return files;
 	const user = cleanImageUser(draft.user.trim());
 	if (user === null) return fail('user', 'User must be empty, a name, a positive uid, or name:group. Root and leading zeros are refused.');
 	const memory = integerIn(draft.memoryMb, 16, 65536);
@@ -313,6 +379,7 @@ export function imageSpecFromDraft(draft: ImageDraft, knownSets?: readonly Known
 		env_sets: envSets,
 		secret_env: secretEnv,
 		volumes: volumes.volumes,
+		files: files.files,
 		restart,
 		user,
 		healthy_after_sec: healthy,
@@ -368,6 +435,7 @@ export function dockerRunPreview(input: {
 	ports: readonly { host: number; container: number }[];
 	envKeys: readonly string[];
 	volumes: readonly { name: string; target: string; readOnly: boolean }[];
+	files?: readonly { file: string; target: string }[];
 	restart: string;
 	user: string;
 	memoryMb: number | null;
@@ -385,6 +453,9 @@ export function dockerRunPreview(input: {
 	for (const volume of input.volumes) {
 		const suffix = volume.readOnly ? ':ro' : '';
 		parts.push('-v', `${volume.name}:${volume.target}${suffix}`);
+	}
+	for (const file of input.files ?? []) {
+		parts.push('-v', shellQuote(`${file.file}:${file.target}:ro`));
 	}
 	if (input.user) parts.push('--user', shellQuote(input.user));
 	if (input.memoryMb != null) parts.push('--memory', `${input.memoryMb}m`);
@@ -642,13 +713,33 @@ export function parseDockerRun(line: string, workload: ImageWorkload = 'service'
 	return { ok: true, draft, unsupported };
 }
 
-/** Drop a submitted secret from an API message when it appears as its own token. */
+/** Copy a parsed `docker run` onto the form. File rows are left as they are. */
+export function applyDockerPaste(draft: ImageDraft, parsed: Extract<DockerPrefill, { ok: true }>): ImageDraft {
+	const next = parsed.draft;
+	return {
+		...draft,
+		image: next.image ?? draft.image,
+		command: next.command && next.command.length > 0 ? next.command : [''],
+		entrypoint: next.entrypoint && next.entrypoint.length > 0 ? next.entrypoint : draft.entrypoint,
+		ports: next.ports ?? [],
+		env: next.env ?? [],
+		volumes: next.volumes ?? [],
+		restart: next.restart ? next.restart : draft.restart,
+		user: next.user != null ? next.user : draft.user
+	};
+}
+
+/**
+ * Drop a submitted secret from an API message.
+ * A piece of at least 8 characters matches inside a longer word. A shorter piece matches only as its own token.
+ */
 export function redactSubmitted(message: string, secrets: readonly string[]): string {
 	const list = [...new Set(secrets.filter((secret) => secret !== ''))].sort((left, right) => right.length - left.length);
 	let out = message;
 	for (const secret of list) {
 		const escaped = secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		out = out.replace(new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`, 'g'), '[redacted]');
+		const pattern = secret.length >= 8 ? escaped : `(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`;
+		out = out.replace(new RegExp(pattern, 'g'), '[redacted]');
 	}
 	return out;
 }
@@ -795,6 +886,7 @@ export function blankImageDraft(): ImageDraft {
 		envSets: [],
 		secrets: [],
 		volumes: [],
+		files: [],
 		restart: 'unless-stopped',
 		user: '',
 		healthyAfter: '',
@@ -815,6 +907,7 @@ export function imageRequestBody(spec: ImageSpec, name: string | null): Record<s
 		env_sets: spec.env_sets,
 		secret_env: spec.secret_env,
 		volumes: spec.volumes,
+		files: spec.files,
 		restart: spec.restart,
 		user: spec.user,
 		memory_mb: spec.memory_mb
@@ -852,7 +945,9 @@ export function imageDraftFromForm(form: FormData): { draft: ImageDraft; message
 	const volumeName = stringList(form, 'volume_name', 12);
 	const volumeTarget = stringList(form, 'volume_target', 12);
 	const volumeRo = stringList(form, 'volume_ro', 12);
-	const lists = [command, entrypoint, portHost, portContainer, envKey, envValue, envSets, secretKey, secretSet, secretName, volumeName, volumeTarget, volumeRo];
+	const fileName = stringList(form, 'file_name', 20);
+	const fileTarget = stringList(form, 'file_target', 20);
+	const lists = [command, entrypoint, portHost, portContainer, envKey, envValue, envSets, secretKey, secretSet, secretName, volumeName, volumeTarget, volumeRo, fileName, fileTarget];
 	const draft = blankImageDraft();
 	draft.name = formText(form, 'name').slice(0, 48);
 	draft.workload = formText(form, 'workload') === 'job' ? 'job' : 'service';
@@ -871,6 +966,9 @@ export function imageDraftFromForm(form: FormData): { draft: ImageDraft; message
 	}
 	if (volumeName.values.length !== volumeTarget.values.length || volumeName.values.length !== volumeRo.values.length) {
 		return { draft, message: 'Each volume needs a name and a target.', field: 'volumes' };
+	}
+	if (fileName.values.length !== fileTarget.values.length) {
+		return { draft, message: 'Each file needs a name and a target.', field: 'files' };
 	}
 	let message: string | null = null;
 	let field: string | null = null;
@@ -901,6 +999,26 @@ export function imageDraftFromForm(form: FormData): { draft: ImageDraft; message
 		target: (volumeTarget.values[index] ?? '').slice(0, 255),
 		readOnly: volumeRo.values[index] === '1'
 	}));
+	draft.files = fileName.values.map((name, index) => {
+		const target = fileTarget.values[index] ?? '';
+		let file = name;
+		let shown = target;
+		if (name.length > 64) {
+			file = '';
+			if (message == null) {
+				message = 'File names use lowercase letters, digits, dots, underscores, and hyphens.';
+				field = 'files';
+			}
+		}
+		if (byteLength(target) > 255) {
+			shown = '';
+			if (message == null) {
+				message = 'A file target must be an absolute path, at most 255 bytes, with no empty, . or .. segment, and not /, /proc, /sys, /dev, or under them.';
+				field = 'files';
+			}
+		}
+		return { file, target: shown };
+	});
 	return { draft, message, field };
 }
 

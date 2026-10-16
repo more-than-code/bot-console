@@ -107,8 +107,15 @@ export type ProjectActionData = {
 	/** Names and key names only. Values are never included. */
 	catalogSets?: KnownSet[];
 	catalogSetsMessage?: string | null;
+	/** File names only. Content is never included. */
+	catalogFiles?: Array<{ name: string }>;
+	catalogFilesMessage?: string | null;
+	/** Plain file content from View. Secret files never set this. */
+	viewedFile?: { name: string; content: string } | null;
 	/** Which settings form failed. The secret field is cleared either way. */
-	settingsField?: 'dotenv' | 'token' | null;
+	settingsField?: 'dotenv' | 'token' | 'file' | null;
+	/** File a delete failure belongs to. The notice sits on that row, not under the dialog. */
+	settingsName?: string | null;
 };
 
 export type RenameOpenState = DialogState;

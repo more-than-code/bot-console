@@ -25,6 +25,17 @@ export function nextFormDialog(state: DialogState, outcome: DialogOutcome): Dial
 	return { open: state.open, sawFailure: false, resetDraft: false };
 }
 
+/** File delete closes on a failure so the row notice is not covered by the dialog. Other confirms use the shared rule. */
+export function nextConfirmDialog(state: DialogState, outcome: DialogOutcome, closeOnFailure = false): DialogView {
+	if (closeOnFailure && outcome === 'failure') return { open: false, sawFailure: false, resetDraft: false };
+	return nextFormDialog(state, outcome);
+}
+
+/** Map an action result (`failure`, `redirect`, …) through the confirm rule. */
+export function confirmAfterAction(state: DialogState, resultType: string, closeOnFailure = false): DialogView {
+	return nextConfirmDialog(state, formDialogOutcome(resultType), closeOnFailure);
+}
+
 /** A returned success, or a redirect such as `backTo`, is success. Anything else failed stays open. */
 export function formDialogOutcome(resultType: string): DialogOutcome {
 	if (resultType === 'success' || resultType === 'redirect') return 'success';

@@ -194,7 +194,7 @@ describe('project services', { concurrency: false }, () => {
 			catalog: ['catalog', 'hosts', 'members'],
 			members: ['invites', 'members'],
 			tokens: ['join-tokens'],
-			settings: ['env-sets', 'registries']
+			settings: ['env-sets', 'files', 'registries']
 		};
 		const overlap: Record<string, number> = {};
 		for (const [tab, want] of Object.entries(expected)) {

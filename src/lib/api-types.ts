@@ -123,6 +123,8 @@ export type HostPrograms = {
 	images: boolean;
 	/** True when the helper answered container_list at start-up. Missing on older hellos is false. */
 	docker: boolean;
+	/** True when the agent reported managed files. Missing on older hellos is false. */
+	files: boolean;
 };
 
 export type ProgramSpec = {
@@ -148,6 +150,12 @@ export type ImageVolume = {
 	read_only: boolean;
 };
 
+/** A project file mounted read-only at `target`. Content stays on the API. */
+export type ImageFileMount = {
+	file: string;
+	target: string;
+};
+
 export type ImageSpec = {
 	kind: ImageWorkload;
 	image: string;
@@ -158,6 +166,7 @@ export type ImageSpec = {
 	env_sets: string[];
 	secret_env: Record<string, string>;
 	volumes: ImageVolume[];
+	files: ImageFileMount[];
 	restart: ImageRestart;
 	user: string;
 	healthy_after_sec: number;
@@ -241,6 +250,29 @@ export type EnvSet = {
 export type Registry = {
 	host: string;
 	username: string;
+	updated_at: string;
+	updated_by: string;
+};
+
+/**
+ * A project file, without its content.
+ * `sha256` is the hex digest of a plain file, and null for a secret file.
+ */
+export type ProjectFile = {
+	name: string;
+	is_secret: boolean;
+	size: number;
+	sha256: string | null;
+	updated_at: string;
+	updated_by: string;
+};
+
+/** A plain file, including content. Secret files are never this object. */
+export type ProjectFileContent = {
+	name: string;
+	content: string;
+	size: number;
+	sha256: string;
 	updated_at: string;
 	updated_by: string;
 };

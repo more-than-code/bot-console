@@ -76,6 +76,7 @@
 					mode="create"
 					saveAction={actionUrlFrom(page.url, 'catalogCreate')}
 					setsAction={actionUrlFrom(page.url, 'catalogEnvSets')}
+					filesAction={actionUrlFrom(page.url, 'catalogFiles')}
 					revealed={imageEditor?.mode === 'create'}
 					editor={imageEditor?.mode === 'create' ? imageEditor : null}
 				/>
@@ -159,6 +160,10 @@
 			settingsField={action?.scope === 'settings' ? (action.settingsField ?? null) : null}
 			envSets={data.envSets ?? []}
 			envSetsMessage={data.envSetsMessage ?? null}
+			files={data.files ?? []}
+			filesMessage={data.filesMessage ?? null}
+			viewedFile={action?.scope === 'settings' ? (action.viewedFile ?? null) : null}
+			settingsName={action?.scope === 'settings' ? (action.settingsName ?? null) : null}
 			registries={data.registries ?? []}
 			registriesMessage={data.registriesMessage ?? null}
 		/>

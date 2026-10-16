@@ -6,7 +6,7 @@
 	import type { Component } from 'svelte';
 	import ConfirmForm from '$lib/components/ConfirmForm.svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
-	import { nextFormDialog, type DialogOutcome } from '$lib/dialog-open';
+	import { confirmAfterAction } from '$lib/dialog-open';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { buttonVariants } from '$lib/components/ui/button';
 
@@ -25,7 +25,9 @@
 		hidden = [],
 		typeToConfirm = null,
 		rowLabel = null,
-		disabled = false
+		disabled = false,
+		closeOnFailure = false,
+		messageClass = ''
 	}: {
 		id: string;
 		action: string;
@@ -39,14 +41,17 @@
 		rowLabel?: string | null;
 		/** The text trigger does not open. Row triggers ignore this. */
 		disabled?: boolean;
+		/** A failure closes the dialog instead of leaving it open over the page. */
+		closeOnFailure?: boolean;
+		messageClass?: string;
 	} = $props();
 
 	let open = $state(false);
 	let sawFailure = $state(false);
 	let typed = $state('');
 
-	function settle(outcome: DialogOutcome) {
-		const next = nextFormDialog({ open, sawFailure }, outcome);
+	function settle(resultType: string) {
+		const next = confirmAfterAction({ open, sawFailure }, resultType, closeOnFailure);
 		open = next.open;
 		sawFailure = next.sawFailure;
 		if (next.resetDraft) typed = '';
@@ -82,7 +87,7 @@
 	<AlertDialog.Content>
 		<AlertDialog.Header>
 			<AlertDialog.Title>{confirmLabel}</AlertDialog.Title>
-			<AlertDialog.Description>{message}</AlertDialog.Description>
+			<AlertDialog.Description class={messageClass}>{message}</AlertDialog.Description>
 		</AlertDialog.Header>
 		<ConfirmForm {id} {action} {confirmLabel} {hidden} {typeToConfirm} bind:typed onSettled={settle}>
 			{#snippet cancel()}

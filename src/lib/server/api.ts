@@ -46,14 +46,18 @@ const CODE_STATUS: Record<string, number> = {
 export class ApiError extends Error {
 	readonly status: number;
 	readonly code: string;
+	/** Message shown to other callers. At most 500 characters. */
 	readonly msg: string;
+	/** Uncut API message. The file-save path redacts this before it clips. */
+	readonly fullMsg: string;
 
-	constructor(status: number, code: string, msg: string) {
+	constructor(status: number, code: string, msg: string, fullMsg?: string) {
 		super(msg);
 		this.name = 'ApiError';
 		this.status = status;
 		this.code = code;
 		this.msg = msg;
+		this.fullMsg = fullMsg ?? msg;
 	}
 }
 
@@ -267,7 +271,7 @@ async function callApi(event: RequestEvent, path: string, init: RequestInit | un
 	if (response.status >= 200 && response.status < 300 && envelope.code === 'ok') return envelope.payload;
 	const status = response.status >= 400 ? response.status : (CODE_STATUS[envelope.code] ?? 500);
 	console.error(`bot api ${method} ${target.pathname} ${status} ${envelope.code}`);
-	throw new ApiError(status, envelope.code, envelope.msg || 'The request failed.');
+	throw new ApiError(status, envelope.code, envelope.msg || 'The request failed.', envelope.fullMsg);
 }
 
 function rejectUnauthorized(
@@ -357,7 +361,7 @@ async function readLimitedBody(response: Response): Promise<string> {
 	return new TextDecoder().decode(merged);
 }
 
-function readEnvelope(text: string, status: number): { code: string; msg: string; payload: unknown } {
+function readEnvelope(text: string, status: number): { code: string; msg: string; fullMsg: string; payload: unknown } {
 	let body: unknown;
 	try {
 		body = text.length === 0 ? null : JSON.parse(text);
@@ -367,6 +371,7 @@ function readEnvelope(text: string, status: number): { code: string; msg: string
 	if (!isRecord(body) || typeof body.code !== 'string' || typeof body.msg !== 'string' || !('payload' in body)) {
 		throw new ApiError(status >= 400 ? status : 502, 'error', 'The API returned an unexpected response.');
 	}
-	const msg = body.msg.length > 500 ? body.msg.slice(0, 500) : body.msg;
-	return { code: body.code, msg, payload: body.payload };
+	const fullMsg = body.msg;
+	const msg = fullMsg.length > 500 ? fullMsg.slice(0, 500) : fullMsg;
+	return { code: body.code, msg, fullMsg, payload: body.payload };
 }

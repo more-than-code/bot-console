@@ -1,5 +1,5 @@
 import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
-import type { CatalogEntry, EnvSet, Host, Invite, JoinToken, Member, ProjectService, ProjectServiceRow, Registry } from '$lib/api-types';
+import type { CatalogEntry, EnvSet, Host, Invite, JoinToken, Member, ProjectFile, ProjectService, ProjectServiceRow, Registry } from '$lib/api-types';
 import { catalogForCaller, isCatalogName } from '$lib/catalog';
 import { SERVICE_DEFAULT_DIR, SERVICE_DEFAULT_SORT, serviceColumns, serviceHostReachable } from '$lib/host-view';
 import { serviceShow } from '$lib/service-view';
@@ -22,14 +22,18 @@ import {
 	catalogDeploy,
 	catalogDeploys,
 	catalogEnvSets,
+	catalogFiles,
 	catalogRemove,
 	catalogRollback,
 	deleteEnvSet,
+	deleteProjectFile,
 	deleteRegistry,
 	loadProjectSettings,
 	patchEnvKey,
 	saveEnvSet,
-	saveRegistry
+	saveProjectFile,
+	saveRegistry,
+	viewProjectFile
 } from '$lib/server/image-actions';
 import { formText } from '$lib/server/form';
 import { requireUser } from '$lib/server/guard';
@@ -168,6 +172,8 @@ const empty = {
 	permissions: null as CatalogPermissionsState | null,
 	envSets: [] as EnvSet[],
 	envSetsMessage: null as string | null,
+	files: [] as ProjectFile[],
+	filesMessage: null as string | null,
 	registries: [] as Registry[],
 	registriesMessage: null as string | null,
 	...noServices
@@ -234,6 +240,8 @@ export const load: PageServerLoad = async (event) => {
 	const permissions = catalogLoad?.permissions ?? null;
 	const envSets = settings?.envSets ?? [];
 	const envSetsMessage = settings?.envSetsMessage ?? null;
+	const files = settings?.files ?? [];
+	const filesMessage = settings?.filesMessage ?? null;
 	const registries = settings?.registries ?? [];
 	const registriesMessage = settings?.registriesMessage ?? null;
 
@@ -267,6 +275,8 @@ export const load: PageServerLoad = async (event) => {
 		permissions,
 		envSets,
 		envSetsMessage,
+		files,
+		filesMessage,
 		registries,
 		registriesMessage,
 		...services
@@ -393,9 +403,13 @@ export const actions: Actions = {
 	catalogConfirm,
 	catalogDeploys,
 	catalogEnvSets,
+	catalogFiles,
 	saveEnvSet,
 	patchEnvKey,
 	deleteEnvSet,
+	saveProjectFile,
+	viewProjectFile,
+	deleteProjectFile,
 	saveRegistry,
 	deleteRegistry,
 	askRevoke: async (event) => {

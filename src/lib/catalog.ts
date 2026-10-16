@@ -59,6 +59,13 @@ export function imageHostBlockReason(host: Pick<Host, 'programs'>): string | nul
 	return null;
 }
 
+/** Why Deploy is refused for an entry that mounts files. An entry with no files has no reason. */
+export function imageFilesBlockReason(host: Pick<Host, 'programs'>, hasFiles: boolean): string | null {
+	if (!hasFiles) return null;
+	if (host.programs?.files === true) return null;
+	return "This host's agent does not support files";
+}
+
 /** Union of run-as accounts on eligible hosts. Shell entries only use hosts that allow a shell. */
 export function runAsChoices(hosts: readonly Pick<Host, 'relation' | 'share_level' | 'programs'>[], shell: boolean): string[] {
 	const names = new Set<string>();

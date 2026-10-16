@@ -3,11 +3,13 @@ import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
 import { render } from 'svelte/server';
-import type { CatalogEntry, EnvSet, Host, ImageDeploy, ImageEntry, ImageSpec, ProjectServiceRow, Registry } from '../src/lib/api-types.ts';
+import type { CatalogEntry, EnvSet, Host, ImageDeploy, ImageEntry, ImageSpec, ProjectFile, ProjectServiceRow, Registry } from '../src/lib/api-types.ts';
+import { formatBytes, formatWhen } from '../src/lib/format.ts';
 import { API_TIMEOUT_MS } from '../src/lib/server/api.ts';
-import { clearSecretField } from '../src/lib/secret-field.ts';
+import { clearSecretField, settleFileSave, showViewedFile } from '../src/lib/secret-field.ts';
 import {
 	acceptHostHistory,
+	applyDockerPaste,
 	applyHistoryResponse,
 	blankImageDraft,
 	dockerRunPreview,
@@ -26,7 +28,7 @@ import {
 	shortDigest,
 	switchedHistoryHost
 } from '../src/lib/image-spec.ts';
-import { parseCatalogEntry, parseCatalogList, parseDeployPayload, parseImageLogs, parseImageSpec, parseImageStatus, parseService } from '../src/lib/server/shape.ts';
+import { parseCatalogEntry, parseCatalogList, parseDeployPayload, parseHostPrograms, parseImageLogs, parseImageSpec, parseImageStatus, parseProjectFile, parseProjectFileContent, parseProjectFileList, parseService } from '../src/lib/server/shape.ts';
 import CatalogDeployForm from '../src/routes/projects/[id]/CatalogDeployForm.svelte';
 import CatalogImageForm from '../src/routes/projects/[id]/CatalogImageForm.svelte';
 import CatalogRunForm from '../src/routes/projects/[id]/CatalogRunForm.svelte';
@@ -63,6 +65,7 @@ function imageSpec(kind: ImageSpec['kind'] = 'service'): ImageSpec {
 		env_sets: [],
 		secret_env: {},
 		volumes: [],
+		files: [],
 		restart: kind === 'job' ? 'no' : 'unless-stopped',
 		user: '',
 		healthy_after_sec: 30,
@@ -128,7 +131,7 @@ function host(): Host {
 		revoked_at: null,
 		relation: 'owner',
 		share_level: null,
-		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true }
+		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false }
 	};
 }
 
@@ -188,7 +191,7 @@ function spyTimeouts(mode: 'hold' | 'abort'): { seen: number[]; restore: () => v
 
 function actionData(result: unknown): {
 	message?: string;
-	settingsField?: 'dotenv' | 'token' | null;
+	settingsField?: 'dotenv' | 'token' | 'file' | null;
 	imageDeploy?: { message?: string | null; history?: ImageDeploy[] | null; confirmation?: { plan: string } | null };
 	imageEditor?: { draft: { env: Array<{ key: string; value: string }> }; message: string | null; field: string | null };
 } {
@@ -196,7 +199,7 @@ function actionData(result: unknown): {
 	if (!isActionFailure(result)) return {};
 	return result.data as unknown as {
 		message?: string;
-		settingsField?: 'dotenv' | 'token' | null;
+		settingsField?: 'dotenv' | 'token' | 'file' | null;
 		imageDeploy?: { message?: string | null; history?: ImageDeploy[] | null; confirmation?: { plan: string } | null };
 		imageEditor?: { draft: { env: Array<{ key: string; value: string }> }; message: string | null; field: string | null };
 	};
@@ -631,6 +634,30 @@ describe('catalog images', { concurrency: false }, () => {
 			if (path === `/v1/projects/${PROJECT.id}/registries`) {
 				return envelope({ items: [{ host: 'ghcr.io', username: 'ada', token: REGISTRY_TOKEN, updated_at: '2026-10-14T00:00:00Z', updated_by: USER.id }] });
 			}
+			if (path === `/v1/projects/${PROJECT.id}/files`) {
+				return envelope({
+					items: [
+						{
+							name: 'app.conf',
+							is_secret: false,
+							size: 17,
+							sha256: 'ab'.repeat(32),
+							updated_at: '2026-10-13T12:00:00Z',
+							updated_by: USER.id,
+							content: 'plain-should-not-load'
+						},
+						{
+							name: 'key.json',
+							is_secret: true,
+							size: 31,
+							sha256: null,
+							updated_at: '2026-10-13T12:00:00Z',
+							updated_by: USER.id,
+							content: 'secret-should-not-load'
+						}
+					]
+				});
+			}
 			return envelope(null, 500, 'error', path);
 		}
 		const catalogCalls = installFetch(answer);
@@ -645,6 +672,7 @@ describe('catalog images', { concurrency: false }, () => {
 		);
 		assert.equal(catalogCalls.some((call) => call.url.pathname.includes('/env-sets')), false);
 		assert.equal(catalogCalls.some((call) => call.url.pathname.includes('/registries')), false);
+		assert.equal(catalogCalls.some((call) => call.url.pathname.endsWith('/files')), false);
 		assert.equal(catalogCalls.some((call) => call.url.pathname.includes('/deploys')), false);
 
 		const viewerCalls = installFetch(answer);
@@ -658,6 +686,7 @@ describe('catalog images', { concurrency: false }, () => {
 			}).event as never
 		);
 		assert.equal(viewerCalls.some((call) => call.url.pathname.includes('/env-sets')), false);
+		assert.equal(viewerCalls.some((call) => call.url.pathname.endsWith('/files')), false);
 
 		const settingsCalls = installFetch(answer);
 		const loaded = await projectLoad(
@@ -671,10 +700,14 @@ describe('catalog images', { concurrency: false }, () => {
 		);
 		assert.equal(settingsCalls.some((call) => call.url.pathname.endsWith('/env-sets')), true);
 		assert.equal(settingsCalls.some((call) => call.url.pathname.endsWith('/registries')), true);
+		assert.equal(settingsCalls.some((call) => call.url.pathname.endsWith('/files')), true);
 		assert.equal(settingsCalls.some((call) => call.url.pathname.includes('/deploys')), false);
 		const loadedJson = JSON.stringify(loaded);
 		assert.equal(loadedJson.includes(SECRET), false);
 		assert.equal(loadedJson.includes(REGISTRY_TOKEN), false);
+		assert.equal(loadedJson.includes('plain-should-not-load'), false);
+		assert.equal(loadedJson.includes('secret-should-not-load'), false);
+		assert.equal(loadedJson.includes('app.conf'), true);
 	});
 
 	test('the settings tab renders no secret value, and the paste and token fields start empty', async () => {
@@ -922,6 +955,7 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(body.spec?.command, null);
 		assert.equal(body.spec?.memory_mb, null);
 		assert.deepEqual(body.spec?.ports, [{ host: 8080, container: 80, public: false }]);
+		assert.deepEqual((body.spec as { files?: unknown }).files, []);
 	});
 
 	test('admins see settings, and the container button stays with the owner', () => {
@@ -1776,7 +1810,7 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.deepEqual(historyFetch(HOST_ID, '', false), { submit: false, pending: false });
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 		const second = '00000000-0000-4000-8000-0000000000ab';
-		const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: true };
+		const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: true, files: false };
 		const blockedHost = { ...host(), programs };
 		const openHost = { ...host(), id: second, name: 'pi2', programs: { ...programs, images: true, docker: true } };
 		const props = {
@@ -1989,5 +2023,1044 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(loading.includes('gone'), false);
 		assert.equal(loading.includes('Loading env sets…'), true);
 		assert.equal(loading.includes('No env sets yet'), false);
+	});
+
+	test('v1.9 file examples parse, and anything else fails closed', () => {
+		const fixtureIds = {
+			PROJECT: '11111111-1111-4111-8111-111111111111',
+			OWNER: '22222222-2222-4222-8222-222222222222',
+			ENTRY_WEB: '33333333-3333-4333-8333-333333333333',
+			ENTRY_API: '44444444-4444-4444-8444-444444444444'
+		} as const;
+		const text = readFileSync(new URL('../docs/examples/v1.9-files.json', import.meta.url), 'utf8');
+		const placeholder = /"([A-Z][A-Z0-9_]*)"/g;
+		const found = [...text.matchAll(placeholder)].map((match) => match[1]);
+		for (const token of found) assert.equal(Object.hasOwn(fixtureIds, token), true, token);
+		let substituted = text;
+		for (const [name, id] of Object.entries(fixtureIds)) substituted = substituted.replaceAll(`"${name}"`, `"${id}"`);
+		assert.deepEqual([...substituted.matchAll(placeholder)].map((match) => match[1]), []);
+		const raw = JSON.parse(substituted) as Record<string, unknown>;
+		assert.deepEqual(Object.keys(raw).sort(), ['catalog_entry', 'delete_conflict', 'deploy_unsupported', 'get_plain', 'host_programs', 'list_files', 'put_file']);
+		function envelopeOf(key: string): { code: string; msg: string; payload: unknown } {
+			const value = raw[key];
+			assert.equal(value != null && typeof value === 'object', true, key);
+			return value as { code: string; msg: string; payload: unknown };
+		}
+		function payloadOf(key: string): Record<string, unknown> {
+			const payload = envelopeOf(key).payload;
+			assert.equal(payload != null && typeof payload === 'object', true, key);
+			return payload as Record<string, unknown>;
+		}
+
+		const entry = payloadOf('catalog_entry');
+		const catalog = parseCatalogEntry(entry);
+		assert.equal(catalog?.kind, 'image');
+		assert.equal(catalog?.id, fixtureIds.ENTRY_WEB);
+		assert.equal(catalog?.project_id, fixtureIds.PROJECT);
+		assert.equal(catalog?.created_by, fixtureIds.OWNER);
+		const spec = parseImageSpec(entry.spec);
+		assert.equal(spec?.kind, 'service');
+		assert.deepEqual(spec?.files, [
+			{ file: 'app.conf', target: '/config/app.conf' },
+			{ file: 'key.json', target: '/run/secrets/key.json' }
+		]);
+		const omitted = { ...(entry.spec as Record<string, unknown>) };
+		delete omitted.files;
+		assert.deepEqual(parseImageSpec(omitted)?.files, []);
+		assert.equal(parseImageSpec({ ...(entry.spec as Record<string, unknown>), files: null }), null);
+		assert.equal(parseImageSpec({ ...(entry.spec as Record<string, unknown>), files: [{ file: 'app.conf', target: '/proc/self' }] }), null);
+		assert.equal(parseImageSpec({ ...(entry.spec as Record<string, unknown>), files: [{ file: 'app.conf', target: '/config/app.conf' }, { file: 'app.conf', target: '/other' }] }), null);
+		function filesOnSpec(count: number): Record<string, unknown> {
+			return {
+				...(entry.spec as Record<string, unknown>),
+				files: Array.from({ length: count }, (_, index) => ({ file: `f${index}.conf`, target: `/opt/f${index}.conf` }))
+			};
+		}
+		assert.equal(parseImageSpec(filesOnSpec(16))?.files.length, 16);
+		assert.equal(parseImageSpec(filesOnSpec(17)), null);
+		const nestedFiles = {
+			...(entry.spec as Record<string, unknown>),
+			files: [
+				{ file: 'app.conf', target: '/config' },
+				{ file: 'key.json', target: '/config/key.json' }
+			]
+		};
+		assert.equal(parseImageSpec({ ...(entry.spec as Record<string, unknown>), files: [{ file: 'Bad', target: '/config/app.conf' }] }), null);
+		assert.equal(
+			parseImageSpec({
+				...(entry.spec as Record<string, unknown>),
+				volumes: [{ name: 'data', target: '/data', read_only: false }],
+				files: [{ file: 'app.conf', target: '/data/app.conf' }]
+			}),
+			null
+		);
+		assert.equal(
+			parseImageSpec({
+				...(entry.spec as Record<string, unknown>),
+				volumes: [{ name: 'data', target: '/config/extra', read_only: true }],
+				files: [{ file: 'app.conf', target: '/config' }]
+			}),
+			null
+		);
+		assert.deepEqual(parseImageSpec(nestedFiles)?.files, [
+			{ file: 'app.conf', target: '/config' },
+			{ file: 'key.json', target: '/config/key.json' }
+		]);
+		assert.equal(
+			parseImageSpec({
+				...(entry.spec as Record<string, unknown>),
+				files: [
+					{ file: 'app.conf', target: '/config/app.conf' },
+					{ file: 'key.json', target: '/config/app.conf' }
+				]
+			}),
+			null
+		);
+
+		for (const key of ['delete_conflict', 'deploy_unsupported']) {
+			assert.equal(parseProjectFile(raw[key]), null, key);
+			assert.equal(parseProjectFile(envelopeOf(key).payload), null, key);
+			assert.equal(parseProjectFileContent(envelopeOf(key).payload), null, key);
+			assert.equal(parseProjectFileList(envelopeOf(key).payload), null, key);
+			assert.equal(parseHostPrograms(raw[key]), null, key);
+		}
+		assert.equal(envelopeOf('delete_conflict').msg, 'referenced by api, web');
+		assert.equal(envelopeOf('deploy_unsupported').msg, "this host's agent does not support files");
+
+		const programs = parseHostPrograms(raw.host_programs);
+		assert.equal(programs?.files, true);
+		assert.equal(programs?.images, true);
+		assert.equal(programs?.docker, true);
+		const missingFlag = { ...(raw.host_programs as Record<string, unknown>) };
+		delete missingFlag.files;
+		assert.equal(parseHostPrograms(missingFlag)?.files, false);
+		assert.equal(parseHostPrograms({ ...(raw.host_programs as Record<string, unknown>), files: null })?.files, false);
+		assert.equal(parseHostPrograms({ ...(raw.host_programs as Record<string, unknown>), files: 'yes' }), null);
+
+		const listed = parseProjectFileList(envelopeOf('list_files').payload);
+		assert.deepEqual(listed?.items.map((item) => item.name), ['app.conf', 'key.json']);
+		assert.equal(listed?.items[0]?.is_secret, false);
+		assert.equal(listed?.items[0]?.sha256, 'f395f66c028f7f579159bec04d13356b2027b4f36809bd4634301abb3cb530ff');
+		assert.equal(listed?.items[1]?.is_secret, true);
+		assert.equal(listed?.items[1]?.sha256, null);
+		assert.equal(JSON.stringify(listed).includes('content'), false);
+		const leaked = parseProjectFile({ ...(listed?.items[1] as ProjectFile), content: 'secret-should-not-load' });
+		assert.equal(leaked?.sha256, null);
+		assert.equal(JSON.stringify(leaked).includes('secret-should-not-load'), false);
+
+		const plain = parseProjectFileContent(payloadOf('get_plain'));
+		assert.equal(plain?.content, 'plain-config-line');
+		assert.equal(plain?.size, 17);
+		assert.equal(plain?.name, 'app.conf');
+		assert.equal(parseProjectFileContent({ ...payloadOf('get_plain'), size: 16 }), null);
+		assert.equal(parseProjectFileContent({ ...payloadOf('get_plain'), content: 'plain-config-line\0' }), null);
+		assert.equal(parseProjectFileContent({ ...payloadOf('get_plain'), content: '' }), null);
+		const utf8 = { ...payloadOf('get_plain'), content: 'héllo', size: 6 };
+		assert.equal(parseProjectFileContent(utf8)?.size, 6);
+		assert.equal(parseProjectFileContent({ ...utf8, size: 5 }), null);
+
+		const saved = parseProjectFile(payloadOf('put_file'));
+		assert.equal(saved?.name, 'key.json');
+		assert.equal(saved?.is_secret, true);
+		assert.equal(saved?.sha256, null);
+		assert.equal(saved?.updated_by, fixtureIds.OWNER);
+		assert.equal(plain?.updated_by, fixtureIds.OWNER);
+		assert.equal(listed?.items[0]?.updated_by, fixtureIds.OWNER);
+		assert.equal(listed?.items[1]?.updated_by, fixtureIds.OWNER);
+		assert.equal(parseProjectFileContent(payloadOf('put_file')), null);
+		const plainRow = listed?.items[0] as ProjectFile;
+		assert.equal(parseProjectFile({ ...plainRow, sha256: null }), null);
+		assert.equal(parseProjectFile({ ...saved, sha256: 'ab'.repeat(32) }), null);
+		const noDigest = { ...plainRow } as Record<string, unknown>;
+		delete noDigest.sha256;
+		assert.equal(parseProjectFile(noDigest), null);
+		assert.equal(parseProjectFile({ ...plainRow, updated_by: USER.id })?.updated_by, USER.id);
+		assert.equal(parseProjectFile({ ...plainRow, updated_by: 'OWNER' }), null);
+		assert.equal(parseProjectFile({ ...plainRow, updated_by: 'not a user' }), null);
+		assert.equal(parseProjectFileList({ items: [plainRow, plainRow] }), null);
+		assert.equal(parseProjectFileList({ items: [plainRow, { ...plainRow, name: 'BAD' }] }), null);
+		const sixtyFour = Array.from({ length: 64 }, (_, index) => ({ ...plainRow, name: `f${index}.conf` }));
+		assert.equal(parseProjectFileList({ items: sixtyFour })?.items.length, 64);
+		const tooMany = Array.from({ length: 65 }, (_, index) => ({ ...plainRow, name: `f${index}.conf` }));
+		assert.equal(parseProjectFileList({ items: tooMany }), null);
+	});
+
+	test('settings files keep the paste empty, view only a plain file, and name a delete conflict', async () => {
+		const secretLine = 'file-secret-line-99';
+		const otherLine = 'second-secret-line';
+		const content = `${secretLine}\n${otherLine}`;
+		const files: ProjectFile[] = [
+			{
+				name: 'app.conf',
+				is_secret: false,
+				size: 17,
+				sha256: 'ab'.repeat(32),
+				updated_at: '2026-10-13T12:00:00Z',
+				updated_by: USER.id
+			},
+			{
+				name: 'key.json',
+				is_secret: true,
+				size: 31,
+				sha256: null,
+				updated_at: '2026-10-13T12:00:00Z',
+				updated_by: USER.id
+			}
+		];
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+		const html = render(SettingsSection, {
+			props: { project: PROJECT, canOwner: true, canAdmin: true, message: null, files }
+		}).body;
+		assert.equal(html.includes('app.conf'), true);
+		assert.equal(html.includes('key.json'), true);
+		assert.equal(html.includes('plain'), true);
+		assert.equal(html.includes('secret'), true);
+		assert.equal(html.includes(formatBytes(17)), true);
+		assert.equal(html.includes(formatBytes(31)), true);
+		assert.equal(html.includes(formatWhen('2026-10-13T12:00:00Z')), true);
+		assert.equal(html.includes('aria-label="View app.conf"'), true);
+		assert.equal(html.includes('aria-label="View key.json"'), false);
+		assert.equal(html.includes(secretLine), false);
+		assert.equal(html.includes(otherLine), false);
+		const secretInput = [...html.matchAll(/<input\b[^>]*>/g)].map((match) => match[0]).find((tag) => tag.includes('name="secret"'));
+		assert.equal(secretInput?.includes('value="1"'), true);
+		assert.equal(html.includes('aria-label="Secret file"'), true);
+		const area = html.match(/<textarea\b[^>]*id="file-content"[^>]*>[\s\S]*?<\/textarea>/);
+		assert.equal(area != null, true);
+		assert.equal(area?.[0].includes('autocomplete="off"'), true);
+		assert.equal(area?.[0].includes(secretLine), false);
+		assert.doesNotMatch(html, /[?&]content=/);
+
+		const settings = readFileSync(new URL('../src/routes/projects/[id]/SettingsSection.svelte', import.meta.url), 'utf8');
+		assert.match(settings, /settleFileSave\(/);
+		assert.match(settings, /showViewedFile\(/);
+		assert.match(settings, /message="Delete file \{file\.name\}\?"/);
+		assert.match(settings, /messageClass="max-w-full min-w-0 break-all"/);
+		assert.match(settings, /closeOnFailure/);
+
+		const refused = installFetch(() => envelope(null, 400, 'bad_request', `saw ${otherLine} and ${secretLine}`));
+		const failed = await projectActions.saveProjectFile(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings&/saveProjectFile`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { name: 'key.json', content, secret: '1' }
+			}).event as never
+		);
+		const failedData = actionData(failed);
+		assert.equal(failedData.settingsField, 'file');
+		assert.equal(failedData.message?.includes('Paste the value again.'), true);
+		assert.equal(failedData.message?.includes(secretLine), false);
+		assert.equal(failedData.message?.includes(otherLine), false);
+		assert.equal(JSON.stringify(failed).includes(secretLine), false);
+		assert.equal(JSON.stringify(failed).includes(otherLine), false);
+		assert.equal(refused[0]?.body?.includes(secretLine), true);
+		const failedHtml = render(SettingsSection, {
+			props: {
+				project: PROJECT,
+				canOwner: true,
+				canAdmin: true,
+				message: failedData.message ?? null,
+				settingsField: 'file',
+				files
+			}
+		}).body;
+		assert.equal(failedHtml.includes(secretLine), false);
+		assert.equal(failedHtml.includes(otherLine), false);
+		assert.equal(failedHtml.includes('Paste the value again.'), true);
+		const failedArea = failedHtml.match(/<textarea\b[^>]*id="file-content"[^>]*>[\s\S]*?<\/textarea>/);
+		assert.equal(failedArea?.[0].includes(secretLine), false);
+		assert.match(failedHtml, /id="file-error"[^>]*tabindex="-1"/);
+
+		const savedCalls = installFetch(() =>
+			envelope({
+				name: 'key.json',
+				is_secret: true,
+				size: 31,
+				sha256: null,
+				updated_at: '2026-10-13T12:00:00Z',
+				updated_by: USER.id
+			})
+		);
+		await assert.rejects(
+			async () => {
+				await projectActions.saveProjectFile(
+					fakeEvent({
+						url: `http://console.example/projects/${PROJECT.id}?tab=settings&/saveProjectFile`,
+						session: TOKEN,
+						user: USER,
+						projects: [PROJECT],
+						params: { id: PROJECT.id },
+						form: { name: 'key.json', content }
+					}).event as never
+				);
+			},
+			(err: unknown) => {
+				assert.equal(JSON.stringify(err).includes(secretLine), false);
+				assert.equal(JSON.stringify(err).includes(otherLine), false);
+				return isRedirect(err) && err.status === 303;
+			}
+		);
+		const sent = JSON.parse(savedCalls[0]?.body ?? '{}') as { content?: string; secret?: boolean };
+		assert.equal(savedCalls[0]?.method, 'PUT');
+		assert.equal(savedCalls[0]?.url.pathname, `/v1/projects/${PROJECT.id}/files/key.json`);
+		assert.equal(sent.secret, true);
+		assert.equal(sent.content, content);
+		for (const [flag, secret] of [
+			['0', false],
+			['1', true]
+		] as const) {
+			const flagged = installFetch(() =>
+				envelope({
+					name: 'key.json',
+					is_secret: secret,
+					size: 31,
+					sha256: secret ? null : 'ab'.repeat(32),
+					updated_at: '2026-10-13T12:00:00Z',
+					updated_by: USER.id
+				})
+			);
+			await assert.rejects(
+				async () => {
+					await projectActions.saveProjectFile(
+						fakeEvent({
+							url: `http://console.example/projects/${PROJECT.id}?tab=settings&/saveProjectFile`,
+							session: TOKEN,
+							user: USER,
+							projects: [PROJECT],
+							params: { id: PROJECT.id },
+							form: { name: 'key.json', content, secret: flag }
+						}).event as never
+					);
+				},
+				(err: unknown) => isRedirect(err)
+			);
+			const body = JSON.parse(flagged[0]?.body ?? '{}') as { secret?: boolean };
+			assert.equal(body.secret, secret, flag);
+		}
+		const afterSave = render(SettingsSection, {
+			props: { project: PROJECT, canOwner: true, canAdmin: true, message: null, files }
+		}).body;
+		assert.equal(afterSave.includes(secretLine), false);
+		assert.equal(afterSave.match(/<textarea\b[^>]*id="file-content"[^>]*>[\s\S]*?<\/textarea>/)?.[0].includes(content), false);
+
+		const viewCalls = installFetch(() =>
+			envelope({
+				name: 'app.conf',
+				content: 'plain-config-line',
+				size: 17,
+				sha256: 'f395f66c028f7f579159bec04d13356b2027b4f36809bd4634301abb3cb530ff',
+				updated_at: '2026-10-13T12:00:00Z',
+				updated_by: USER.id
+			})
+		);
+		const viewedAgain = (await projectActions.viewProjectFile(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings&/viewProjectFile`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { name: 'app.conf' }
+			}).event as never
+		)) as { viewedFile?: { name: string; content: string } };
+		assert.equal(viewCalls[0]?.method, 'GET');
+		assert.equal(viewCalls[0]?.url.pathname, `/v1/projects/${PROJECT.id}/files/app.conf`);
+		assert.equal(viewedAgain.viewedFile?.name, 'app.conf');
+		assert.equal(viewedAgain.viewedFile?.content, 'plain-config-line');
+		assert.equal(JSON.stringify(viewedAgain).includes(secretLine), false);
+		const viewedHtml = render(SettingsSection, {
+			props: {
+				project: PROJECT,
+				canOwner: true,
+				canAdmin: true,
+				message: null,
+				files,
+				viewedFile: viewedAgain.viewedFile ?? null
+			}
+		}).body;
+		const viewTag = [...viewedHtml.matchAll(/<pre\b[^>]*>/g)].map((match) => match[0]).find((tag) => tag.includes('id="file-view-app.conf"'));
+		assert.equal(viewTag?.includes('tabindex="-1"'), true);
+		assert.equal(viewTag?.includes('aria-label="File app.conf"'), true);
+		assert.equal(viewedHtml.includes('plain-config-line'), true);
+		assert.equal(viewedHtml.includes('aria-label="View key.json"'), false);
+
+		installFetch(() => envelope(null, 403, 'forbidden', 'secret files cannot be read'));
+		const denied = await projectActions.viewProjectFile(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings&/viewProjectFile`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { name: 'key.json' }
+			}).event as never
+		);
+		assert.equal(actionData(denied).settingsField ?? null, null);
+		assert.equal(actionData(denied).message, 'secret files cannot be read');
+		assert.equal(actionData(denied).message?.includes('Paste the value again.'), false);
+		assert.equal(JSON.stringify(denied).includes(secretLine), false);
+
+		const deleteCalls = installFetch(() => envelope(null, 409, 'conflict', 'referenced by api, web'));
+		const conflict = await projectActions.deleteProjectFile(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings&/deleteProjectFile`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { name: 'key.json' }
+			}).event as never
+		);
+		assert.equal(deleteCalls[0]?.method, 'DELETE');
+		assert.equal(deleteCalls[0]?.url.pathname, `/v1/projects/${PROJECT.id}/files/key.json`);
+		assert.equal(actionData(conflict).message, 'referenced by api, web');
+		assert.equal((actionData(conflict) as { settingsName?: string }).settingsName, 'key.json');
+		assert.equal(actionData(conflict).settingsField ?? null, null);
+		const longName = `${'a'.repeat(60)}.conf`;
+		const conflictHtml = render(SettingsSection, {
+			props: {
+				project: PROJECT,
+				canOwner: true,
+				canAdmin: true,
+				message: actionData(conflict).message ?? null,
+				settingsName: 'key.json',
+				files: [...files, { ...files[1], name: longName }]
+			}
+		}).body;
+		const filesAt = conflictHtml.indexOf('>Files<');
+		const rowAt = conflictHtml.indexOf('key.json');
+		const messageAt = conflictHtml.indexOf('referenced by api, web');
+		const formAt = conflictHtml.indexOf('id="file-name"');
+		assert.equal(filesAt >= 0 && rowAt > filesAt && messageAt > rowAt && formAt > messageAt, true);
+		assert.equal(conflictHtml.slice(0, filesAt).includes('referenced by api, web'), false);
+		assert.match(conflictHtml, new RegExp(`break-all[\\s\\S]{0,80}${longName}`));
+
+		const namesOnly = installFetch(() =>
+			envelope({
+				items: [
+					{
+						name: 'key.json',
+						is_secret: true,
+						size: 31,
+						sha256: null,
+						updated_at: '2026-10-13T12:00:00Z',
+						updated_by: USER.id,
+						content: secretLine
+					}
+				]
+			})
+		);
+		const catalog = (await projectActions.catalogFiles(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogFiles`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id }
+			}).event as never
+		)) as { catalogFiles?: Array<{ name: string }> };
+		assert.deepEqual(catalog.catalogFiles, [{ name: 'key.json' }]);
+		assert.equal(JSON.stringify(catalog).includes(secretLine), false);
+		assert.equal(namesOnly[0]?.method, 'GET');
+	});
+
+	test('a file save clears the paste, and name and secret reset only after success', async () => {
+		let content = 'secret-paste';
+		let name = 'key.json';
+		let secret = false;
+		let saved: string | null = 'previous';
+		let during = 'unset';
+		await settleFileSave(
+			(next) => {
+				content = next.content;
+				name = next.name;
+				secret = next.secret;
+				saved = next.saved;
+			},
+			{ name: 'key.json', secret: false },
+			'key.json',
+			async () => {
+				during = content;
+			},
+			'failure'
+		);
+		assert.equal(during, '');
+		assert.equal(content, '');
+		assert.equal(name, 'key.json');
+		assert.equal(secret, false);
+		assert.equal(saved, null);
+		content = 'secret-paste';
+		await settleFileSave(
+			(next) => {
+				content = next.content;
+				name = next.name;
+				secret = next.secret;
+				saved = next.saved;
+			},
+			{ name: 'key.json', secret: false },
+			'key.json',
+			async () => undefined,
+			'redirect'
+		);
+		assert.equal(content, '');
+		assert.equal(name, '');
+		assert.equal(secret, true);
+		assert.equal(saved, 'key.json');
+		let focused = false;
+		let applied = false;
+		await showViewedFile(
+			async () => {
+				applied = true;
+			},
+			() => {
+				focused = applied;
+			}
+		);
+		assert.equal(focused, true);
+	});
+
+	test('a file save redacts a secret inside a word and past the 500-character cut', async () => {
+		const line = 'innersecret';
+		const content = `${line}\nother-line-ok`;
+		installFetch(() => envelope(null, 400, 'bad_request', `saw zz${line}zz now`));
+		const inside = await projectActions.saveProjectFile(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings&/saveProjectFile`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { name: 'key.json', content, secret: '1' }
+			}).event as never
+		);
+		const insideMessage = actionData(inside).message ?? '';
+		assert.equal(insideMessage.includes(line), false);
+		assert.equal(insideMessage.includes('[redacted]'), true);
+		const piece = 'longsecret';
+		const long = `${'q'.repeat(495)}${piece}${'q'.repeat(30)}`;
+		installFetch(() => envelope(null, 400, 'bad_request', long));
+		const cut = await projectActions.saveProjectFile(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings&/saveProjectFile`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { name: 'key.json', content: piece, secret: '1' }
+			}).event as never
+		);
+		const cutMessage = actionData(cut).message ?? '';
+		assert.equal(cutMessage.includes(piece), false);
+		assert.equal(cutMessage.includes(piece.slice(0, 5)), false);
+		assert.equal(cutMessage.includes('Paste the value again.'), true);
+	});
+
+	test('a file save refuses an empty, NUL, or over-long paste before calling the API', async () => {
+		const calls = installFetch(() => envelope(null, 500, 'error', 'should not run'));
+		const base = {
+			url: `http://console.example/projects/${PROJECT.id}?tab=settings&/saveProjectFile`,
+			session: TOKEN,
+			user: USER,
+			projects: [PROJECT],
+			params: { id: PROJECT.id }
+		};
+		for (const content of ['', 'has\0nul', 'a'.repeat(65537)]) {
+			const refused = await projectActions.saveProjectFile(fakeEvent({ ...base, form: { name: 'key.json', content, secret: '1' } }).event as never);
+			assert.equal(actionData(refused).settingsField, 'file');
+			assert.equal(actionData(refused).message?.includes('1 to 64 KiB'), true);
+		}
+		assert.equal(calls.length, 0);
+	});
+
+	test('catalog create and update post spec.files', async () => {
+		const calls = installFetch(() => envelope({ id: '33333333-3333-4333-8333-333333333333' }));
+		const files = [
+			{ file: 'app.conf', target: '/config/app.conf' },
+			{ file: 'key.json', target: '/run/secrets/key.json' }
+		];
+		const form = {
+			entry_kind: 'image',
+			name: 'web',
+			workload: 'service',
+			image: 'nginx',
+			restart: 'unless-stopped',
+			file_name: files.map((row) => row.file),
+			file_target: files.map((row) => row.target)
+		};
+		const base = { session: TOKEN, user: USER, projects: [PROJECT], params: { id: PROJECT.id } };
+		await assert.rejects(
+			async () => {
+				await projectActions.catalogCreate(
+					fakeEvent({ ...base, url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogCreate`, form }).event as never
+				);
+			},
+			(err: unknown) => isRedirect(err) && err.status === 303
+		);
+		const created = JSON.parse(calls[0]?.body ?? '{}') as { spec?: { files?: unknown } };
+		assert.equal(calls[0]?.method, 'POST');
+		assert.equal(calls[0]?.url.pathname, `/v1/projects/${PROJECT.id}/catalog`);
+		assert.deepEqual(created.spec?.files, files);
+		await assert.rejects(
+			async () => {
+				await projectActions.catalogUpdate(
+					fakeEvent({
+						...base,
+						url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogUpdate`,
+						form: { ...form, entry_name: 'web' }
+					}).event as never
+				);
+			},
+			(err: unknown) => isRedirect(err) && err.status === 303
+		);
+		const updated = JSON.parse(calls[1]?.body ?? '{}') as { spec?: { files?: unknown } };
+		assert.equal(calls[1]?.method, 'PUT');
+		assert.equal(calls[1]?.url.pathname, `/v1/projects/${PROJECT.id}/catalog/web`);
+		assert.deepEqual(updated.spec?.files, files);
+	});
+
+	test('file rows round-trip, follow rule 13, and the preview mounts them read-only', () => {
+		const pasted = parseDockerRun('docker run -v app.conf:/config/app.conf:ro nginx');
+		assert.equal(pasted.ok, true);
+		if (!pasted.ok) return;
+		assert.equal(pasted.draft.files, undefined);
+		assert.deepEqual(pasted.draft.volumes, [{ name: 'app.conf', target: '/config/app.conf', readOnly: true }]);
+		const keptFiles = [
+			{ file: 'app.conf', target: '/config/app.conf' },
+			{ file: 'key.json', target: '/run/secrets/key.json' }
+		];
+		const beforePaste = blankImageDraft();
+		beforePaste.files = keptFiles;
+		beforePaste.image = 'old';
+		const mounted = parseDockerRun('docker run -v a:/b:ro nginx');
+		assert.equal(mounted.ok, true);
+		if (!mounted.ok) return;
+		const afterPaste = applyDockerPaste(beforePaste, mounted);
+		assert.deepEqual(afterPaste.files, keptFiles);
+		assert.deepEqual(afterPaste.volumes, [{ name: 'a', target: '/b', readOnly: true }]);
+		assert.equal(afterPaste.image, 'nginx');
+		const formSource = readFileSync(new URL('../src/routes/projects/[id]/CatalogImageForm.svelte', import.meta.url), 'utf8');
+		assert.match(formSource, /draft = applyDockerPaste\(draft, parsed\)/);
+		assert.match(formSource, /filesStatus === 'ready' \? files\.map\(\(file\) => file\.name\) : undefined/);
+		assert.match(formSource, /max-w-\[calc\(100vw-2rem\)\]/);
+		assert.match(formSource, /\[&>span:last-of-type\]:break-all/);
+
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const entry = imageEntry(['deploy']);
+		entry.spec.files = [
+			{ file: 'app.conf', target: '/config/app.conf' },
+			{ file: 'key.json', target: '/run/secrets/key.json' }
+		];
+		const html = render(CatalogImageForm, {
+			props: {
+				mode: 'edit',
+				entry,
+				saveAction: '?/catalogUpdate',
+				sets: [],
+				setsStatus: 'ready',
+				files: [{ name: 'app.conf' }, { name: 'key.json' }],
+				filesStatus: 'ready',
+				editor: null
+			}
+		}).body;
+		function inputValue(source: string, name: string, value: string): boolean {
+			return [...source.matchAll(/<input\b[^>]*>/g)].some((match) => match[0].includes(`name="${name}"`) && match[0].includes(`value="${value}"`));
+		}
+		assert.equal(inputValue(html, 'file_name', 'app.conf'), true);
+		assert.equal(inputValue(html, 'file_target', '/config/app.conf'), true);
+		assert.equal(inputValue(html, 'file_name', 'key.json'), true);
+		assert.equal(inputValue(html, 'file_target', '/run/secrets/key.json'), true);
+		assert.equal(html.includes('for="catalog-image-web-file-0"'), true);
+		const preview = html.slice(html.indexOf('aria-label="docker run preview"'), html.indexOf('</pre>', html.indexOf('aria-label="docker run preview"')));
+		assert.match(preview, /-v app\.conf:\/config\/app\.conf:ro/);
+		assert.match(preview, /-v key\.json:\/run\/secrets\/key\.json:ro/);
+		const names = [...html.matchAll(/name="file_name"/g)];
+		assert.equal(names.length, 2);
+
+		const round = new FormData();
+		round.set('name', 'web');
+		round.set('image', 'nginx');
+		round.append('file_name', 'app.conf');
+		round.append('file_target', '/config/app.conf');
+		const built = imageDraftFromForm(round);
+		assert.deepEqual(built.draft.files, [{ file: 'app.conf', target: '/config/app.conf' }]);
+		const kept = imageSpecFromDraft(built.draft, undefined, true, ['app.conf']);
+		assert.equal(kept.ok, true);
+		if (!kept.ok) return;
+		assert.deepEqual(kept.spec.files, [{ file: 'app.conf', target: '/config/app.conf' }]);
+
+		function fileMessage(rows: Array<{ file: string; target: string }>, known?: string[], volumes: ImageDraftVolumes = []): string {
+			const draft = blankImageDraft();
+			draft.image = 'nginx';
+			draft.volumes = volumes;
+			draft.files = rows;
+			const check = imageSpecFromDraft(draft, undefined, false, known);
+			assert.equal(check.ok, false);
+			if (check.ok) return '';
+			assert.equal(check.field, 'files');
+			return check.message;
+		}
+		type ImageDraftVolumes = Array<{ name: string; target: string; readOnly: boolean }>;
+		assert.equal(fileMessage([{ file: 'Bad', target: '/config/app.conf' }]), 'File names use lowercase letters, digits, dots, underscores, and hyphens.');
+		assert.equal(fileMessage([{ file: 'app.conf', target: '/config/app.conf' }, { file: 'app.conf', target: '/other' }]), 'Each file can appear once.');
+		assert.equal(fileMessage([{ file: 'missing.conf', target: '/config/app.conf' }], ['app.conf']), 'Unknown file missing.conf.');
+		assert.equal(
+			fileMessage([{ file: 'app.conf', target: 'relative' }]),
+			'A file target must be an absolute path, at most 255 bytes, with no empty, . or .. segment, and not /, /proc, /sys, /dev, or under them.'
+		);
+		for (const target of ['/', '/proc', '/proc/self', '/sys/fs', '/dev/null', '/config/', '/config/../etc', '/config//app', `/${'a'.repeat(255)}`]) {
+			assert.match(fileMessage([{ file: 'app.conf', target }]), /absolute path/, target);
+		}
+		const allowed = blankImageDraft();
+		allowed.image = 'nginx';
+		allowed.files = [{ file: 'app.conf', target: '/devfoo' }];
+		assert.equal(imageSpecFromDraft(allowed, undefined, false, ['app.conf']).ok, true);
+		allowed.files = [{ file: 'app.conf', target: '/Proc/self' }];
+		assert.equal(imageSpecFromDraft(allowed, undefined, false, ['app.conf']).ok, true);
+		const withoutList = blankImageDraft();
+		withoutList.image = 'nginx';
+		withoutList.files = [{ file: 'app.conf', target: '/config/app.conf' }];
+		assert.equal(imageSpecFromDraft(withoutList).ok, true);
+		assert.equal(
+			fileMessage([{ file: 'app.conf', target: '/data' }, { file: 'key.json', target: '/data' }]),
+			'Each file and volume target can appear once.'
+		);
+		const nested = blankImageDraft();
+		nested.image = 'nginx';
+		nested.files = [
+			{ file: 'app.conf', target: '/config' },
+			{ file: 'key.json', target: '/config/key.json' }
+		];
+		const nestedSpec = imageSpecFromDraft(nested, undefined, false, ['app.conf', 'key.json']);
+		assert.equal(nestedSpec.ok, true);
+		if (nestedSpec.ok) {
+			assert.deepEqual(nestedSpec.spec.files, [
+				{ file: 'app.conf', target: '/config' },
+				{ file: 'key.json', target: '/config/key.json' }
+			]);
+		}
+		const longName = new FormData();
+		longName.set('image', 'nginx');
+		longName.append('file_name', 'a'.repeat(65));
+		longName.append('file_target', '/config/app.conf');
+		const nameError = imageDraftFromForm(longName);
+		assert.equal(nameError.field, 'files');
+		assert.equal(nameError.message, 'File names use lowercase letters, digits, dots, underscores, and hyphens.');
+		assert.equal(JSON.stringify(nameError).includes('a'.repeat(65)), false);
+		const longTarget = new FormData();
+		longTarget.set('image', 'nginx');
+		longTarget.append('file_name', 'app.conf');
+		longTarget.append('file_target', `/${'a'.repeat(255)}`);
+		const targetError = imageDraftFromForm(longTarget);
+		assert.equal(targetError.field, 'files');
+		assert.match(targetError.message ?? '', /255 bytes/);
+		assert.equal(JSON.stringify(targetError).includes('a'.repeat(255)), false);
+		assert.equal(
+			fileMessage([{ file: 'app.conf', target: '/data' }], undefined, [{ name: 'data', target: '/data', readOnly: false }]),
+			'Each file and volume target can appear once.'
+		);
+		assert.equal(
+			fileMessage([{ file: 'app.conf', target: '/data/app.conf' }], undefined, [{ name: 'data', target: '/data', readOnly: false }]),
+			'A file target cannot sit inside a volume target, or the other way around.'
+		);
+		assert.equal(
+			fileMessage([{ file: 'app.conf', target: '/config' }], undefined, [{ name: 'data', target: '/config/extra', readOnly: false }]),
+			'A file target cannot sit inside a volume target, or the other way around.'
+		);
+
+		const many = new FormData();
+		many.set('name', 'web');
+		many.set('image', 'nginx');
+		for (let index = 0; index < 17; index += 1) {
+			many.append('file_name', `f${index}.conf`);
+			many.append('file_target', `/config/f${index}.conf`);
+		}
+		const over = imageDraftFromForm(many);
+		assert.equal(over.message, null);
+		const tooMany = imageSpecFromDraft(over.draft, undefined, true);
+		assert.equal(tooMany.ok, false);
+		if (!tooMany.ok) assert.equal(tooMany.message, 'At most 16 files.');
+		const sixteen = new FormData();
+		sixteen.set('name', 'web');
+		sixteen.set('image', 'nginx');
+		for (let index = 0; index < 16; index += 1) {
+			sixteen.append('file_name', `f${index}.conf`);
+			sixteen.append('file_target', `/opt/f${index}.conf`);
+		}
+		const full = imageSpecFromDraft(imageDraftFromForm(sixteen).draft, undefined, true);
+		assert.equal(full.ok, true);
+		if (full.ok) assert.equal(full.spec.files.length, 16);
+		const mismatch = new FormData();
+		mismatch.append('file_name', 'app.conf');
+		const uneven = imageDraftFromForm(mismatch);
+		assert.equal(uneven.message, 'Each file needs a name and a target.');
+		assert.equal(uneven.field, 'files');
+		const line = dockerRunPreview({
+			name: 'web',
+			image: 'nginx',
+			command: [],
+			entrypoint: [],
+			ports: [],
+			envKeys: [],
+			volumes: [],
+			files: [{ file: 'app.conf', target: '/config/app.conf' }],
+			restart: 'unless-stopped',
+			user: '',
+			memoryMb: null
+		});
+		assert.match(line, /-v app\.conf:\/config\/app\.conf:ro/);
+		const quoted = dockerRunPreview({
+			name: 'web',
+			image: 'nginx',
+			command: [],
+			entrypoint: [],
+			ports: [],
+			envKeys: [],
+			volumes: [],
+			files: [{ file: 'app.conf', target: '/config/my file' }],
+			restart: 'unless-stopped',
+			user: '',
+			memoryMb: null
+		});
+		assert.match(quoted, /-v 'app\.conf:\/config\/my file:ro'/);
+	});
+
+	test('a host without files support is not offered deploy for an entry that mounts files', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		function buttons(html: string): string[] {
+			return [...html.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)].map((match) => match[0]);
+		}
+		function control(html: string, label: string): string {
+			const found = buttons(html).find((tag) => tag.includes(label));
+			assert.equal(found != null, true, label);
+			return found ?? '';
+		}
+		function markedDisabled(tag: string): boolean {
+			const open = tag.slice(0, tag.indexOf('>') + 1);
+			return /\sdisabled(?:=|\s|>)/.test(open);
+		}
+		const plainHost = host();
+		const capable = host();
+		if (capable.programs) capable.programs = { ...capable.programs, files: true };
+		const withFiles = imageEntry(['deploy']);
+		withFiles.spec.files = [{ file: 'app.conf', target: '/config/app.conf' }];
+		const props = {
+			deployAction: '?/catalogDeploy',
+			rollbackAction: '?/catalogRollback',
+			removeAction: '?/catalogRemove',
+			confirmAction: '?/catalogConfirm',
+			historyAction: '?/catalogDeploys',
+			result: null
+		};
+		const blocked = render(CatalogDeployForm, { props: { ...props, entry: withFiles, hosts: [plainHost] } }).body;
+		assert.equal(blocked.includes("pi1: This host's agent does not support files"), true);
+		assert.equal(markedDisabled(control(blocked, 'Deploy')), true);
+		assert.equal(markedDisabled(control(blocked, 'Remove')), false);
+		const radios = buttons(blocked).filter((tag) => tag.includes('role="radio"'));
+		assert.equal(radios.length, 1);
+		assert.equal(markedDisabled(radios[0] ?? ''), false);
+		assert.equal(radios[0]?.includes('pi1'), true);
+
+		const open = render(CatalogDeployForm, { props: { ...props, entry: imageEntry(['deploy']), hosts: [plainHost] } }).body;
+		assert.equal(open.includes('does not support files'), false);
+		assert.equal(markedDisabled(control(open, 'Deploy')), false);
+
+		const offered = render(CatalogDeployForm, { props: { ...props, entry: withFiles, hosts: [capable] } }).body;
+		assert.equal(offered.includes('does not support files'), false);
+		assert.equal(markedDisabled(control(offered, 'Deploy')), false);
+
+		const second = '00000000-0000-4000-8000-0000000000ab';
+		const withoutFiles = { ...host(), id: second, name: 'pi2' };
+		const both = render(CatalogDeployForm, { props: { ...props, entry: withFiles, hosts: [capable, withoutFiles] } }).body;
+		assert.equal(both.includes("pi1: This host's agent does not support files"), false);
+		assert.equal(both.includes("pi2: This host's agent does not support files"), true);
+		assert.equal(markedDisabled(control(both, 'Deploy')), false);
+		const hostRadios = buttons(both).filter((tag) => tag.includes('role="radio"'));
+		assert.equal(hostRadios.length, 2);
+		assert.equal(hostRadios[0]?.includes('pi1') && hostRadios[0]?.includes('aria-checked="true"'), true);
+		assert.equal(hostRadios[1]?.includes('pi2') && hostRadios[1]?.includes('aria-checked="false"'), true);
+	});
+
+	test('a failed file save does not put the paste back into the box', async () => {
+		const secret = 'failed-save-paste-99';
+		installFetch(() => envelope(null, 400, 'bad_request', 'no'));
+		const failed = await projectActions.saveProjectFile(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings&/saveProjectFile`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { name: 'key.json', content: secret, secret: '1' }
+			}).event as never
+		);
+		assert.equal(isActionFailure(failed), true);
+		if (!isActionFailure(failed)) return;
+		const returned = failed.data as unknown as { scope?: string; message?: string; settingsField?: string; content?: string };
+		assert.equal(returned.content, undefined);
+		assert.equal(JSON.stringify(returned).includes(secret), false);
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+		const files: ProjectFile[] = [
+			{
+				name: 'key.json',
+				is_secret: true,
+				size: 20,
+				sha256: null,
+				updated_at: '2026-10-13T12:00:00Z',
+				updated_by: USER.id
+			}
+		];
+		const echoed = render(SettingsSection, {
+			props: {
+				project: PROJECT,
+				canOwner: true,
+				canAdmin: true,
+				message: returned.message ?? null,
+				settingsField: 'file',
+				files,
+				content: secret
+			} as never
+		}).body;
+		const area = echoed.match(/<textarea\b[^>]*id="file-content"[^>]*>[\s\S]*?<\/textarea>/);
+		const inner = area?.[0].replace(/^<textarea\b[^>]*>/, '').replace(/<\/textarea>$/, '') ?? secret;
+		assert.equal(inner.trim(), '');
+		assert.equal(echoed.includes(secret), false);
+		const page = render(ProjectPage, {
+			props: {
+				data: {
+					project: PROJECT,
+					userId: USER.id,
+					message: null,
+					tab: 'settings',
+					canAdmin: true,
+					canOwner: true,
+					files,
+					filesMessage: null,
+					envSets: [],
+					envSetsMessage: null,
+					registries: [],
+					registriesMessage: null
+				} as never,
+				form: { ...returned, content: secret } as never
+			}
+		}).body;
+		const pageArea = page.match(/<textarea\b[^>]*id="file-content"[^>]*>[\s\S]*?<\/textarea>/);
+		const pageInner = pageArea?.[0].replace(/^<textarea\b[^>]*>/, '').replace(/<\/textarea>$/, '') ?? secret;
+		assert.equal(pageInner.trim(), '');
+		assert.equal(page.includes(secret), false);
+	});
+
+	test('a failed file save redacts lines of 8 or 9 characters and keeps a line of 5', async () => {
+		const line8 = 'eightchr';
+		const line9 = 'ninechars';
+		const line5 = 'abcde';
+		assert.equal(line8.length, 8);
+		assert.equal(line9.length, 9);
+		assert.equal(line5.length, 5);
+		const content = `${line8}\n${line9}\n${line5}`;
+		const base = {
+			url: `http://console.example/projects/${PROJECT.id}?tab=settings&/saveProjectFile`,
+			session: TOKEN,
+			user: USER,
+			projects: [PROJECT],
+			params: { id: PROJECT.id }
+		};
+		installFetch(() => envelope(null, 400, 'bad_request', `xx${line8}xx yy${line9}yy ${line5}`));
+		const pieces = await projectActions.saveProjectFile(
+			fakeEvent({ ...base, form: { name: 'key.json', content, secret: '1' } }).event as never
+		);
+		const pieceMessage = actionData(pieces).message ?? '';
+		assert.equal(pieceMessage.includes(line8), false);
+		assert.equal(pieceMessage.includes(line9), false);
+		assert.equal(pieceMessage.includes('[redacted]'), true);
+		assert.equal((pieceMessage.match(new RegExp(line5, 'g')) ?? []).length, 1);
+		installFetch(() => envelope(null, 400, 'bad_request', `${content} ${line5}`));
+		const whole = await projectActions.saveProjectFile(
+			fakeEvent({ ...base, form: { name: 'key.json', content, secret: '1' } }).event as never
+		);
+		const wholeMessage = actionData(whole).message ?? '';
+		assert.equal(wholeMessage.includes(content), false);
+		assert.equal(wholeMessage.includes(`${line9}\n${line5}`), false);
+		assert.equal((wholeMessage.match(new RegExp(line5, 'g')) ?? []).length, 1);
+	});
+
+	test('a secret file cannot be viewed', async () => {
+		const secretBody = 'secret-view-body-77';
+		const files: ProjectFile[] = [
+			{
+				name: 'app.conf',
+				is_secret: false,
+				size: 17,
+				sha256: 'ab'.repeat(32),
+				updated_at: '2026-10-13T12:00:00Z',
+				updated_by: USER.id
+			},
+			{
+				name: 'key.json',
+				is_secret: true,
+				size: secretBody.length,
+				sha256: null,
+				updated_at: '2026-10-13T12:00:00Z',
+				updated_by: USER.id
+			}
+		];
+		installFetch(() =>
+			envelope(
+				{
+					name: 'key.json',
+					content: secretBody,
+					size: secretBody.length,
+					sha256: null,
+					updated_at: '2026-10-13T12:00:00Z',
+					updated_by: USER.id
+				},
+				403,
+				'forbidden',
+				'secret files cannot be read'
+			)
+		);
+		const denied = await projectActions.viewProjectFile(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings&/viewProjectFile`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { name: 'key.json' }
+			}).event as never
+		);
+		assert.equal(isActionFailure(denied), true);
+		if (!isActionFailure(denied)) return;
+		const returned = denied.data as unknown as { message?: string; viewedFile?: { name: string; content: string } | null };
+		assert.equal(returned.viewedFile ?? null, null);
+		assert.equal(JSON.stringify(denied).includes(secretBody), false);
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+		const fromAction = render(SettingsSection, {
+			props: {
+				project: PROJECT,
+				canOwner: true,
+				canAdmin: true,
+				message: returned.message ?? null,
+				files,
+				viewedFile: returned.viewedFile ?? null
+			}
+		}).body;
+		assert.equal(fromAction.includes(secretBody), false);
+		assert.equal(fromAction.includes('id="file-view-key.json"'), false);
+		const shown = render(SettingsSection, {
+			props: {
+				project: PROJECT,
+				canOwner: true,
+				canAdmin: true,
+				message: null,
+				files,
+				viewedFile: { name: 'key.json', content: secretBody }
+			}
+		}).body;
+		assert.equal(shown.includes('key.json'), true);
+		assert.equal(shown.includes(secretBody), false);
+		assert.equal(shown.includes('id="file-view-key.json"'), false);
 	});
 });
