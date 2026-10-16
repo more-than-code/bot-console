@@ -172,7 +172,9 @@
 							action={actionUrlFrom(page.url, 'catalogDelete')}
 							label="Delete"
 							confirmLabel="Delete"
-							message="Delete {entry.name}? Running units are not stopped."
+							message={entry.kind === 'image'
+								? `Delete ${entry.name}? Its containers keep running on their hosts.`
+								: `Delete ${entry.name}? Running units are not stopped.`}
 							hidden={[{ name: 'name', value: entry.name }]}
 							rowLabel="Delete {entry.name}"
 						/>

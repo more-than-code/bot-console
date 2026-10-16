@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
 import { render } from 'svelte/server';
@@ -777,6 +778,15 @@ describe('catalog images', { concurrency: false }, () => {
 			props: { action: '?/catalogPermissions', name: 'web', grants: [], members: [], loaded: true, includeDeploy: false }
 		}).body;
 		assert.equal(form.includes('admin_deploy'), false);
+	});
+
+	test('the delete confirmation names what keeps running for each entry kind', () => {
+		// The dialog body renders only when open, so check the source as dialog-open.test.ts does.
+		const section = readFileSync(new URL('../src/routes/projects/[id]/CatalogSection.svelte', import.meta.url), 'utf8');
+		assert.match(
+			section,
+			/entry\.kind === 'image'\s*\?\s*`Delete \$\{entry\.name\}\? Its containers keep running on their hosts\.`\s*:\s*`Delete \$\{entry\.name\}\? Running units are not stopped\.`/
+		);
 	});
 
 	test('an owned container row shows its name and short digest', () => {
