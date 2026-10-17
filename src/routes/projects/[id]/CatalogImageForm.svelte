@@ -17,6 +17,7 @@
 		dockerRunPreview,
 		imageSpecFromDraft,
 		parseDockerRun,
+		setPortPublic,
 		type ImageDraft,
 		type KnownSet
 	} from '$lib/image-spec';
@@ -63,7 +64,7 @@
 			image: spec.image,
 			command: spec.command && spec.command.length > 0 ? [...spec.command] : [''],
 			entrypoint: spec.entrypoint && spec.entrypoint.length > 0 ? [...spec.entrypoint] : [''],
-			ports: spec.ports.map((port) => ({ host: String(port.host), container: String(port.container) })),
+			ports: spec.ports.map((port) => ({ host: String(port.host), container: String(port.container), public: port.public })),
 			env: Object.entries(spec.env).map(([key, value]) => ({ key, value })),
 			envSets: [...spec.env_sets],
 			secrets: Object.entries(spec.secret_env).map(([key, reference]) => {
@@ -119,7 +120,7 @@
 			entrypoint: draft.entrypoint.map((item) => item.trim()).filter((item) => item !== ''),
 			ports: draft.ports.flatMap((port) => {
 				if (!/^[0-9]+$/.test(port.host) || !/^[0-9]+$/.test(port.container)) return [];
-				return [{ host: Number(port.host), container: Number(port.container) }];
+				return [{ host: Number(port.host), container: Number(port.container), public: port.public }];
 			}),
 			envKeys: [...draft.env.map((row) => row.key.trim()), ...draft.secrets.map((row) => row.key.trim()), ...setKeys],
 			volumes: draft.volumes
@@ -285,16 +286,22 @@
 	</div>
 	<div class="grid gap-1.5">
 		<p class="text-sm font-medium">Ports</p>
+		<p class="text-muted-foreground text-sm">Public ports listen on all of the host's interfaces and are only allowed when the host's runner.toml sets allow_public_ports = true. Otherwise the deploy is refused.</p>
 		{#each draft.ports as row, index (index)}
 			<div class="flex flex-wrap items-center gap-2">
+				<Input type="hidden" name="port_public" value={row.public ? '1' : '0'} />
 				<Label class="sr-only" for="{fieldId}-port-host-{index}">Host port {index + 1}</Label>
 				<Input id="{fieldId}-port-host-{index}" name="port_host" bind:value={draft.ports[index].host} inputmode="numeric" maxlength={5} placeholder="Host" aria-invalid={invalid('ports')} aria-describedby={describedBy('ports')} />
 				<Label class="sr-only" for="{fieldId}-port-container-{index}">Container port {index + 1}</Label>
 				<Input id="{fieldId}-port-container-{index}" name="port_container" bind:value={draft.ports[index].container} inputmode="numeric" maxlength={5} placeholder="Container" aria-invalid={invalid('ports')} aria-describedby={describedBy('ports')} />
+				<Label class="flex items-center gap-2" for="{fieldId}-port-public-{index}">
+					<Checkbox id="{fieldId}-port-public-{index}" checked={row.public} aria-label="Public (all interfaces) port {index + 1}" onCheckedChange={(value) => setPortPublic(draft.ports[index], value)} />
+					Public (all interfaces)
+				</Label>
 				<Button type="button" variant="outline" aria-label="Remove port {index + 1}" onclick={() => (draft.ports = draft.ports.filter((_, item) => item !== index))}>Remove</Button>
 			</div>
 		{/each}
-		<Button type="button" variant="outline" disabled={draft.ports.length >= 16} onclick={() => (draft.ports = [...draft.ports, { host: '', container: '' }])}>Add port</Button>
+		<Button type="button" variant="outline" disabled={draft.ports.length >= 16} onclick={() => (draft.ports = [...draft.ports, { host: '', container: '', public: false }])}>Add port</Button>
 		{@render fieldNotice('ports')}
 	</div>
 	<div class="grid gap-1.5">

@@ -17,8 +17,10 @@ import {
 	historyFetch,
 	historyNotice,
 	imageDraftFromForm,
+	imagePortText,
 	imageRequestBody,
 	imageSpecFromDraft,
+	setPortPublic,
 	nextHistory,
 	nextIdempotencyKey,
 	nextRollbackKey,
@@ -239,7 +241,7 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(check.spec.command, null);
 		assert.equal(check.spec.entrypoint, null);
 		assert.equal(check.spec.restart, 'on-failure');
-		assert.deepEqual(check.spec.ports, [{ host: 8080, container: 80, public: false }]);
+		assert.deepEqual(check.spec.ports, [{ host: 8080, container: 80, public: true }]);
 		const body = imageRequestBody(check.spec, check.name);
 		assert.equal(body.kind, 'image');
 		const spec = body.spec as Record<string, unknown>;
@@ -292,10 +294,10 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(nginx.ok, true);
 		if (!nginx.ok) return;
 		assert.equal(nginx.draft.image, 'nginx');
-		const loopback = parseDockerRun('docker run -p 8080:80 nginx');
-		assert.equal(loopback.ok, true);
-		if (!loopback.ok) return;
-		assert.deepEqual(loopback.draft.ports, [{ host: '8080', container: '80' }]);
+		const published = parseDockerRun('docker run -p 8080:80 nginx');
+		assert.equal(published.ok, true);
+		if (!published.ok) return;
+		assert.deepEqual(published.draft.ports, [{ host: '8080', container: '80', public: true }]);
 		for (const line of [
 			'docker run --memory 256m nginx',
 			'docker run --gpus all nginx',
@@ -355,7 +357,7 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(real.ok, true);
 		if (!real.ok) return;
 		assert.equal(real.draft.image, 'nginx');
-		assert.deepEqual(real.draft.ports, [{ host: '8088', container: '80' }]);
+		assert.deepEqual(real.draft.ports, [{ host: '8088', container: '80', public: false }]);
 		assert.deepEqual(real.unsupported, ['-d', '--name']);
 		const ignored: Array<[string, string[], 'service' | 'job']> = [
 			['docker run -d nginx', ['-d'], 'service'],
@@ -383,6 +385,335 @@ describe('catalog images', { concurrency: false }, () => {
 			assert.equal(refused.message, '--gpus is not supported.');
 			assert.equal(refused.message.includes('nginx'), false);
 		}
+	});
+
+	test('public and loopback ports round-trip through the draft, the spec, and the preview', () => {
+		const form = new FormData();
+		form.set('name', 'web');
+		form.set('workload', 'service');
+		form.set('image', 'nginx');
+		form.append('port_host', '8080');
+		form.append('port_container', '80');
+		form.append('port_public', '1');
+		form.append('port_host', '9090');
+		form.append('port_container', '90');
+		form.append('port_public', '0');
+		const built = imageDraftFromForm(form);
+		assert.equal(built.message, null);
+		assert.deepEqual(built.draft.ports, [
+			{ host: '8080', container: '80', public: true },
+			{ host: '9090', container: '90', public: false }
+		]);
+		const check = imageSpecFromDraft(built.draft, undefined, true);
+		assert.equal(check.ok, true);
+		if (!check.ok) return;
+		assert.deepEqual(check.spec.ports, [
+			{ host: 8080, container: 80, public: true },
+			{ host: 9090, container: 90, public: false }
+		]);
+		const direct = blankImageDraft();
+		direct.name = 'web';
+		direct.image = 'nginx';
+		direct.ports = [
+			{ host: '80', container: '80', public: true },
+			{ host: '8080', container: '8080', public: false }
+		];
+		const directCheck = imageSpecFromDraft(direct, undefined, true);
+		assert.equal(directCheck.ok, true);
+		if (!directCheck.ok) return;
+		assert.deepEqual(directCheck.spec.ports, [
+			{ host: 80, container: 80, public: true },
+			{ host: 8080, container: 8080, public: false }
+		]);
+		const preview = dockerRunPreview({
+			name: 'web',
+			image: 'nginx',
+			command: [],
+			entrypoint: [],
+			ports: check.spec.ports,
+			envKeys: [],
+			volumes: [],
+			restart: 'unless-stopped',
+			user: '',
+			memoryMb: null
+		});
+		assert.match(preview, /-p 8080:80\b/);
+		assert.match(preview, /-p 127\.0\.0\.1:9090:90\b/);
+		assert.equal(preview.includes('127.0.0.1:8080'), false);
+		const omitted = new FormData();
+		omitted.set('name', 'web');
+		omitted.set('image', 'nginx');
+		omitted.append('port_host', '8080');
+		omitted.append('port_container', '80');
+		const quiet = imageSpecFromDraft(imageDraftFromForm(omitted).draft, undefined, true);
+		assert.equal(quiet.ok, true);
+		if (!quiet.ok) return;
+		assert.deepEqual(quiet.spec.ports, [{ host: 8080, container: 80, public: false }]);
+	});
+
+	test('pasted docker publish flags set public or refuse another bind address', () => {
+		const accepted: Array<[string, Array<{ host: string; container: string; public: boolean }>]> = [
+			['docker run -p 80:80 nginx', [{ host: '80', container: '80', public: true }]],
+			['docker run -p 0.0.0.0:80:80 nginx', [{ host: '80', container: '80', public: true }]],
+			['docker run -p 127.0.0.1:80:80 nginx', [{ host: '80', container: '80', public: false }]],
+			['docker run -p localhost:80:80 nginx', [{ host: '80', container: '80', public: false }]],
+			[
+				'docker run -p 80:80 -p 127.0.0.1:8080:80 -p 0.0.0.0:9090:90 nginx',
+				[
+					{ host: '80', container: '80', public: true },
+					{ host: '8080', container: '80', public: false },
+					{ host: '9090', container: '90', public: true }
+				]
+			]
+		];
+		for (const [line, ports] of accepted) {
+			const parsed = parseDockerRun(line);
+			assert.equal(parsed.ok, true, line);
+			if (!parsed.ok) continue;
+			assert.deepEqual(parsed.draft.ports, ports, line);
+		}
+		const mixed = parseDockerRun('docker run -p 80:80 -p 127.0.0.1:8080:80 nginx');
+		assert.equal(mixed.ok, true);
+		if (!mixed.ok) return;
+		const applied = applyDockerPaste(blankImageDraft(), mixed);
+		applied.name = 'web';
+		applied.image = 'nginx';
+		const spec = imageSpecFromDraft(applied, undefined, true);
+		assert.equal(spec.ok, true);
+		if (!spec.ok) return;
+		assert.deepEqual(spec.spec.ports, [
+			{ host: 80, container: 80, public: true },
+			{ host: 8080, container: 80, public: false }
+		]);
+		for (const line of ['docker run -p 192.168.1.10:80:80 nginx', 'docker run -p 10.0.0.1:80:80 nginx', 'docker run --publish 172.16.0.1:80:80 nginx']) {
+			const refused = parseDockerRun(line);
+			assert.equal(refused.ok, false, line);
+			if (refused.ok) continue;
+			assert.equal(refused.message, 'Only 127.0.0.1 or all interfaces (0.0.0.0) can be bound.', line);
+			assert.equal(refused.message.includes('nginx'), false, line);
+		}
+		for (const line of ['docker run -p [::1]:80:80 nginx', 'docker run -p [::]:80:80 nginx']) {
+			const refused = parseDockerRun(line);
+			assert.equal(refused.ok, false, line);
+			if (refused.ok) continue;
+			assert.equal(refused.message, '-p is not supported.', line);
+		}
+	});
+
+	test('the container form labels a public checkbox and keeps an existing public port', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const entry = imageEntry(['deploy']);
+		entry.spec.ports = [
+			{ host: 8080, container: 80, public: true },
+			{ host: 9090, container: 90, public: false }
+		];
+		const editHtml = render(CatalogImageForm, {
+			props: {
+				mode: 'edit',
+				entry,
+				saveAction: '?/catalogUpdate',
+				sets: [],
+				setsStatus: 'ready',
+				editor: null
+			}
+		}).body;
+		function portBox(source: string, label: string): string {
+			const tag = [...source.matchAll(/<button\b[^>]*>/g)].map((match) => match[0]).find((item) => item.includes(`aria-label="${label}"`));
+			assert.equal(tag != null, true, label);
+			return tag ?? '';
+		}
+		function publicValues(source: string): string[] {
+			return [...source.matchAll(/<input\b[^>]*>/g)]
+				.map((match) => match[0])
+				.filter((tag) => tag.includes('name="port_public"'))
+				.map((tag) => /value="([^"]*)"/.exec(tag)?.[1] ?? '');
+		}
+		const open = portBox(editHtml, 'Public (all interfaces) port 1');
+		const loopback = portBox(editHtml, 'Public (all interfaces) port 2');
+		assert.equal(open.includes('role="checkbox"'), true);
+		assert.equal(open.includes('type="button"'), true);
+		assert.equal(open.includes('id="catalog-image-web-port-public-0"'), true);
+		assert.equal(open.includes('aria-checked="true"'), true);
+		assert.equal(loopback.includes('role="checkbox"'), true);
+		assert.equal(loopback.includes('id="catalog-image-web-port-public-1"'), true);
+		assert.equal(loopback.includes('aria-checked="false"'), true);
+		assert.match(editHtml, /for="catalog-image-web-port-public-0"/);
+		assert.equal([...editHtml.matchAll(/Public \(all interfaces\)<!----><\/label>/g)].length, 2);
+		assert.deepEqual(publicValues(editHtml), ['1', '0']);
+		assert.match(editHtml, /Public ports listen on all of the host's interfaces/);
+		assert.match(editHtml, /allow_public_ports = true/);
+		assert.match(editHtml, /Otherwise the deploy is refused\./);
+		const editPreview = editHtml.slice(editHtml.indexOf('aria-label="docker run preview"'), editHtml.indexOf('</pre>', editHtml.indexOf('aria-label="docker run preview"')));
+		assert.match(editPreview, /-p 8080:80\b/);
+		assert.match(editPreview, /-p 127\.0\.0\.1:9090:90\b/);
+		assert.equal(editPreview.includes('127.0.0.1:8080'), false);
+		const created = blankImageDraft();
+		created.ports = [{ host: '80', container: '80', public: false }];
+		const createHtml = render(CatalogImageForm, {
+			props: {
+				mode: 'create',
+				saveAction: '?/catalogCreate',
+				sets: [],
+				setsStatus: 'ready',
+				editor: { mode: 'create', name: null, draft: created, field: null, message: null }
+			}
+		}).body;
+		const fresh = portBox(createHtml, 'Public (all interfaces) port 1');
+		assert.equal(fresh.includes('role="checkbox"'), true);
+		assert.equal(fresh.includes('aria-checked="false"'), true);
+		assert.deepEqual(publicValues(createHtml), ['0']);
+		const empty = render(CatalogImageForm, {
+			props: { mode: 'create', saveAction: '?/catalogCreate', sets: [], setsStatus: 'ready', editor: null }
+		}).body;
+		assert.match(empty, /allow_public_ports = true/);
+		assert.equal(empty.includes('aria-label="Public (all interfaces) port 1"'), false);
+		const formSource = readFileSync(new URL('../src/routes/projects/[id]/CatalogImageForm.svelte', import.meta.url), 'utf8');
+		assert.match(formSource, /\{ host: '', container: '', public: false \}/);
+	});
+
+	test('setPortPublic toggles one port row and the checkbox calls it', () => {
+		const ports = [
+			{ host: '8080', container: '80', public: false },
+			{ host: '9090', container: '90', public: true }
+		];
+		const first = ports[0];
+		const second = ports[1];
+		assert.ok(first);
+		assert.ok(second);
+		setPortPublic(first, true);
+		assert.equal(first.public, true);
+		assert.equal(second.public, true);
+		setPortPublic(second, false);
+		assert.equal(second.public, false);
+		assert.equal(first.public, true);
+		setPortPublic(first, 'indeterminate');
+		assert.equal(first.public, false);
+		assert.equal(second.public, false);
+		const formSource = readFileSync(new URL('../src/routes/projects/[id]/CatalogImageForm.svelte', import.meta.url), 'utf8');
+		assert.match(formSource, /onCheckedChange=\{\(value\) => setPortPublic\(draft\.ports\[index\], value\)\}/);
+	});
+
+	test('parseImageSpec keeps a public port and refuses a non-boolean', () => {
+		const spec = {
+			env: {},
+			kind: 'service',
+			user: '',
+			image: 'nginx',
+			ports: [{ host: 80, container: 80, public: true }],
+			command: null,
+			restart: 'unless-stopped',
+			volumes: [],
+			env_sets: [],
+			memory_mb: null,
+			entrypoint: null,
+			secret_env: {},
+			timeout_sec: 600,
+			healthy_after_sec: 30
+		};
+		assert.deepEqual(parseImageSpec(spec)?.ports, [{ host: 80, container: 80, public: true }]);
+		for (const flag of ['true', 1, null]) {
+			assert.equal(parseImageSpec({ ...spec, ports: [{ host: 80, container: 80, public: flag }] }), null, String(flag));
+		}
+		assert.equal(parseImageSpec({ ...spec, ports: [{ host: 80, container: 80 }] }), null);
+	});
+
+	test('catalog update posts mixed port_public flags', async () => {
+		const calls = installFetch(() => envelope({ id: ENTRY_ID }));
+		const base = { session: TOKEN, user: USER, projects: [PROJECT], params: { id: PROJECT.id } };
+		await assert.rejects(
+			async () => {
+				await projectActions.catalogUpdate(
+					fakeEvent({
+						...base,
+						url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogUpdate`,
+						form: {
+							entry_kind: 'image',
+							name: 'web',
+							entry_name: 'web',
+							workload: 'service',
+							image: 'nginx',
+							restart: 'unless-stopped',
+							port_host: ['8080', '9090'],
+							port_container: ['80', '90'],
+							port_public: ['1', '0']
+						}
+					}).event as never
+				);
+			},
+			(err: unknown) => isRedirect(err) && err.status === 303
+		);
+		const call = calls[0];
+		assert.equal(call?.method, 'PUT');
+		assert.equal(call?.url.pathname, `/v1/projects/${PROJECT.id}/catalog/web`);
+		const body = JSON.parse(call?.body ?? '{}') as { spec?: { ports?: unknown } };
+		assert.deepEqual(body.spec?.ports, [
+			{ host: 8080, container: 80, public: true },
+			{ host: 9090, container: 90, public: false }
+		]);
+	});
+
+	test('the catalog row and deploy dialog mark a public port', () => {
+		assert.equal(imagePortText({ host: 8080, container: 80, public: true }), '8080:80 public');
+		assert.equal(imagePortText({ host: 9090, container: 90, public: false }), '9090:90');
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const mixed = imageEntry(['deploy', 'logs']);
+		mixed.spec.ports = [
+			{ host: 8080, container: 80, public: true },
+			{ host: 9090, container: 90, public: false }
+		];
+		const loopback = imageEntry(['logs']);
+		loopback.id = '00000000-0000-4000-8000-0000000000c2';
+		loopback.name = 'api';
+		loopback.spec.ports = [{ host: 9090, container: 90, public: false }];
+		const program = programEntry();
+		program.id = '00000000-0000-4000-8000-0000000000c3';
+		const section = render(CatalogSection, {
+			props: {
+				canOwner: true,
+				entries: [mixed, loopback, program],
+				omitted: 0,
+				truncated: false,
+				message: null,
+				hosts: [host()],
+				members: []
+			}
+		}).body;
+		const cells = [...section.matchAll(/<td class="p-2 align-middle font-mono">([^<]*)<\/td>/g)].map((match) => match[1]);
+		assert.deepEqual(cells, ['8080:80 public, 9090:90', '9090:90', '3031']);
+		assert.equal(section.includes('Publishes on all of the host'), false);
+		const sectionSource = readFileSync(new URL('../src/routes/projects/[id]/CatalogSection.svelte', import.meta.url), 'utf8');
+		const deploySource = readFileSync(new URL('../src/routes/projects/[id]/CatalogDeployForm.svelte', import.meta.url), 'utf8');
+		assert.match(sectionSource, /imagePortText\(port\)/);
+		assert.match(deploySource, /imagePortText\(port\)/);
+
+		function deployHtml(entry: ImageEntry): string {
+			return render(CatalogDeployForm, {
+				props: {
+					entry,
+					hosts: [host()],
+					deployAction: '?/catalogDeploy',
+					rollbackAction: '?/catalogRollback',
+					removeAction: '?/catalogRemove',
+					confirmAction: '?/catalogConfirm',
+					historyAction: '?/catalogDeploys',
+					result: null
+				}
+			}).body;
+		}
+		const warning = "Publishes on all of the host's interfaces.";
+		const open = deployHtml(mixed);
+		const buttonAt = open.search(/>Deploy(?:<!---->)?</);
+		const markedAt = open.indexOf('8080:80 public');
+		const warnAt = open.indexOf(warning);
+		assert.equal(markedAt >= 0 && buttonAt > markedAt, true);
+		assert.equal(warnAt >= 0 && buttonAt > warnAt, true);
+		assert.equal(open.includes('9090:90'), true);
+		assert.equal(open.includes('9090:90 public'), false);
+		const closed = deployHtml(loopback);
+		assert.equal(closed.includes('9090:90'), true);
+		assert.equal(closed.includes('9090:90 public'), false);
+		assert.equal(closed.includes(warning), false);
+		assert.equal(closed.includes('8080:80 public'), false);
 	});
 
 	test('deploy and rollback use the long timeout, and a timeout says the host is still running', async () => {
@@ -954,7 +1285,7 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(body.kind, 'image');
 		assert.equal(body.spec?.command, null);
 		assert.equal(body.spec?.memory_mb, null);
-		assert.deepEqual(body.spec?.ports, [{ host: 8080, container: 80, public: false }]);
+		assert.deepEqual(body.spec?.ports, [{ host: 8080, container: 80, public: true }]);
 		assert.deepEqual((body.spec as { files?: unknown }).files, []);
 	});
 

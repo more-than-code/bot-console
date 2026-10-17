@@ -13,7 +13,7 @@
 	import type { Host, ImageDeploy, ImageEntry } from '$lib/api-types';
 	import { imageFilesBlockReason, imageHostBlockReason, isCatalogHost, reuseIdempotencyKey } from '$lib/catalog';
 	import { formatWhen } from '$lib/format';
-	import { applyHistoryResponse, historyAfterSwitch, historyFetch, historyNotice, nextHistory, nextIdempotencyKey, nextRollbackKey, rollbackDigests, shortDigest } from '$lib/image-spec';
+	import { applyHistoryResponse, historyAfterSwitch, historyFetch, historyNotice, imagePortText, nextHistory, nextIdempotencyKey, nextRollbackKey, rollbackDigests, shortDigest } from '$lib/image-spec';
 	import type { ImageDeployState } from '$lib/project-action';
 
 	let {
@@ -75,6 +75,8 @@
 	const notice = $derived(historyNotice({ hostCount: eligible.length, pending: historyPending, ready: historyReady, count: history.length }));
 	const targets = $derived(entry.spec.kind === 'job' ? [] : rollbackDigests(history));
 	const digest = $derived(shortDigest(result?.outcome?.digest ?? result?.status?.digest));
+	const portLine = $derived(entry.spec.ports.map((port) => imagePortText(port)).join(', '));
+	const publishesPublic = $derived(entry.spec.ports.some((port) => port.public));
 
 	$effect(() => {
 		const id = result?.resultId ?? null;
@@ -291,6 +293,12 @@
 	{/if}
 	{#if result && result.lines.length > 0}
 		<pre class="bg-muted max-h-40 overflow-auto rounded-lg p-2 font-mono text-xs whitespace-pre-wrap" aria-label="Deploy log">{result.lines.join('\n')}</pre>
+	{/if}
+	{#if portLine !== ''}
+		<p class="font-mono text-sm">{portLine}</p>
+	{/if}
+	{#if publishesPublic}
+		<p class="text-muted-foreground text-sm">Publishes on all of the host's interfaces.</p>
 	{/if}
 	<div class="flex flex-wrap items-center gap-2">
 		<Button type="submit" disabled={submitting || hostId === '' || containerBlocked || filesBlocked}>{actionLabel}</Button>

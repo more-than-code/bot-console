@@ -8,6 +8,7 @@
 	import RowAction from '$lib/components/RowAction.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import type { CatalogEntry, Host, Member } from '$lib/api-types';
+	import { imagePortText } from '$lib/image-spec';
 	import type { CatalogEditorState, CatalogPermissionsState, CatalogRunState, ImageDeployState, ImageEditorState } from '$lib/project-action';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
@@ -75,7 +76,7 @@
 	function portOf(entry: CatalogEntry): string {
 		if (entry.kind === 'image') {
 			if (entry.spec.ports.length === 0) return 'n/a';
-			return entry.spec.ports.map((port) => `${port.host}:${port.container}`).join(', ');
+			return entry.spec.ports.map((port) => imagePortText(port)).join(', ');
 		}
 		return entry.spec.port == null ? 'n/a' : String(entry.spec.port);
 	}

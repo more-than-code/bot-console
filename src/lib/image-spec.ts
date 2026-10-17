@@ -41,7 +41,7 @@ export type ImageDraft = {
 	image: string;
 	command: string[];
 	entrypoint: string[];
-	ports: Array<{ host: string; container: string }>;
+	ports: Array<{ host: string; container: string; public: boolean }>;
 	env: Array<{ key: string; value: string }>;
 	envSets: string[];
 	secrets: Array<{ key: string; set: string; name: string }>;
@@ -227,7 +227,7 @@ function cleanPorts(rows: ImageDraft['ports']): { ok: true; ports: ImageSpec['po
 		if (host < 1 || host > 65535 || container < 1 || container > 65535) return fail('ports', 'Ports must be from 1 to 65535.');
 		if (seen.has(host)) return fail('ports', 'Each host port can appear once.');
 		seen.add(host);
-		ports.push({ host, container, public: false });
+		ports.push({ host, container, public: row.public === true });
 	}
 	if (ports.length > 16) return fail('ports', 'At most 16 ports.');
 	return { ok: true, ports };
@@ -293,7 +293,7 @@ function integerIn(raw: string, min: number, max: number): number | null | undef
 
 /**
  * Map a container form onto an ImageSpec. Empty command and entrypoint lists become null.
- * A job's restart is always `no`. `public` is false: the API has no allow-public flag.
+ * A job's restart is always `no`. A port is public only when the draft says so.
  */
 export function imageSpecFromDraft(
 	draft: ImageDraft,
@@ -426,13 +426,24 @@ function shellQuote(value: string): string {
 	return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
+/** Catalog and deploy label. A public port reads `8080:80 public`; a loopback port stays `9090:90`. */
+export function imagePortText(port: { host: number | string; container: number | string; public?: boolean }): string {
+	const pair = `${port.host}:${port.container}`;
+	return port.public === true ? `${pair} public` : pair;
+}
+
+/** One port row. bits-ui passes true, false, or 'indeterminate'; only true publishes that row. */
+export function setPortPublic(row: { public: boolean }, value: boolean | 'indeterminate'): void {
+	row.public = value === true;
+}
+
 /** Read-only `docker run` line. Every env source is `-e KEY` with no value. */
 export function dockerRunPreview(input: {
 	name: string;
 	image: string;
 	command: readonly string[];
 	entrypoint: readonly string[];
-	ports: readonly { host: number; container: number }[];
+	ports: readonly { host: number; container: number; public?: boolean }[];
 	envKeys: readonly string[];
 	volumes: readonly { name: string; target: string; readOnly: boolean }[];
 	files?: readonly { file: string; target: string }[];
@@ -443,7 +454,10 @@ export function dockerRunPreview(input: {
 	const parts = ['docker run'];
 	if (input.name) parts.push('--name', shellQuote(input.name));
 	if (input.restart) parts.push('--restart', input.restart);
-	for (const port of input.ports) parts.push('-p', `127.0.0.1:${port.host}:${port.container}`);
+	for (const port of input.ports) {
+		const binding = port.public === true ? `${port.host}:${port.container}` : `127.0.0.1:${port.host}:${port.container}`;
+		parts.push('-p', binding);
+	}
 	const seen = new Set<string>();
 	for (const key of input.envKeys) {
 		if (!key || seen.has(key)) continue;
@@ -549,16 +563,20 @@ function publishPorts(spec: string, ports: ImageDraft['ports']): string | null {
 	const bits = spec.split(':');
 	let host = '';
 	let container = '';
+	let isPublic = false;
 	if (bits.length === 2) {
 		host = bits[0] ?? '';
 		container = bits[1] ?? '';
+		isPublic = true;
 	} else if (bits.length === 3) {
 		const bind = bits[0] ?? '';
-		if (bind !== '127.0.0.1' && bind !== 'localhost') return 'A public bind is not supported.';
+		if (bind === '127.0.0.1' || bind === 'localhost') isPublic = false;
+		else if (bind === '0.0.0.0') isPublic = true;
+		else return 'Only 127.0.0.1 or all interfaces (0.0.0.0) can be bound.';
 		host = bits[1] ?? '';
 		container = bits[2] ?? '';
 	} else return `not supported: publish ${spec}`;
-	ports.push({ host, container });
+	ports.push({ host, container, public: isPublic });
 	return null;
 }
 
@@ -936,6 +954,7 @@ export function imageDraftFromForm(form: FormData): { draft: ImageDraft; message
 	const entrypoint = stringList(form, 'entrypoint', 40);
 	const portHost = stringList(form, 'port_host', 20);
 	const portContainer = stringList(form, 'port_container', 20);
+	const portPublic = stringList(form, 'port_public', 20);
 	const envKey = stringList(form, 'env_key', 80);
 	const envValue = stringList(form, 'env_value', 80);
 	const envSets = stringList(form, 'env_set', 12);
@@ -947,7 +966,7 @@ export function imageDraftFromForm(form: FormData): { draft: ImageDraft; message
 	const volumeRo = stringList(form, 'volume_ro', 12);
 	const fileName = stringList(form, 'file_name', 20);
 	const fileTarget = stringList(form, 'file_target', 20);
-	const lists = [command, entrypoint, portHost, portContainer, envKey, envValue, envSets, secretKey, secretSet, secretName, volumeName, volumeTarget, volumeRo, fileName, fileTarget];
+	const lists = [command, entrypoint, portHost, portContainer, portPublic, envKey, envValue, envSets, secretKey, secretSet, secretName, volumeName, volumeTarget, volumeRo, fileName, fileTarget];
 	const draft = blankImageDraft();
 	draft.name = formText(form, 'name').slice(0, 48);
 	draft.workload = formText(form, 'workload') === 'job' ? 'job' : 'service';
@@ -980,7 +999,11 @@ export function imageDraftFromForm(form: FormData): { draft: ImageDraft; message
 		message = 'An entrypoint argument is too long.';
 		field = 'entrypoint';
 	}));
-	draft.ports = portHost.values.map((host, index) => ({ host: host.slice(0, 5), container: (portContainer.values[index] ?? '').slice(0, 5) }));
+	draft.ports = portHost.values.map((host, index) => ({
+		host: host.slice(0, 5),
+		container: (portContainer.values[index] ?? '').slice(0, 5),
+		public: portPublic.values[index] === '1'
+	}));
 	draft.env = envKey.values.map((key, index) => {
 		const raw = envValue.values[index] ?? '';
 		return { key: key.slice(0, 64), value: clip(raw, 4096, () => {
