@@ -8,7 +8,14 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import type { ImageEntry } from '$lib/api-types';
-	import { imageEditorDialog, type DialogOutcome } from '$lib/dialog-open';
+	import {
+		imageDialogReveal,
+		imageNoticeOnCloseComplete,
+		imageNoticeOnDialog,
+		imageSaveView,
+		settleImageAuxLoad,
+		type DialogOutcome
+	} from '$lib/dialog-open';
 	import type { KnownSet } from '$lib/image-spec';
 	import type { ImageEditorState } from '$lib/project-action';
 	import CatalogImageForm from './CatalogImageForm.svelte';
@@ -20,7 +27,8 @@
 		setsAction,
 		filesAction,
 		revealed = false,
-		editor = null
+		editor = null,
+		onSaved
 	}: {
 		mode: 'create' | 'edit';
 		entry?: ImageEntry | null;
@@ -29,10 +37,16 @@
 		filesAction: string;
 		revealed?: boolean;
 		editor?: ImageEditorState | null;
+		onSaved?: (name: string | null) => void;
 	} = $props();
 
 	let open = $state(untrack(() => revealed));
+	let sawReveal = $state(untrack(() => revealed));
 	let sawFailure = $state(untrack(() => revealed));
+	let wasOpen = $state(untrack(() => revealed));
+	let pendingSaved = $state<string | null>(null);
+	// Resolved when bits-ui finishes closing, so update() cannot drop the notice first.
+	let closeWait: (() => void) | null = null;
 	let sets = $state<KnownSet[]>([]);
 	let setsMessage = $state<string | null>(null);
 	let setsStatus = $state<'loading' | 'ready' | 'error'>('loading');
@@ -44,16 +58,53 @@
 	let filesFetched = $state(false);
 	let filesForm = $state<HTMLFormElement | null>(null);
 
+	// A new failure opens the dialog. A run while it is still revealed does not write it open again.
 	$effect(() => {
-		const next = imageEditorDialog(untrack(() => ({ open, sawFailure })), revealed ? 'failure' : '');
+		const next = imageDialogReveal(untrack(() => ({ open, sawReveal })), revealed);
 		open = next.open;
-		sawFailure = next.sawFailure;
+		sawReveal = next.sawReveal;
 	});
 
-	function settle(outcome: DialogOutcome) {
-		const next = imageEditorDialog({ open, sawFailure }, outcome);
+	// Opening create or edit drops the previous notice. A close keeps a name that is waiting to be announced.
+	$effect(() => {
+		const now = open;
+		const previous = untrack(() => wasOpen);
+		// 'notice' is a stand-in. Only the opening transition returns null; the page holds the real name.
+		if (imageNoticeOnDialog('notice', previous, now) == null) {
+			pendingSaved = null;
+			onSaved?.(null);
+		}
+		wasOpen = now;
+	});
+
+	function settle(outcome: DialogOutcome, name: string): void | Promise<void> {
+		const next = imageSaveView({ open, sawFailure }, outcome, name);
 		open = next.open;
 		sawFailure = next.sawFailure;
+		if (next.savedName == null) {
+			pendingSaved = null;
+			onSaved?.(null);
+			return;
+		}
+		pendingSaved = next.savedName;
+		return new Promise<void>((resolve) => {
+			closeWait = resolve;
+			// If bits-ui never reports the close, do not hold the save's update() forever.
+			setTimeout(() => {
+				if (closeWait === resolve) onDialogOpenChangeComplete(false);
+			}, 1000);
+		});
+	}
+
+	// bits-ui calls this after the dialog content has left the tree, so the notice is not inside aria-modal.
+	function onDialogOpenChangeComplete(isOpen: boolean) {
+		const next = imageNoticeOnCloseComplete(pendingSaved, isOpen);
+		pendingSaved = next.pending;
+		if (next.announce != null) onSaved?.(next.announce);
+		if (!isOpen) {
+			closeWait?.();
+			closeWait = null;
+		}
 	}
 
 	// Names and key names only. This post does not replace the page form, so a later save keeps the list.
@@ -118,7 +169,7 @@
 	}
 </script>
 
-<Dialog.Root bind:open>
+<Dialog.Root bind:open onOpenChangeComplete={onDialogOpenChangeComplete}>
 	{#if mode === 'create'}
 		<Dialog.Trigger class={buttonVariants()}>
 			<Plus class="size-4" />
@@ -146,7 +197,7 @@
 				class="hidden"
 				use:enhance={() => {
 					return async ({ result }) => {
-						if (result.type === 'success' || result.type === 'failure') takeSets(result.data as Record<string, unknown>);
+						open = settleImageAuxLoad(result, open, takeSets);
 					};
 				}}
 			></form>
@@ -157,7 +208,7 @@
 				class="hidden"
 				use:enhance={() => {
 					return async ({ result }) => {
-						if (result.type === 'success' || result.type === 'failure') takeFiles(result.data as Record<string, unknown>);
+						open = settleImageAuxLoad(result, open, takeFiles);
 					};
 				}}
 			></form>

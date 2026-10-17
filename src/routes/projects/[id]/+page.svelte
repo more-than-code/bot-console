@@ -1,13 +1,21 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
+	import {
+		imageNoticeOnDialog,
+		imageNoticeOnSave,
+		imageNoticeOnSubmit,
+		imageNoticeOnView,
+		type ImageNoticeSeen
+	} from '$lib/dialog-open';
 	import { servicesRenameView, type ProjectActionData, type ProjectScope } from '$lib/project-action';
+	import { actionUrlFrom, namedFormAction } from '$lib/url';
 	import CatalogEntryDialog from './CatalogEntryDialog.svelte';
 	import CatalogImageDialog from './CatalogImageDialog.svelte';
 	import CatalogSection from './CatalogSection.svelte';
 	import HostsSection from './HostsSection.svelte';
-	import { actionUrlFrom } from '$lib/url';
 	import { page } from '$app/state';
 	import MembersSection from './MembersSection.svelte';
 	import ServicesSection from './ServicesSection.svelte';
@@ -15,6 +23,23 @@
 	import TokensSection from './TokensSection.svelte';
 
 	let { data, form } = $props();
+	let savedImage = $state<string | null>(null);
+	let seenNotice = $state<ImageNoticeSeen | null>(null);
+
+	function onImageSaved(name: string | null) {
+		savedImage = imageNoticeOnSave(name);
+	}
+
+	function onCatalogEditOpen() {
+		savedImage = imageNoticeOnDialog(savedImage, false, true);
+	}
+
+	function onCatalogSubmit(event: SubmitEvent) {
+		const target = event.target;
+		if (!(target instanceof HTMLFormElement)) return;
+		savedImage = imageNoticeOnSubmit(savedImage, namedFormAction(target.action));
+	}
+
 	const action = $derived((form ?? null) as ProjectActionData | null);
 	const scope = $derived<ProjectScope>(action?.scope ?? data.tab ?? 'hosts');
 	const sectionMessage = $derived(action?.scope === scope ? (action.message ?? null) : null);
@@ -29,6 +54,15 @@
 	const catalogMessage = $derived.by(() => {
 		if (catalogEditor || imageEditor || imageDeploy || catalogRun || (action?.scope === 'catalog' && action.permissions)) return data.catalogMessage ?? null;
 		return sectionMessage ?? data.catalogMessage ?? null;
+	});
+
+	$effect(() => {
+		const projectId = data.project?.id ?? '';
+		const tab = scope;
+		const permissions = page.url.searchParams.has('permissions');
+		const next = imageNoticeOnView(untrack(() => savedImage), untrack(() => seenNotice), { projectId, tab, permissions });
+		savedImage = next.name;
+		seenNotice = next.seen;
 	});
 
 	const tabs = $derived(
@@ -48,6 +82,8 @@
 			: []
 	);
 </script>
+
+<svelte:window onsubmit={onCatalogSubmit} />
 
 <svelte:head>
 	<title>{data.project ? data.project.name : 'Project'} · deploybot</title>
@@ -71,6 +107,7 @@
 					parseAction={actionUrlFrom(page.url, 'catalogParse')}
 					revealed={catalogEditor?.mode === 'create'}
 					editor={catalogEditor?.mode === 'create' ? catalogEditor : null}
+					onOpened={onCatalogEditOpen}
 				/>
 				<CatalogImageDialog
 					mode="create"
@@ -79,6 +116,7 @@
 					filesAction={actionUrlFrom(page.url, 'catalogFiles')}
 					revealed={imageEditor?.mode === 'create'}
 					editor={imageEditor?.mode === 'create' ? imageEditor : null}
+					onSaved={onImageSaved}
 				/>
 			{/if}
 		{/snippet}
@@ -124,6 +162,9 @@
 			permissions={catalogPermissions}
 			imageEditor={imageEditor?.mode === 'edit' ? imageEditor : null}
 			imageDeploy={imageDeploy}
+			{savedImage}
+			{onImageSaved}
+			onEditOpen={onCatalogEditOpen}
 		/>
 	{:else if scope === 'members'}
 		<MembersSection

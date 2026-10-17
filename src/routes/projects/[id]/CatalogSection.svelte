@@ -49,7 +49,10 @@
 		run = null,
 		permissions = null,
 		imageEditor = null,
-		imageDeploy = null
+		imageDeploy = null,
+		savedImage = null,
+		onImageSaved,
+		onEditOpen
 	}: {
 		canOwner: boolean;
 		entries: CatalogEntry[];
@@ -63,6 +66,9 @@
 		permissions?: CatalogPermissionsState | null;
 		imageEditor?: ImageEditorState | null;
 		imageDeploy?: ImageDeployState | null;
+		savedImage?: string | null;
+		onImageSaved?: (name: string | null) => void;
+		onEditOpen?: () => void;
 	} = $props();
 
 	const columns: Column<CatalogEntry>[] = [
@@ -89,6 +95,11 @@
 	const permissionEntry = $derived(permissions ? (entries.find((item) => item.name === permissions.name) ?? null) : null);
 </script>
 
+{#if savedImage}
+	<div class="max-w-full min-w-0 break-all">
+		<Notice kind="success">Saved {savedImage}.</Notice>
+	</div>
+{/if}
 {#if message}
 	<Notice kind="error">{message}</Notice>
 {/if}
@@ -151,6 +162,7 @@
 							parseAction={actionUrlFrom(page.url, 'catalogParse')}
 							revealed={editor?.mode === 'edit' && editor.name === entry.name}
 							editor={editor?.mode === 'edit' && editor.name === entry.name ? editor : null}
+							onOpened={onEditOpen}
 						/>
 					{:else if canOwner && entry.kind === 'image'}
 						<CatalogImageDialog
@@ -161,6 +173,7 @@
 							filesAction={actionUrlFrom(page.url, 'catalogFiles')}
 							revealed={imageEditor?.mode === 'edit' && imageEditor.name === entry.name}
 							editor={imageEditor?.mode === 'edit' && imageEditor.name === entry.name ? imageEditor : null}
+							onSaved={onImageSaved}
 						/>
 					{/if}
 					{#if canOwner}

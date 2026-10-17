@@ -40,7 +40,22 @@ import ProjectPage from '../src/routes/projects/[id]/+page.svelte';
 import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import SettingsSection from '../src/routes/projects/[id]/SettingsSection.svelte';
 import { actions as projectActions, load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
-import { imageEditorDialog } from '../src/lib/dialog-open.ts';
+import {
+	imageAuxFormSettle,
+	imageDialogReveal,
+	imageEditorDialog,
+	imageNoticeOnCloseComplete,
+	imageNoticeOnDialog,
+	imageNoticeOnSave,
+	imageNoticeOnSubmit,
+	imageNoticeOnView,
+	imageSaveView,
+	settleImageAuxLoad,
+	settleImageForm,
+	type ImageNoticeSeen
+} from '../src/lib/dialog-open.ts';
+import { namedFormAction } from '../src/lib/url.ts';
+import { parse } from 'svelte/compiler';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 
@@ -51,6 +66,46 @@ const KEY = 'image-key-1';
 const SECRET = 'super-secret-value-99';
 const PLAIN = 'visible-plain-value-99';
 const REGISTRY_TOKEN = 'registry-token-secret';
+
+function readSource(path: string): string {
+	return readFileSync(new URL(path, import.meta.url), 'utf8');
+}
+
+function inlineAttributes(source: string): Array<{ name: string; attrs: string[] }> {
+	const ast = parse(source) as { html?: unknown };
+	const found: Array<{ name: string; attrs: string[] }> = [];
+	function walk(node: unknown): void {
+		if (!node || typeof node !== 'object') return;
+		const record = node as { type?: string; name?: string; attributes?: Array<{ name?: string }> };
+		if (record.type === 'InlineComponent' && record.name) {
+			found.push({ name: record.name, attrs: (record.attributes ?? []).map((attr) => attr.name ?? '') });
+		}
+		for (const value of Object.values(record)) {
+			if (Array.isArray(value)) value.forEach(walk);
+			else if (value && typeof value === 'object') walk(value);
+		}
+	}
+	walk(ast.html);
+	return found;
+}
+
+function scriptCalls(source: string): string[] {
+	const ast = parse(source) as { instance?: unknown };
+	const calls: string[] = [];
+	function walk(node: unknown): void {
+		if (!node || typeof node !== 'object') return;
+		const record = node as { type?: string; callee?: { type?: string; name?: string } };
+		if (record.type === 'CallExpression' && record.callee?.type === 'Identifier' && record.callee.name) {
+			calls.push(record.callee.name);
+		}
+		for (const value of Object.values(record)) {
+			if (Array.isArray(value)) value.forEach(walk);
+			else if (value && typeof value === 'object') walk(value);
+		}
+	}
+	walk(ast.instance);
+	return calls;
+}
 
 function digest(ch: string): string {
 	return `sha256:${ch.repeat(64)}`;
@@ -948,6 +1003,286 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(imageEditorDialog(editing, 'failure').open, true);
 		assert.equal(imageEditorDialog({ open: true, sawFailure: true }, 'redirect').open, false);
 		assert.equal(imageEditorDialog(editing, '').open, true);
+	});
+
+	test('create and edit image saves close on success and stay open on failure', () => {
+		// Same settle for both. Create posts catalogCreate; edit posts catalogUpdate.
+		// A failure opens only while sawFailure is false. After the user closes that failure
+		// ({ open: false, sawFailure: true }), the same failure does not reopen. That is nextFormDialog.
+		const editing = { open: true, sawFailure: false };
+		const created = imageSaveView(editing, 'redirect', 'api');
+		assert.equal(created.open, false);
+		assert.equal(created.sawFailure, false);
+		assert.equal(created.savedName, 'api');
+		const edited = imageSaveView({ open: true, sawFailure: true }, 'success', ' web ');
+		assert.equal(edited.open, false);
+		assert.equal(edited.sawFailure, false);
+		assert.equal(edited.savedName, 'web');
+		const failed = imageSaveView(editing, 'failure', 'web');
+		assert.equal(failed.open, true);
+		assert.equal(failed.sawFailure, true);
+		assert.equal(failed.savedName, null);
+		const errored = imageSaveView(editing, 'error', 'api');
+		assert.equal(errored.open, true);
+		assert.equal(errored.sawFailure, true);
+		assert.equal(errored.savedName, null);
+		const dismissed = imageSaveView({ open: false, sawFailure: true }, 'failure', 'web');
+		assert.equal(dismissed.open, false);
+		assert.equal(dismissed.sawFailure, true);
+		assert.equal(dismissed.savedName, null);
+		const dismissedError = imageSaveView({ open: false, sawFailure: true }, 'error', 'web');
+		assert.equal(dismissedError.open, false);
+		assert.equal(dismissedError.savedName, null);
+		const idle = imageSaveView(editing, '', 'web');
+		assert.equal(idle.open, true);
+		assert.equal(idle.sawFailure, false);
+		assert.equal(idle.savedName, null);
+	});
+
+	test('a still-revealed editor does not reopen the dialog after a successful save', () => {
+		const openOnFailure = imageDialogReveal({ open: false, sawReveal: false }, true);
+		assert.equal(openOnFailure.open, true);
+		assert.equal(openOnFailure.sawReveal, true);
+		const settled = imageSaveView({ open: true, sawFailure: true }, 'redirect', 'web');
+		assert.equal(settled.open, false);
+		// update() has not applied the redirect yet, so revealed is still true.
+		const rerun = imageDialogReveal({ open: settled.open, sawReveal: openOnFailure.sawReveal }, true);
+		assert.equal(rerun.open, false);
+		assert.equal(rerun.sawReveal, true);
+		const cleared = imageDialogReveal(rerun, false);
+		assert.equal(cleared.open, false);
+		assert.equal(cleared.sawReveal, false);
+		const calls = scriptCalls(readSource('../src/routes/projects/[id]/CatalogImageDialog.svelte'));
+		assert.equal(calls.includes('imageDialogReveal'), true);
+	});
+
+	test('the saved notice wraps a 48-character name', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const name = 'n'.repeat(48);
+		const html = render(CatalogSection, {
+			props: {
+				canOwner: true,
+				entries: [],
+				omitted: 0,
+				truncated: false,
+				message: null,
+				hosts: [],
+				members: [],
+				savedImage: name
+			}
+		}).body;
+		const at = html.indexOf(`Saved ${name}.`);
+		assert.equal(at > 0, true);
+		const wrap = html.lastIndexOf('min-w-0 break-all', at);
+		assert.equal(wrap !== -1 && wrap < at, true);
+	});
+
+	test('the page passes the saved notice into the catalog and both image dialogs', () => {
+		// Callback props are not in the SSR HTML. The template AST fails if a prop is removed.
+		const pageAttrs = inlineAttributes(readSource('../src/routes/projects/[id]/+page.svelte'));
+		const create = pageAttrs.filter((item) => item.name === 'CatalogImageDialog');
+		const section = pageAttrs.filter((item) => item.name === 'CatalogSection');
+		assert.equal(create.length, 1);
+		assert.equal(create[0]?.attrs.includes('onSaved'), true);
+		assert.equal(section.length, 1);
+		assert.equal(section[0]?.attrs.includes('savedImage'), true);
+		assert.equal(section[0]?.attrs.includes('onImageSaved'), true);
+		const edit = inlineAttributes(readSource('../src/routes/projects/[id]/CatalogSection.svelte')).filter(
+			(item) => item.name === 'CatalogImageDialog'
+		);
+		assert.equal(edit.length, 1);
+		assert.equal(edit[0]?.attrs.includes('onSaved'), true);
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const html = render(CatalogSection, {
+			props: {
+				canOwner: true,
+				entries: [imageEntry(['deploy'])],
+				omitted: 0,
+				truncated: false,
+				message: null,
+				hosts: [],
+				members: [],
+				savedImage: 'web',
+				onImageSaved: () => {}
+			}
+		}).body;
+		assert.equal(html.includes('Saved web.'), true);
+		assert.equal(html.includes('Edit web'), true);
+	});
+
+	test('env set and file loads keep the image dialog open and still take their lists', () => {
+		assert.deepEqual(imageAuxFormSettle(true, 'success'), { open: true, take: true });
+		assert.deepEqual(imageAuxFormSettle(true, 'failure'), { open: true, take: true });
+		assert.deepEqual(imageAuxFormSettle(false, 'success'), { open: false, take: true });
+		assert.deepEqual(imageAuxFormSettle(true, 'redirect'), { open: true, take: false });
+		const dialog = readSource('../src/routes/projects/[id]/CatalogImageDialog.svelte');
+		const sets = dialog.indexOf('settleImageAuxLoad(result, open, takeSets)');
+		assert.notEqual(sets, -1);
+		const files = dialog.indexOf('settleImageAuxLoad(result, open, takeFiles)');
+		assert.notEqual(files, -1);
+		const setsHandler = dialog.slice(sets, files);
+		const filesHandler = dialog.slice(files, dialog.indexOf('<CatalogImageForm'));
+		assert.notEqual(setsHandler.indexOf('takeSets'), -1);
+		assert.notEqual(filesHandler.indexOf('takeFiles'), -1);
+		assert.equal(setsHandler.includes('open = false'), false);
+		assert.equal(filesHandler.includes('open = false'), false);
+	});
+
+	test('a saved image notice clears on project, tab, permissions, and other catalog actions', () => {
+		const onCatalog: ImageNoticeSeen = { projectId: PROJECT.id, tab: 'catalog', permissions: false };
+		const stayed = imageNoticeOnView('web', onCatalog, onCatalog);
+		assert.equal(stayed.name, 'web');
+		const otherProject = imageNoticeOnView('web', onCatalog, { ...onCatalog, projectId: 'other-project' });
+		assert.equal(otherProject.name, null);
+		const back = imageNoticeOnView(otherProject.name, otherProject.seen, onCatalog);
+		assert.equal(back.name, null);
+		const left = imageNoticeOnView('api', onCatalog, { ...onCatalog, tab: 'hosts' });
+		assert.equal(left.name, null);
+		const returned = imageNoticeOnView(left.name, left.seen, onCatalog);
+		assert.equal(returned.name, null);
+		const permissions = imageNoticeOnView('web', onCatalog, { ...onCatalog, permissions: true });
+		assert.equal(permissions.name, null);
+		assert.equal(imageNoticeOnSubmit('web', 'catalogDelete'), null);
+		assert.equal(imageNoticeOnSubmit('web', 'catalogRun'), null);
+		assert.equal(imageNoticeOnSubmit('web', 'rename'), 'web');
+		assert.equal(imageNoticeOnSubmit('web', null), 'web');
+		// FIX-2: create and update submits do not clear. A cancelled save is one of those submits.
+		assert.equal(imageNoticeOnSubmit('old', 'catalogCreate'), 'old');
+		assert.equal(imageNoticeOnSave('api'), 'api');
+		assert.equal(imageNoticeOnSubmit('old', 'catalogUpdate'), 'old');
+		assert.equal(imageNoticeOnSave(' web '), 'web');
+		assert.equal(imageNoticeOnSave(null), null);
+		assert.equal(namedFormAction(`http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogDelete`), 'catalogDelete');
+		assert.equal(namedFormAction(`http://console.example/projects/${PROJECT.id}?/catalogCreate`), 'catalogCreate');
+		assert.equal(namedFormAction(`http://console.example/projects/${PROJECT.id}?tab=catalog`), null);
+		const calls = scriptCalls(readSource('../src/routes/projects/[id]/+page.svelte'));
+		assert.equal(calls.includes('imageNoticeOnView'), true);
+		assert.equal(calls.includes('imageNoticeOnSubmit'), true);
+		assert.equal(calls.includes('imageNoticeOnSave'), true);
+	});
+
+	test('the image form enhance callback settles before update', async () => {
+		const modes = ['create', 'edit'] as const;
+		const results = [
+			['success', 'success'],
+			['redirect', 'success'],
+			['failure', 'failure'],
+			['error', 'failure']
+		] as const;
+		for (const mode of modes) {
+			for (const [type, outcome] of results) {
+				const order: string[] = [];
+				let seenOutcome = '';
+				let seenName = '';
+				await settleImageForm(
+					{ type },
+					mode,
+					mode === 'edit' ? { name: 'web' } : null,
+					{ name: 'api' },
+					async (nextOutcome, name) => {
+						order.push('settled');
+						seenOutcome = nextOutcome;
+						seenName = name;
+						await Promise.resolve();
+						order.push('settled-done');
+					},
+					async () => {
+						order.push('update');
+					}
+				);
+				assert.equal(seenOutcome, outcome, `${mode} ${type}`);
+				assert.equal(seenName, mode === 'edit' ? 'web' : 'api', `${mode} ${type}`);
+				assert.deepEqual(order, ['settled', 'settled-done', 'update'], `${mode} ${type}`);
+			}
+		}
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let returned = false;
+		const pending = settleImageForm({ type: 'redirect' }, 'create', null, { name: 'api' }, async () => {}, () => gate);
+		void pending.then(() => {
+			returned = true;
+		});
+		await Promise.resolve();
+		await Promise.resolve();
+		assert.equal(returned, false);
+		release();
+		await pending;
+		assert.equal(returned, true);
+		const form = readSource('../src/routes/projects/[id]/CatalogImageForm.svelte');
+		assert.notEqual(form.indexOf('settleImageForm(result, mode, entry, draft, onSettled, update)'), -1);
+	});
+
+	test('hidden env-set and file loads take success and failure and do not close the dialog', () => {
+		const taken: unknown[] = [];
+		const take = (data: Record<string, unknown>) => {
+			taken.push(data);
+		};
+		assert.equal(settleImageAuxLoad({ type: 'success', data: { catalogSets: ['app'] } }, true, take), true);
+		assert.deepEqual(taken, [{ catalogSets: ['app'] }]);
+		taken.length = 0;
+		assert.equal(settleImageAuxLoad({ type: 'failure', data: { catalogFiles: ['key.json'] } }, true, take), true);
+		assert.deepEqual(taken, [{ catalogFiles: ['key.json'] }]);
+		taken.length = 0;
+		assert.equal(settleImageAuxLoad({ type: 'redirect' }, true, take), true);
+		assert.equal(settleImageAuxLoad({ type: 'error' }, true, take), true);
+		assert.equal(settleImageAuxLoad({ type: 'success', data: null }, true, take), true);
+		assert.deepEqual(taken, [{}]);
+		taken.length = 0;
+		assert.equal(settleImageAuxLoad({ type: 'success', data: { catalogSets: [] } }, false, take), false);
+		const dialog = readSource('../src/routes/projects/[id]/CatalogImageDialog.svelte');
+		const sets = dialog.indexOf('settleImageAuxLoad(result, open, takeSets)');
+		assert.notEqual(sets, -1);
+		const files = dialog.indexOf('settleImageAuxLoad(result, open, takeFiles)');
+		assert.notEqual(files, -1);
+		assert.equal(dialog.slice(sets, dialog.indexOf('<CatalogImageForm')).includes('open = false'), false);
+	});
+
+	test('the saved notice clears only for user catalog actions and is announced after the dialog closes', () => {
+		for (const action of ['catalogDelete', 'catalogRun', 'catalogStop', 'catalogRestart', 'catalogDeploy', 'catalogRollback']) {
+			assert.equal(imageNoticeOnSubmit('web', action), null, action);
+		}
+		for (const action of ['catalogEnvSets', 'catalogFiles', 'catalogCreate', 'catalogUpdate']) {
+			assert.equal(imageNoticeOnSubmit('web', action), 'web', action);
+		}
+		let name = imageNoticeOnSubmit('web', 'catalogCreate');
+		assert.equal(name, 'web');
+		name = imageNoticeOnSave('api');
+		assert.equal(name, 'api');
+		name = imageNoticeOnDialog(name, false, true);
+		assert.equal(name, null);
+		name = imageNoticeOnDialog(name, true, true);
+		assert.equal(name, null);
+		name = imageNoticeOnDialog('web', true, false);
+		assert.equal(name, 'web');
+		name = imageNoticeOnSave('worker');
+		assert.equal(name, 'worker');
+		const whileOpen = imageNoticeOnCloseComplete('worker', true);
+		assert.equal(whileOpen.announce, null);
+		assert.equal(whileOpen.pending, 'worker');
+		const closed = imageNoticeOnCloseComplete(whileOpen.pending, false);
+		assert.equal(closed.announce, 'worker');
+		assert.equal(closed.pending, null);
+		assert.equal(imageNoticeOnSave(closed.announce), 'worker');
+		assert.equal(imageNoticeOnCloseComplete(null, false).announce, null);
+		const imageDialog = readSource('../src/routes/projects/[id]/CatalogImageDialog.svelte');
+		const imageCalls = scriptCalls(imageDialog);
+		assert.equal(imageCalls.includes('imageNoticeOnDialog'), true);
+		assert.equal(imageCalls.includes('imageNoticeOnCloseComplete'), true);
+		assert.notEqual(imageDialog.indexOf('onOpenChangeComplete={onDialogOpenChangeComplete}'), -1);
+		assert.equal(scriptCalls(readSource('../src/routes/projects/[id]/CatalogEntryDialog.svelte')).includes('imageNoticeOnDialog'), true);
+		const page = readSource('../src/routes/projects/[id]/+page.svelte');
+		assert.equal(scriptCalls(page).includes('imageNoticeOnDialog'), true);
+		const pageEntry = inlineAttributes(page).filter((item) => item.name === 'CatalogEntryDialog');
+		assert.equal(pageEntry.length, 1);
+		assert.equal(pageEntry[0]?.attrs.includes('onOpened'), true);
+		const section = readSource('../src/routes/projects/[id]/CatalogSection.svelte');
+		const sectionEntry = inlineAttributes(section).filter((item) => item.name === 'CatalogEntryDialog');
+		assert.equal(sectionEntry.length, 1);
+		assert.equal(sectionEntry[0]?.attrs.includes('onOpened'), true);
+		const pageSection = inlineAttributes(page).filter((item) => item.name === 'CatalogSection');
+		assert.equal(pageSection[0]?.attrs.includes('onEditOpen'), true);
 	});
 
 	test('the settings tab loads env sets and registries only while that tab is open', async () => {
