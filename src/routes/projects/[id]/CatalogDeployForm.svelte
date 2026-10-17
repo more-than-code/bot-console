@@ -13,7 +13,7 @@
 	import type { Host, ImageDeploy, ImageEntry } from '$lib/api-types';
 	import { imageFilesBlockReason, imageHostBlockReason, isCatalogHost, reuseIdempotencyKey } from '$lib/catalog';
 	import { formatWhen } from '$lib/format';
-	import { applyHistoryResponse, historyAfterSwitch, historyFetch, historyNotice, imagePortText, nextHistory, nextIdempotencyKey, nextRollbackKey, rollbackDigests, shortDigest } from '$lib/image-spec';
+	import { applyHistoryResponse, historyAfterSwitch, historyFetch, historyNotice, imagePortText, nextHistory, nextIdempotencyKey, nextRollbackKey, rollbackChoices, shortDigest } from '$lib/image-spec';
 	import type { ImageDeployState } from '$lib/project-action';
 
 	let {
@@ -73,7 +73,7 @@
 	const containerBlocked = $derived(selectedHost != null && imageHostBlockReason(selectedHost) != null);
 	const filesBlocked = $derived(selectedHost != null && imageFilesBlockReason(selectedHost, entry.spec.files.length > 0) != null);
 	const notice = $derived(historyNotice({ hostCount: eligible.length, pending: historyPending, ready: historyReady, count: history.length }));
-	const targets = $derived(entry.spec.kind === 'job' ? [] : rollbackDigests(history));
+	const targets = $derived(entry.spec.kind === 'job' ? [] : rollbackChoices(history));
 	const digest = $derived(shortDigest(result?.outcome?.digest ?? result?.status?.digest));
 	const portLine = $derived(entry.spec.ports.map((port) => imagePortText(port)).join(', '));
 	const publishesPublic = $derived(entry.spec.ports.some((port) => port.public));
@@ -356,15 +356,22 @@
 		<p class="text-muted-foreground text-sm">Loading history…</p>
 	{/if}
 	{#if historyReady}
-		{#each targets as item (item)}
-			<form method="POST" action={rollbackAction} class="flex flex-wrap items-center gap-2" use:enhance={rollbackEnhance(item)}>
+		{#each targets as item (item.digest)}
+			<form method="POST" action={rollbackAction} class="grid gap-1" use:enhance={rollbackEnhance(item.digest)}>
 				<Input type="hidden" name="name" value={entry.name} />
 				<Input type="hidden" name="host_id" value={hostId} />
 				<Input type="hidden" name="workload" value={entry.spec.kind} />
 				<Input type="hidden" name="wait_sec" value={String(waitSec)} />
-				<Input type="hidden" name="digest" value={item} />
-				<Button type="submit" variant="outline" disabled={submitting || hostId === '' || containerBlocked}>Roll back to {shortDigest(item) ?? item}</Button>
-				<span class="font-mono text-sm">{shortDigest(item) ?? item}</span>
+				<Input type="hidden" name="digest" value={item.digest} />
+				<div class="flex flex-wrap items-center gap-2">
+					<Button type="submit" variant="outline" disabled={submitting || hostId === '' || containerBlocked}>{item.sameImage ? 'Previous version (same image)' : `Roll back to ${shortDigest(item.digest) ?? item.digest}`}</Button>
+					{#if !item.sameImage}
+						<span class="font-mono text-sm">{shortDigest(item.digest) ?? item.digest}</span>
+					{/if}
+				</div>
+				{#if item.sameImage}
+					<p class="text-muted-foreground text-sm">Restores the previous container with its earlier files and settings.</p>
+				{/if}
 			</form>
 		{/each}
 	{/if}

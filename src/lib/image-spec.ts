@@ -403,22 +403,38 @@ export function shortDigest(digest: string | null | undefined): string | null {
 	return `sha256:${match[1].slice(0, 12)}`;
 }
 
+export type RollbackChoice = {
+	digest: string;
+	/** Current digest, offered when that image was deployed more than once in the window. */
+	sameImage: boolean;
+};
+
 /**
- * Digests a service Roll back button may target.
- * The newest succeeded or unchanged digest is the one already current, including
- * when a later row failed with that same digest, so it is not a target.
- * At most three distinct succeeded or unchanged digests are considered, newest first.
+ * Service rollback targets, newest first.
+ * History is newest first. The walk still stops at three distinct succeeded or
+ * unchanged digests. The newest of those is current. It is included, first, only
+ * when that digest occurs at least twice in the window, so a content-only
+ * redeploy can swap back to the kept container. One occurrence is still dropped.
  */
-export function rollbackDigests(items: readonly { outcome: string; digest: string | null }[]): string[] {
+export function rollbackChoices(items: readonly { outcome: string; digest: string | null }[]): RollbackChoice[] {
 	const distinct: string[] = [];
+	const counts = new Map<string, number>();
 	for (const item of items) {
 		if (!ROLLBACK.has(item.outcome as ImageOutcome) || !item.digest) continue;
-		if (distinct.includes(item.digest)) continue;
-		distinct.push(item.digest);
+		if (!distinct.includes(item.digest)) distinct.push(item.digest);
+		counts.set(item.digest, (counts.get(item.digest) ?? 0) + 1);
 		if (distinct.length === 3) break;
 	}
-	const current = distinct[0] ?? null;
-	return distinct.filter((digest) => digest !== current);
+	const current = distinct[0];
+	if (current == null) return [];
+	const older = distinct.slice(1).map((digest) => ({ digest, sameImage: false }));
+	if ((counts.get(current) ?? 0) >= 2) return [{ digest: current, sameImage: true }, ...older];
+	return older;
+}
+
+/** Digests a service Roll back button may target, newest first. */
+export function rollbackDigests(items: readonly { outcome: string; digest: string | null }[]): string[] {
+	return rollbackChoices(items).map((choice) => choice.digest);
 }
 
 function shellQuote(value: string): string {
