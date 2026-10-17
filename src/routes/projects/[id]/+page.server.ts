@@ -1,6 +1,16 @@
 import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
 import type { CatalogEntry, EnvSet, Host, Invite, JoinToken, Member, ProjectFile, ProjectService, ProjectServiceRow, Registry } from '$lib/api-types';
 import { catalogForCaller, isCatalogName } from '$lib/catalog';
+import {
+	HEALTH_CHECK_LIMIT,
+	HEALTH_NEEDS_CONFIRMATION,
+	draftsFromForm,
+	fieldForHealthMessage,
+	healthCheckPayload,
+	payloadHasConfirmation,
+	probeRequestBody,
+	validateHealthChecks
+} from '$lib/health-checks';
 import { SERVICE_DEFAULT_DIR, SERVICE_DEFAULT_SORT, serviceColumns, serviceHostReachable } from '$lib/host-view';
 import { serviceShow } from '$lib/service-view';
 import type { CatalogPermissionsState, ProjectScope } from '$lib/project-action';
@@ -51,6 +61,7 @@ import {
 	parseProbe,
 	parseProject,
 	parseProjectService,
+	parseService,
 	parseServicePage
 } from '$lib/server/shape';
 import { withChecks } from '$lib/server/service-checks';
@@ -360,6 +371,94 @@ function keptName(event: RequestEvent, serviceId: string, typed: string, status:
 	return fail(status, present(event, { scope: 'services', message, renameServiceId: serviceId, displayName: typed }));
 }
 
+function healthFieldFailure(
+	event: RequestEvent,
+	serviceId: string,
+	status: number,
+	field: string,
+	index: number | null,
+	message: string
+) {
+	// Field text stays in the dialog. `message` would also become the section banner.
+	return fail(status, present(event, {
+		scope: 'services' as const,
+		healthServiceId: serviceId,
+		healthField: field,
+		healthIndex: index,
+		healthMessage: message
+	}));
+}
+
+/** Editor probe failures stay on the row. `field` null is the row notice; a field is the control error. */
+function editorProbeFailure(
+	event: RequestEvent,
+	serviceId: string,
+	status: number,
+	index: number | null,
+	message: string,
+	field: string | null
+) {
+	return fail(status, present(event, {
+		scope: 'services' as const,
+		editorProbe: true,
+		probeServiceId: serviceId,
+		probeIndex: index,
+		probeMessage: field == null ? message : null,
+		healthServiceId: serviceId,
+		healthField: field,
+		healthIndex: field == null ? null : index,
+		healthMessage: field == null ? null : message
+	}));
+}
+
+function probeRowIndex(raw: string): number | null {
+	if (!/^(0|[1-9]\d{0,5})$/.test(raw)) return null;
+	const value = Number(raw);
+	if (!Number.isSafeInteger(value) || value < 0 || value > HEALTH_CHECK_LIMIT) return null;
+	return value;
+}
+
+/** Lets the shape check accept this port before the service is read. An unusable port matches nothing. */
+function shapePorts(port: string): number[] {
+	if (!/^(0|[1-9]\d{0,5})$/.test(port)) return [];
+	const value = Number(port);
+	if (!Number.isSafeInteger(value) || value < 1 || value > 65535) return [];
+	return [value];
+}
+
+async function replaceHealthChecks(event: RequestEvent, serviceId: string, form: FormData) {
+	if (!isUuid(serviceId)) return invalid(event, 'services', 'That service is not valid.');
+	const read = draftsFromForm(form);
+	if (!read.ok) return healthFieldFailure(event, serviceId, 400, read.field, read.index, read.message);
+	try {
+		const detail = parseService(await apiFetch(event, `/v1/services/${serviceId}`));
+		if (!detail) {
+			return healthFieldFailure(event, serviceId, 502, 'form', null, 'The API returned an unexpected response.');
+		}
+		const issue = validateHealthChecks(read.drafts, detail.ports)[0];
+		if (issue) return healthFieldFailure(event, serviceId, 400, issue.field, issue.index, issue.message);
+		const saved = await apiFetch(event, `/v1/services/${serviceId}/health-checks`, {
+			method: 'PUT',
+			body: JSON.stringify({ checks: healthCheckPayload(read.drafts) })
+		});
+		if (payloadHasConfirmation(saved)) {
+			return healthFieldFailure(event, serviceId, 409, 'form', null, HEALTH_NEEDS_CONFIRMATION);
+		}
+		const dest = new URL(backTo(event.url), event.url.origin);
+		const qs = dest.searchParams.toString();
+		redirect(303, qs ? `${dest.pathname}?${qs}` : dest.pathname);
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		if (err instanceof ApiError && err.code === 'bad_request') {
+			return healthFieldFailure(event, serviceId, err.status, fieldForHealthMessage(err.msg), null, err.msg);
+		}
+		if (err instanceof ApiError) {
+			return healthFieldFailure(event, serviceId, err.status, 'form', null, err.msg);
+		}
+		return actionFailure(event, err, 'services');
+	}
+}
+
 async function renameService(event: RequestEvent, serviceId: string, form: FormData) {
 	if (!isUuid(serviceId)) return invalid(event, 'services', 'That service is not valid.');
 	const typed = formText(form, 'display_name');
@@ -607,21 +706,72 @@ export const actions: Actions = {
 		const form = await event.request.formData();
 		const serviceId = formText(form, 'service_id');
 		const checkId = formText(form, 'check_id');
-		if (!isUuid(serviceId) || !isUuid(checkId)) {
+		if (!isUuid(serviceId)) {
 			return fail(400, present(event, { scope: 'services', message: 'That health check is not valid.' }));
 		}
+		// Saved rows still post only check_id. The editor posts protocol, port, and path.
+		if (checkId !== '') {
+			if (!isUuid(checkId)) {
+				return fail(400, present(event, { scope: 'services', message: 'That health check is not valid.' }));
+			}
+			try {
+				const probe = parseProbe(
+					await apiFetch(event, `/v1/services/${serviceId}/probe`, {
+						method: 'POST',
+						body: JSON.stringify({ check_id: checkId })
+					})
+				);
+				if (!probe) return fail(502, present(event, { scope: 'services', message: 'The API returned an unexpected response.' }));
+				return present(event, { scope: 'services' as const, probe, probeServiceId: serviceId });
+			} catch (err) {
+				return actionFailure(event, err, 'services');
+			}
+		}
+		if (formText(form, 'protocol') === '') {
+			return fail(400, present(event, { scope: 'services', message: 'That health check is not valid.' }));
+		}
+		const protocol = formText(form, 'protocol');
+		const port = formText(form, 'port');
+		const path = formText(form, 'path');
+		const index = probeRowIndex(formText(form, 'probe_index'));
+		// Path and port shape need no fetch. Membership uses the service read below, not this list.
+		const shape = probeRequestBody({ protocol, port, path, ports: shapePorts(port) });
+		if (!shape.ok) return editorProbeFailure(event, serviceId, 400, index, shape.message, shape.field);
 		try {
+			const detail = parseService(await apiFetch(event, `/v1/services/${serviceId}`));
+			if (!detail) {
+				return editorProbeFailure(event, serviceId, 502, index, 'The API returned an unexpected response.', null);
+			}
+			const built = probeRequestBody({ protocol, port, path, ports: detail.ports });
+			if (!built.ok) return editorProbeFailure(event, serviceId, 400, index, built.message, built.field);
 			const probe = parseProbe(
 				await apiFetch(event, `/v1/services/${serviceId}/probe`, {
 					method: 'POST',
-					body: JSON.stringify({ check_id: checkId })
+					body: JSON.stringify(built.body)
 				})
 			);
-			if (!probe) return fail(502, present(event, { scope: 'services', message: 'The API returned an unexpected response.' }));
-			return present(event, { scope: 'services' as const, probe, probeServiceId: serviceId });
+			if (!probe) return editorProbeFailure(event, serviceId, 502, index, 'The API returned an unexpected response.', null);
+			return present(event, {
+				scope: 'services' as const,
+				probe,
+				probeServiceId: serviceId,
+				editorProbe: true,
+				probeIndex: index
+			});
 		} catch (err) {
-			return actionFailure(event, err, 'services');
+			if (isRedirect(err) || isHttpError(err)) throw err;
+			if (!(err instanceof ApiError)) console.error('bot api request failed');
+			const status = err instanceof ApiError && err.status >= 400 && err.status <= 599 ? err.status : 503;
+			const message = err instanceof ApiError ? err.msg : 'The API is unavailable.';
+			return editorProbeFailure(event, serviceId, status, index, message, null);
 		}
+	},
+
+	saveHealthChecks: async (event) => {
+		requireUser(event);
+		projectId(event.params);
+		const form = await event.request.formData();
+		return replaceHealthChecks(event, formText(form, 'service_id'), form);
 	},
 
 	deleteProject: async (event) => {

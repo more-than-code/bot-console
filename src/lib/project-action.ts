@@ -93,8 +93,19 @@ export type ProjectActionData = {
 	created?: CreatedJoin;
 	probe?: ProbeView;
 	probeServiceId?: string;
+	/** Set when the probe was the editor's unsaved row, not a saved check id. */
+	editorProbe?: boolean;
+	/** Draft row the editor probe ran against. Null when the form did not send one. */
+	probeIndex?: number | null;
+	/** Editor probe error shown on that row. Field errors use `healthMessage` instead. */
+	probeMessage?: string | null;
 	renameServiceId?: string;
 	displayName?: string;
+	/** Health-check dialog stays open for this service. */
+	healthServiceId?: string;
+	healthField?: string | null;
+	healthIndex?: number | null;
+	healthMessage?: string | null;
 	/** Set only on the create-invite action result. A reload drops it. */
 	inviteUrl?: string;
 	inviteRole?: InviteRole;

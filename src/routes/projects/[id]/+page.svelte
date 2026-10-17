@@ -10,6 +10,13 @@
 		imageNoticeOnView,
 		type ImageNoticeSeen
 	} from '$lib/dialog-open';
+	import {
+		healthNoticeOnAction,
+		healthNoticeOnDialog,
+		healthNoticeOnView,
+		servicesHealthView,
+		type HealthNoticeSeen
+	} from '$lib/health-checks';
 	import { servicesRenameView, type ProjectActionData, type ProjectScope } from '$lib/project-action';
 	import { actionUrlFrom, namedFormAction } from '$lib/url';
 	import CatalogEntryDialog from './CatalogEntryDialog.svelte';
@@ -25,6 +32,8 @@
 	let { data, form } = $props();
 	let savedImage = $state<string | null>(null);
 	let seenNotice = $state<ImageNoticeSeen | null>(null);
+	let savedHealthId = $state<string | null>(null);
+	let seenHealth = $state<HealthNoticeSeen | null>(null);
 
 	function onImageSaved(name: string | null) {
 		savedImage = imageNoticeOnSave(name);
@@ -34,16 +43,27 @@
 		savedImage = imageNoticeOnDialog(savedImage, false, true);
 	}
 
+	function onHealthSaved(serviceId: string | null) {
+		savedHealthId = serviceId;
+	}
+
+	function onHealthOpen() {
+		savedHealthId = healthNoticeOnDialog(savedHealthId, false, true);
+	}
+
 	function onCatalogSubmit(event: SubmitEvent) {
 		const target = event.target;
 		if (!(target instanceof HTMLFormElement)) return;
-		savedImage = imageNoticeOnSubmit(savedImage, namedFormAction(target.action));
+		const named = namedFormAction(target.action);
+		savedImage = imageNoticeOnSubmit(savedImage, named);
+		savedHealthId = healthNoticeOnAction(savedHealthId, named);
 	}
 
 	const action = $derived((form ?? null) as ProjectActionData | null);
 	const scope = $derived<ProjectScope>(action?.scope ?? data.tab ?? 'hosts');
 	const sectionMessage = $derived(action?.scope === scope ? (action.message ?? null) : null);
 	const rename = $derived(servicesRenameView(action));
+	const healthEditor = $derived(servicesHealthView(action));
 	const catalogEditor = $derived(action?.scope === 'catalog' ? (action.catalogEditor ?? null) : null);
 	const catalogRun = $derived(action?.scope === 'catalog' ? (action.catalogAction ?? null) : null);
 	const imageEditor = $derived(action?.scope === 'catalog' ? (action.imageEditor ?? null) : null);
@@ -63,6 +83,9 @@
 		const next = imageNoticeOnView(untrack(() => savedImage), untrack(() => seenNotice), { projectId, tab, permissions });
 		savedImage = next.name;
 		seenNotice = next.seen;
+		const healthNext = healthNoticeOnView(untrack(() => savedHealthId), untrack(() => seenHealth), { projectId, tab });
+		savedHealthId = healthNext.notice;
+		seenHealth = healthNext.seen;
 	});
 
 	const tabs = $derived(
@@ -145,8 +168,18 @@
 			message={sectionMessage ?? data.servicesMessage}
 			probe={action?.scope === 'services' ? (action.probe ?? null) : null}
 			probeServiceId={action?.scope === 'services' ? (action.probeServiceId ?? null) : null}
+			editorProbe={healthEditor.editorProbe}
 			renameServiceId={rename.renameServiceId}
 			typedName={rename.typedName}
+			{savedHealthId}
+			healthServiceId={healthEditor.serviceId}
+			healthField={healthEditor.field}
+			healthIndex={healthEditor.index}
+			healthMessage={healthEditor.message}
+			probeIndex={action?.scope === 'services' ? (action.probeIndex ?? null) : null}
+			probeMessage={action?.scope === 'services' ? (action.probeMessage ?? null) : null}
+			{onHealthSaved}
+			{onHealthOpen}
 		/>
 	{:else if scope === 'catalog'}
 		<CatalogSection

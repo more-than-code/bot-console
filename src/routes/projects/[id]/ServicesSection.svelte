@@ -18,7 +18,8 @@
 		showProjectColumn
 	} from '$lib/host-view';
 	import { shortDigest } from '$lib/image-spec';
-	import { canRenameService, serviceLabel } from '$lib/service-label';
+	import { canEditHealthChecks, SAVED_HEALTH_CHECKS } from '$lib/health-checks';
+	import { serviceLabel } from '$lib/service-label';
 	import {
 		SERVICE_SHOW_LABEL,
 		SERVICE_SHOWS,
@@ -34,6 +35,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import * as Select from '$lib/components/ui/select';
+	import HealthChecks from './HealthChecks.svelte';
 	import RenameService from './RenameService.svelte';
 
 	let {
@@ -49,8 +51,18 @@
 		message,
 		probe,
 		probeServiceId,
+		editorProbe = false,
 		renameServiceId,
-		typedName
+		typedName,
+		savedHealthId = null,
+		healthServiceId = null,
+		healthField = null,
+		healthIndex = null,
+		healthMessage = null,
+		probeIndex = null,
+		probeMessage = null,
+		onHealthSaved,
+		onHealthOpen
 	}: {
 		projectId: string;
 		projectName: string;
@@ -64,8 +76,18 @@
 		message: string | null;
 		probe: ProbeView | null;
 		probeServiceId: string | null;
+		editorProbe?: boolean;
 		renameServiceId: string | null;
 		typedName: string | null;
+		savedHealthId?: string | null;
+		healthServiceId?: string | null;
+		healthField?: string | null;
+		healthIndex?: number | null;
+		healthMessage?: string | null;
+		probeIndex?: number | null;
+		probeMessage?: string | null;
+		onHealthSaved?: (serviceId: string | null) => void;
+		onHealthOpen?: () => void;
 	} = $props();
 
 	const showProject = $derived(showProjectColumn(projectName, rows));
@@ -116,7 +138,7 @@
 
 	function renameAllowed(row: ProjectServiceRow): boolean {
 		const host = hosts.find((item) => item.id === row.host_id);
-		return canRenameService({
+		return canEditHealthChecks({
 			canAdmin,
 			projectId,
 			serviceProjectId: row.project_id,
@@ -234,6 +256,29 @@
 						failed={renameServiceId === service.id}
 						{message}
 					/>
+					<HealthChecks
+						action={actionUrlFrom(page.url, 'saveHealthChecks')}
+						probeAction={actionUrlFrom(page.url, 'probe')}
+						serviceId={service.id}
+						rowLabel={serviceLabel(service)}
+						ports={service.ports}
+						checks={service.checks}
+						checksMessage={service.checksMessage}
+						health={service.health}
+						failed={healthServiceId === service.id}
+						serverField={healthServiceId === service.id ? healthField : null}
+						serverIndex={healthServiceId === service.id ? healthIndex : null}
+						serverMessage={healthServiceId === service.id ? healthMessage : null}
+						{probe}
+						{probeIndex}
+						{probeMessage}
+						showProbe={editorProbe && probeServiceId === service.id}
+						onSaved={onHealthSaved}
+						onOpened={onHealthOpen}
+					/>
+				{/if}
+				{#if savedHealthId === service.id}
+					<Notice kind="success">{SAVED_HEALTH_CHECKS}</Notice>
 				{/if}
 			</td>
 			<td class="p-2 align-middle"><a class="text-primary underline-offset-4 hover:underline" href="/hosts/{service.host_id}">{service.host_name}</a></td>

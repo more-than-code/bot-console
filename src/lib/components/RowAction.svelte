@@ -21,7 +21,8 @@
 		type = 'button',
 		name,
 		value,
-		trigger
+		trigger,
+		disabled = false
 	}: {
 		label: string;
 		icon: Component;
@@ -32,6 +33,8 @@
 		value?: string;
 		/** Dialog or alert-dialog trigger. Omit it for a form submit. */
 		trigger?: Snippet<[TriggerProps]>;
+		/** A disabled control does not receive hover, so the tooltip sits on a wrapper. */
+		disabled?: boolean;
 	} = $props();
 
 	const controlClass = $derived(
@@ -43,7 +46,20 @@
 	<Tooltip.Root>
 		<Tooltip.Trigger>
 			{#snippet child({ props })}
-				{#if trigger}
+				{#if disabled}
+					<span {...props} class={cn('inline-flex', tooltipClass(props.class))} title={label}>
+						<Button
+							type="button"
+							disabled
+							variant="ghost"
+							size="icon-sm"
+							class="pointer-events-none"
+							aria-label={label}
+						>
+							<Icon class="size-4" />
+						</Button>
+					</span>
+				{:else if trigger}
 					{@render trigger({
 						...props,
 						class: cn(controlClass, tooltipClass(props.class)),

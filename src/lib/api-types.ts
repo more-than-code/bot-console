@@ -349,6 +349,10 @@ export type HealthCheck = {
 	port: number;
 	path: string | null;
 	enabled: boolean;
+	/** Present when the detail payload sent them. Absent on older rows; the editor defaults them. */
+	interval_sec?: number;
+	expect_status_min?: number;
+	expect_status_max?: number;
 };
 
 export type ServiceSummary = {

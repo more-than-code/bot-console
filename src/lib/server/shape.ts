@@ -74,6 +74,13 @@ function optionalText(value: unknown, max: number): string | null | undefined {
 	return parsed === null ? undefined : parsed;
 }
 
+/** Absent is null. A non-integer is malformed. An out-of-range integer is kept so the editor can show it. */
+function optionalInt(value: unknown): number | null | undefined {
+	if (value == null) return null;
+	if (typeof value !== 'number' || !Number.isInteger(value)) return undefined;
+	return value;
+}
+
 /** Health-check and probe paths are capped at 512 bytes (api-v1 v1.0.1 §7). */
 function optionalPath(value: unknown): string | null | undefined {
 	if (value == null) return null;
@@ -466,7 +473,20 @@ export function parseHealthChecks(value: unknown): HealthCheck[] | null {
 		if (path === undefined) return null;
 		if (item.protocol === 'http' && (!path || !path.startsWith('/'))) return null;
 		if (item.protocol === 'tcp' && path !== null) return null;
-		checks.push({ id, protocol: item.protocol, port: item.port, path, enabled: item.enabled });
+		const interval_sec = optionalInt(item.interval_sec);
+		const expect_status_min = optionalInt(item.expect_status_min);
+		const expect_status_max = optionalInt(item.expect_status_max);
+		if (interval_sec === undefined || expect_status_min === undefined || expect_status_max === undefined) return null;
+		checks.push({
+			id,
+			protocol: item.protocol,
+			port: item.port,
+			path,
+			enabled: item.enabled,
+			interval_sec: interval_sec ?? 60,
+			expect_status_min: expect_status_min ?? 200,
+			expect_status_max: expect_status_max ?? 399
+		});
 	}
 	return checks;
 }
