@@ -6,10 +6,9 @@ JavaScript is required. Search, sort, paging, tabs, and filters stay in the URL.
 
 ## Setup
 
-Node 24 and pnpm are installed under the home directory. The system Node at `/usr/bin/node` is too old. Put the user-local Node on `PATH` before every command:
+Requires Node.js 20+ and pnpm:
 
 ```bash
-export PATH="$HOME/.local/opt/node/bin:$PATH"
 pnpm install
 ```
 
@@ -18,7 +17,7 @@ Copy `.env.example` to `.env`. The app reads these variables on the server only 
 | Key | Purpose |
 |-----|---------|
 | `BOT_API_URL` | Required bot-api-server origin, no path. Unset or invalid → 503 `Console is not configured (BOT_API_URL)` |
-| `BOT_API_ALLOW_INSECURE_HTTP` | Set to `1` to allow a non-loopback `http://` API URL (tailnet dev only) |
+| `BOT_API_ALLOW_INSECURE_HTTP` | Set to `1` to allow a non-loopback `http://` API URL (development/internal testing only) |
 | `BOT_API_OAUTH_AUTHORIZE_HOSTS` | Comma-separated `authorize_url` hostnames. Default `accounts.google.com` |
 
 `https` is accepted. `http` is accepted only for `localhost`, `127.0.0.1`, and `::1`, unless `BOT_API_ALLOW_INSECURE_HTTP=1`.
@@ -40,13 +39,12 @@ Do not commit `.env`. `.env` is gitignored.
 Production, behind the reverse proxy:
 
 ```bash
-export PATH="$HOME/.local/opt/node/bin:$PATH"
 PORT=5180 HOST=127.0.0.1 ADDRESS_HEADER=X-Forwarded-For XFF_DEPTH=1 node build
 ```
 
 `PORT` defaults to 3000 and `HOST` to `0.0.0.0` in the Node adapter. Bind to loopback (`HOST=127.0.0.1`) when a reverse proxy is the only client. `ADDRESS_HEADER=X-Forwarded-For` and `XFF_DEPTH=1` make `event.getClientAddress()` the rightmost forwarded address, the one the closest proxy added. The console sets that address as `X-Forwarded-For` on every bot-api-server call. The API rate-limits Google sign-in start (20 per minute), invite redemption, and OAuth by client IP, and it uses the rightmost `X-Forwarded-For` address only when the TCP peer is `BOT_API_TRUSTED_PROXY` (`127.0.0.1` in production). Without the header, every console user shares that loopback bucket. A client who can reach the console directly can spoof `X-Forwarded-For`, which is why the process listens on loopback. `vite dev` ignores these two variables and uses the socket peer. If `getClientAddress()` throws, or returns an empty or non-IP value, the console sends no `X-Forwarded-For`.
 
-In dev (umbrella decision D33) the console runs on Joe's Mac with `pnpm dev` on port 5180 against the local bot-api-server (`BOT_API_URL=http://127.0.0.1:8090`). The older pi2 user unit `bot-console.service` (also port 5180) predates the control plane and is not the current deployment.
+In development, run `pnpm dev` on port 5180 against a running `bot-api-server` (e.g. `BOT_API_URL=http://127.0.0.1:8090`).
 
 ## Pages
 
@@ -67,7 +65,7 @@ Overview (`?range=1h|6h|24h|7d`, default `1h`) shows status, a snapshot action, 
 
 Catalog (`?tab=catalog`) lists program and container image entries for every member. Row actions follow `my_actions`. The owner adds and edits a program or a container image, sets permissions, and deletes an entry. Each container port row has Public (all interfaces), off by default. A public port listens on all of the host's interfaces and is allowed only when that host's runner.toml sets `allow_public_ports = true`; otherwise the deploy is refused. The catalog port column and the deploy dialog mark a public port as `<host>:<container> public` and leave a loopback port as `<host>:<container>`. The dialog shows that line before Deploy (Run job for a job), and adds `Publishes on all of the host's interfaces.` when any port is public. A successful image save closes the dialog and, once that dialog has finished closing, the catalog says Saved <name>. That line clears when you leave the catalog, switch projects, open Permissions, or start delete, run, stop, restart, deploy, rollback, or a create or edit dialog. Reloading env sets or files, or cancelling a save before it is sent, leaves the line in place. Image entries can also be deployed, rolled back, or removed when `my_actions` includes `deploy`. For a service, the rollback list offers the last three distinct succeeded or unchanged digests and omits the current digest unless that digest succeeded or was unchanged more than once in that window, in which case it is offered first as Previous version (same image). Run, stop, restart, and status ask for a host and reuse one idempotency key until that post succeeds. Logs do not. `waiting for the host owner's approval` is an info notice. On a host page, an owning-project admin approves or revokes catalog entries and sees exec, args, and env on each row; other callers do not see that section.
 
-The dashboard is meant for the home LAN and Tailscale. Do not publish the port.
+Security note: The console dashboard is intended to run behind an authenticating reverse proxy with TLS or on private/overlay networks (VPN/internal). Do not expose the HTTP port directly to untrusted networks.
 
 ## Auth
 
