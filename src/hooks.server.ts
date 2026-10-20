@@ -20,7 +20,7 @@ function applyHeaders(pathname: string, response: Response): Response {
 }
 
 function notConfigured(): Response {
-	const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Unavailable · deploybot</title><p>${NOT_CONFIGURED_MESSAGE}</p></html>`;
+	const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Unavailable · Deploybot</title><p>${NOT_CONFIGURED_MESSAGE}</p></html>`;
 	return new Response(html, {
 		status: 503,
 		headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }
@@ -48,7 +48,7 @@ function unavailable(pathname: string): Response {
 			headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }
 		});
 	}
-	const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Unavailable · deploybot</title><p>Sign-in is temporarily unavailable.</p><form method="post" action="/signout"><button type="submit">Sign out</button></form></html>`;
+	const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Unavailable · Deploybot</title><p>Sign-in is temporarily unavailable.</p><form method="post" action="/signout"><button type="submit">Sign out</button></form></html>`;
 	return new Response(html, {
 		status: 503,
 		headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }

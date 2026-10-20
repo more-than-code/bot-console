@@ -14,14 +14,14 @@ const SHOW_TO_VIEW = {
 } as const satisfies Record<ServiceShow, ServiceApiView>;
 
 export const SERVICE_SHOW_LABEL: Record<ServiceShow, string> = {
-	deploybot: 'deploybot services',
+	deploybot: 'Deploybot services',
 	discovered: 'Also discovered',
 	all: 'Everything, including gone'
 };
 
 /**
  * URL `show` and the `view` query it sends.
- * Missing or any other value is deploybot services (`view=deploybot`).
+ * Missing or any other value is Deploybot services (`view=deploybot`).
  * The API spelling `deploybot_and_discovered` is not a `show` value.
  */
 export function serviceShow(raw: string | null | undefined): { show: ServiceShow; view: ServiceApiView } {
@@ -33,7 +33,7 @@ export function serviceShow(raw: string | null | undefined): { show: ServiceShow
 
 /**
  * Status word for one services row.
- * `gone_at` replaces health: owned and declared are stopped (deploybot can start them),
+ * `gone_at` replaces health: owned and declared are stopped (Deploybot can start them),
  * discovered is gone. A present row keeps its health status.
  */
 export function serviceRowStatus(row: {
@@ -75,7 +75,7 @@ export function imageDigestText(value: string | null | undefined): string | null
 }
 
 /**
- * The deploybot empty line and its link.
+ * The Deploybot empty line and its link.
  * A search, or any load or action message, keeps the ordinary "No services reported."
  */
 export function showDeploybotEmpty(input: {

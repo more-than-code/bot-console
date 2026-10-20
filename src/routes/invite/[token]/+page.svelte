@@ -10,7 +10,7 @@
 </script>
 
 <svelte:head>
-	<title>{title} · deploybot</title>
+	<title>{title} · Deploybot</title>
 </svelte:head>
 
 <PageHeader title={title} breadcrumbs={[{ label: 'Projects', href: '/projects' }, { label: 'Invite' }]} />

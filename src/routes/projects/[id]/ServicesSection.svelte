@@ -242,7 +242,7 @@
 		<Label for="services-show">Show</Label>
 		<Select.Root type="single" bind:value={showValue} onValueChange={applyFilters}>
 			<Select.Trigger id="services-show" class="w-full min-w-0">
-				<Select.Value class="min-w-0 truncate" placeholder="deploybot services">{showLabel}</Select.Value>
+				<Select.Value class="min-w-0 truncate" placeholder="Deploybot services">{showLabel}</Select.Value>
 			</Select.Trigger>
 			<Select.Content>
 				{#each SERVICE_SHOWS as option (option)}
@@ -257,7 +257,7 @@
 	{columns}
 	id="services"
 	labelledBy="services-heading"
-	empty={deploybotEmpty ? 'No services run by deploybot yet.' : 'No services reported.'}
+	empty={deploybotEmpty ? 'No services run by Deploybot yet.' : 'No services reported.'}
 	rowKey={(row) => row.id}
 	defaultSort={SERVICE_DEFAULT_SORT}
 	defaultDir={SERVICE_DEFAULT_DIR}

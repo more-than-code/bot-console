@@ -223,7 +223,7 @@ test('the services table shows stopped or gone instead of health', () => {
 	assert.equal(present.split(' ').includes('gone'), false);
 });
 
-test('the deploybot empty line is only a quiet default view', () => {
+test('the Deploybot empty line is only a quiet default view', () => {
 	assert.equal(showDeploybotEmpty({ show: 'deploybot', search: '', message: null }), true);
 	assert.equal(showDeploybotEmpty({ show: 'deploybot', search: 'api', message: null }), false);
 	assert.equal(showDeploybotEmpty({ show: 'deploybot', search: '', message: 'api down' }), false);
@@ -234,7 +234,7 @@ test('the deploybot empty line is only a quiet default view', () => {
 test('the default empty state links to discovered listeners and keeps the host', () => {
 	const url = `http://console.example/projects/${PROJECT.id}?tab=services&services.host=${HOST_ID}`;
 	const html = renderServices(url, []);
-	assert.equal(html.includes('No services run by deploybot yet.'), true);
+	assert.equal(html.includes('No services run by Deploybot yet.'), true);
 	assert.equal(html.includes('No services reported.'), false);
 	const href = `/projects/${PROJECT.id}?tab=services&services.host=${HOST_ID}&show=discovered`;
 	assert.equal(html.includes(`href="${href}"`), true);
@@ -247,12 +247,12 @@ test('the default empty state links to discovered listeners and keeps the host',
 
 	const searched = renderServices(`${url}&services.q=api`, []);
 	assert.equal(searched.includes('No services reported.'), true);
-	assert.equal(searched.includes('No services run by deploybot yet.'), false);
+	assert.equal(searched.includes('No services run by Deploybot yet.'), false);
 	assert.equal(searched.includes('Show discovered listeners'), false);
 
 	const failed = renderServices(url, [], { message: 'The API returned an unexpected response.' });
 	assert.equal(failed.includes('No services reported.'), true);
-	assert.equal(failed.includes('No services run by deploybot yet.'), false);
+	assert.equal(failed.includes('No services run by Deploybot yet.'), false);
 	assert.equal(failed.includes('Show discovered listeners'), false);
 	assert.equal(failed.includes('The API returned an unexpected response.'), true);
 
@@ -261,11 +261,11 @@ test('the default empty state links to discovered listeners and keeps the host',
 		[]
 	);
 	assert.equal(discovered.includes('No services reported.'), true);
-	assert.equal(discovered.includes('No services run by deploybot yet.'), false);
+	assert.equal(discovered.includes('No services run by Deploybot yet.'), false);
 	assert.equal(discovered.includes('Show discovered listeners'), false);
 
 	const filled = renderServices(url, [row(PRESENT, 'discovered', null, 'up')]);
-	assert.equal(filled.includes('No services run by deploybot yet.'), false);
+	assert.equal(filled.includes('No services run by Deploybot yet.'), false);
 	assert.equal(filled.includes('Show discovered listeners'), false);
 
 	const everything = renderServices(
@@ -273,14 +273,14 @@ test('the default empty state links to discovered listeners and keeps the host',
 		[]
 	);
 	assert.equal(everything.includes('No services reported.'), true);
-	assert.equal(everything.includes('No services run by deploybot yet.'), false);
+	assert.equal(everything.includes('No services run by Deploybot yet.'), false);
 	assert.equal(everything.includes('Show discovered listeners'), false);
 
 	const unknown = renderServices(
 		`http://console.example/projects/${PROJECT.id}?tab=services&show=nope`,
 		[]
 	);
-	assert.equal(unknown.includes('No services run by deploybot yet.'), true);
+	assert.equal(unknown.includes('No services run by Deploybot yet.'), true);
 	assert.equal(unknown.includes(`href="/projects/${PROJECT.id}?tab=services&show=discovered"`), true);
 });
 
@@ -297,7 +297,7 @@ test('the Show select submits one value and the trigger shows that label', () =>
 	assert.equal([...source.matchAll(/class="w-full min-w-0"/g)].length, 2);
 	assert.equal([...source.matchAll(/class="min-w-0 truncate"/g)].length, 2);
 	assert.deepEqual(SERVICE_SHOW_LABEL, {
-		deploybot: 'deploybot services',
+		deploybot: 'Deploybot services',
 		discovered: 'Also discovered',
 		all: 'Everything, including gone'
 	});

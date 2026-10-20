@@ -109,7 +109,7 @@
 <svelte:window onsubmit={onCatalogSubmit} />
 
 <svelte:head>
-	<title>{data.project ? data.project.name : 'Project'} · deploybot</title>
+	<title>{data.project ? data.project.name : 'Project'} · Deploybot</title>
 </svelte:head>
 
 {#if !data.project}

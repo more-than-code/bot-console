@@ -6,7 +6,7 @@
 </script>
 
 <svelte:head>
-	<title>Sign out · deploybot</title>
+	<title>Sign out · Deploybot</title>
 </svelte:head>
 
 <PageHeader title="Sign out" subtitle="This ends the console session on this browser." />

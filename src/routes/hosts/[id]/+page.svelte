@@ -59,7 +59,7 @@
 </script>
 
 <svelte:head>
-	<title>{data.host ? data.host.name : 'Host'} · deploybot</title>
+	<title>{data.host ? data.host.name : 'Host'} · Deploybot</title>
 </svelte:head>
 
 <PageHeader title={data.host ? data.host.name : 'Host'} breadcrumbs={crumbs} />

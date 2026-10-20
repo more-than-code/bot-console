@@ -10,7 +10,7 @@
 </script>
 
 <svelte:head>
-	<title>Sign in · deploybot</title>
+	<title>Sign in · Deploybot</title>
 </svelte:head>
 
 <PageHeader title="Sign in" />

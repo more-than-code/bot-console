@@ -4,7 +4,7 @@
 **Status:** Approved 2026-10-14 (Joe: "yes, approve the spec")
 **Requested by:** Joe, 2026-10-14:
 - "what UI lib and icon lib is used? Should refer to ../tutored"
-- AskUserQuestion: adopt tutored's stack; use deploybot's own palette.
+- AskUserQuestion: adopt tutored's stack; use Deploybot's own palette.
 - "yes, JS required, write the spec"
 
 Theme switch: "Surface the theme switch on the web ui".
@@ -13,7 +13,7 @@ Theme switch: "Surface the theme switch on the web ui".
 
 ## 1. Goal
 
-bot-console moves to the same UI stack and conventions as tutored's `ttd-webapp`, with deploybot's own colours. It gets a System / Light / Dark switch. JavaScript becomes a requirement. URL-driven state and server-side form actions stay; the separate no-JavaScript code paths are removed.
+bot-console moves to the same UI stack and conventions as tutored's `ttd-webapp`, with Deploybot's own colours. It gets a System / Light / Dark switch. JavaScript becomes a requirement. URL-driven state and server-side form actions stay; the separate no-JavaScript code paths are removed.
 
 ## 2. Reference: tutored `ttd-webapp` (read-only, `../tutored/ttd-webapp`)
 
@@ -32,7 +32,7 @@ bot-console copies these conventions: the same `components.json` settings, the s
 | Topic | Decision |
 |---|---|
 | **JavaScript** | **Required.** <br>**Kept:** search, sort, page, tab and filter state in the URL (shareable links, Back, refresh); every write through SvelteKit form actions with `use:enhance`, with permission checks on the server; server-rendered first paint. <br>**Removed:** the no-JavaScript fallbacks `?confirm=<id>` and `?services.edit=<id>`, and their helpers and tests (`confirmHref`, the URL-open state in `confirm.ts`, `serviceEditHref`, `serviceEditCancelHref`). Sort and pager links and the GET search form stay as plain links and forms, because they are URL state, not fallbacks. |
-| **Palette** | deploybot's own colours in shadcn's variable set (`--background`, `--foreground`, `--card`, `--popover`, `--primary`, `--secondary`, `--muted`, `--accent`, `--destructive`, `--border`, `--input`, `--ring`, `--chart-1..5`, `--sidebar-*`, each `*-foreground`), plus deploybot status tokens `--status-online`, `--status-offline`, `--status-asleep`, `--status-revoked`, `--status-up`, `--status-down`, `--status-unknown`. Values in oklch, for light on `:root` and dark on `.dark`. **Brand:** a neutral base (like tutored) with one cool accent for primary and focus ring, so it reads as an ops tool and not as tutored. Text and muted text meet WCAG AA on `--background` and `--card` in both themes, and so do status colours as text. The existing dark look is the reference for the dark values. |
+| **Palette** | Deploybot's own colours in shadcn's variable set (`--background`, `--foreground`, `--card`, `--popover`, `--primary`, `--secondary`, `--muted`, `--accent`, `--destructive`, `--border`, `--input`, `--ring`, `--chart-1..5`, `--sidebar-*`, each `*-foreground`), plus Deploybot status tokens `--status-online`, `--status-offline`, `--status-asleep`, `--status-revoked`, `--status-up`, `--status-down`, `--status-unknown`. Values in oklch, for light on `:root` and dark on `.dark`. **Brand:** a neutral base (like tutored) with one cool accent for primary and focus ring, so it reads as an ops tool and not as tutored. Text and muted text meet WCAG AA on `--background` and `--card` in both themes, and so do status colours as text. The existing dark look is the reference for the dark values. |
 | **Font** | tutored's system-UI body stack, no webfont. Monospace (`ui-monospace, SFMono-Regular, Menlo, monospace`) for command lines, ports, IDs and tokens. |
 | **Icons** | `@lucide/svelte` only:<br>• navigation: Projects, Hosts, Services, Processes, Members, Tokens, Settings;<br>• actions: probe, rename, revoke, delete, copy, sign out;<br>• status dots stay CSS, not icons;<br>• theme: Monitor, Sun, Moon.<br>Icons sit beside text labels. An icon-only button has an `aria-label` and a tooltip. |
 | **Theme switch** | Cookie `bot_theme` ∈ {`system`, `light`, `dark`}, default `system`. Path `/`, Max-Age 1 year, SameSite=Lax, HttpOnly, Secure only over https. Any other value counts as `system`. <br>**Setting it:** `POST /theme` (public route, default action, safe same-origin `next`, 303) sets the cookie. <br>**No flash:** `hooks.server.ts` `transformPageChunk` writes `class="dark"` on `<html>` for `dark`, nothing for `light`, and `data-theme="system"` for `system`. A tiny inline script in `app.html` `<head>` (`nonce="%sveltekit.nonce%"`, so a later CSP works) adds `.dark` before first paint when `data-theme="system"` and `prefers-color-scheme: dark`, and follows changes to that preference. <br>**UI:** `ThemeSwitch.svelte` is a shadcn `DropdownMenu` (or `ToggleGroup`) with System, Light and Dark and Lucide icons, in the header on every page, including sign-in. Choosing a theme sets the class at once, then posts the form with `use:enhance` (no reload). |

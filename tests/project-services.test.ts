@@ -191,7 +191,7 @@ describe('project services', { concurrency: false }, () => {
 		const expected: Record<string, string[]> = {
 			hosts: ['hosts'],
 			services: ['hosts', 'services'],
-			// Catalog also loads one deploybot services page so image actions know which hosts have a container.
+			// Catalog also loads one Deploybot services page so image actions know which hosts have a container.
 			catalog: ['catalog', 'hosts', 'members', 'services'],
 			members: ['invites', 'members'],
 			tokens: ['join-tokens'],

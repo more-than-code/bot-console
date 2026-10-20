@@ -25,7 +25,7 @@
 <div class="mx-auto w-full min-w-0 max-w-6xl px-4">
 	<header class="flex flex-col gap-y-2 py-3 sm:flex-row sm:items-center sm:gap-x-3">
 		<div class="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 sm:contents">
-			<a class="shrink-0 text-sm font-semibold" href="/projects">deploybot</a>
+			<a class="shrink-0 text-sm font-semibold" href="/projects">Deploybot</a>
 			<nav class="flex shrink-0 items-center" aria-label="Primary">
 				<a
 					href="/projects"

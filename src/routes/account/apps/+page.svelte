@@ -22,7 +22,7 @@
 </script>
 
 <svelte:head>
-	<title>Connected apps · deploybot</title>
+	<title>Connected apps · Deploybot</title>
 </svelte:head>
 
 <PageHeader title="Connected apps" />

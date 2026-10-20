@@ -15,7 +15,7 @@
 </script>
 
 <svelte:head>
-	<title>Allow access? · deploybot</title>
+	<title>Allow access? · Deploybot</title>
 </svelte:head>
 
 <PageHeader title="Allow access?" />

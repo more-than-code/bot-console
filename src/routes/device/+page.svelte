@@ -20,7 +20,7 @@
 </script>
 
 <svelte:head>
-	<title>Device · deploybot</title>
+	<title>Device · Deploybot</title>
 </svelte:head>
 
 <PageHeader title="Device approval" />

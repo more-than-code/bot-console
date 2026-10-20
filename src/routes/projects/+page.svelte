@@ -20,7 +20,7 @@
 </script>
 
 <svelte:head>
-	<title>Projects · deploybot</title>
+	<title>Projects · Deploybot</title>
 </svelte:head>
 
 <PageHeader title="Projects" headingId="projects-heading">

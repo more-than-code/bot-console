@@ -5,7 +5,7 @@
 </script>
 
 <svelte:head>
-	<title>{page.status} · deploybot</title>
+	<title>{page.status} · Deploybot</title>
 </svelte:head>
 
 <PageHeader title={String(page.status)} subtitle={page.error?.message ?? 'Something went wrong'} />
