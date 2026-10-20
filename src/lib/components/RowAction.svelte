@@ -16,6 +16,7 @@
 
 	let {
 		label,
+		tip,
 		icon: Icon,
 		destructive = false,
 		type = 'button',
@@ -25,6 +26,8 @@
 		disabled = false
 	}: {
 		label: string;
+		/** Extra hover sentence. The aria-label stays `label`. */
+		tip?: string;
 		icon: Component;
 		/** Destructive row actions use the destructive text colour. */
 		destructive?: boolean;
@@ -37,6 +40,7 @@
 		disabled?: boolean;
 	} = $props();
 
+	const hover = $derived(tip ? `${label}. ${tip}` : label);
 	const controlClass = $derived(
 		cn(buttonVariants({ variant: 'ghost', size: 'icon-sm' }), destructive && 'text-destructive')
 	);
@@ -47,7 +51,7 @@
 		<Tooltip.Trigger>
 			{#snippet child({ props })}
 				{#if disabled}
-					<span {...props} class={cn('inline-flex', tooltipClass(props.class))} title={label}>
+					<span {...props} class={cn('inline-flex', tooltipClass(props.class))} title={hover}>
 						<Button
 							type="button"
 							disabled
@@ -81,6 +85,6 @@
 				{/if}
 			{/snippet}
 		</Tooltip.Trigger>
-		<Tooltip.Content>{label}</Tooltip.Content>
+		<Tooltip.Content>{hover}</Tooltip.Content>
 	</Tooltip.Root>
 </Tooltip.Provider>

@@ -7,6 +7,12 @@ export const GRANT_ACTIONS = ['run', 'stop', 'restart', 'logs'] as const;
 /** Image entries add deploy. Program grants stay on GRANT_ACTIONS. */
 export const IMAGE_GRANT_ACTIONS = [...GRANT_ACTIONS, 'deploy'] as const;
 
+/** Hover sentence for Run on a container. The aria-label stays "Run <name>". */
+export const IMAGE_RUN_TIP = 'Starts the container already on this host.';
+
+/** Hover sentence for Deploy. The aria-label stays "Deploy <name>". */
+export const IMAGE_DEPLOY_TIP = 'Pulls the image and creates or replaces the container from this catalog entry.';
+
 export const CATALOG_NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
 
 export const RUN_AS = /^[a-z_][a-z0-9_-]{0,31}$/;

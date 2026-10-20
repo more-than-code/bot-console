@@ -22,7 +22,8 @@
 		hosts,
 		action,
 		result = null,
-		entryKind = 'program'
+		entryKind = 'program',
+		tip
 	}: {
 		kind: CatalogRunKind;
 		entryName: string;
@@ -32,6 +33,8 @@
 		action: string;
 		result?: CatalogRunState | null;
 		entryKind?: 'program' | 'image';
+		/** Extra hover sentence. Omit it to keep the tooltip as the action and the name. */
+		tip?: string;
 	} = $props();
 
 	const Icon = $derived(ICONS[kind]);
@@ -48,7 +51,7 @@
 </script>
 
 <Dialog.Root bind:open>
-	<RowAction label="{label} {entryName}" icon={Icon}>
+	<RowAction label="{label} {entryName}" {tip} icon={Icon}>
 		{#snippet trigger(props)}
 			<Dialog.Trigger {...props}>
 				<Icon class="size-4" />

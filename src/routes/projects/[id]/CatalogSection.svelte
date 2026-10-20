@@ -8,6 +8,7 @@
 	import RowAction from '$lib/components/RowAction.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import type { CatalogEntry, Host, Member } from '$lib/api-types';
+	import { IMAGE_RUN_TIP } from '$lib/catalog';
 	import { imagePortText } from '$lib/image-spec';
 	import type { CatalogEditorState, CatalogPermissionsState, CatalogRunState, ImageDeployState, ImageEditorState } from '$lib/project-action';
 	import type { Column } from '$lib/table';
@@ -138,6 +139,7 @@
 								action={actionUrlFrom(page.url, RUN_ACTION[action])}
 								result={runFor(entry)?.kind === action ? runFor(entry) : null}
 								entryKind={entry.kind === 'image' ? 'image' : 'program'}
+								tip={entry.kind === 'image' && action === 'run' ? IMAGE_RUN_TIP : undefined}
 							/>
 						{/if}
 					{/each}

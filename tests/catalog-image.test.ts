@@ -4,6 +4,7 @@ import { after, before, describe, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
 import { render } from 'svelte/server';
 import type { CatalogEntry, EnvSet, Host, ImageDeploy, ImageEntry, ImageSpec, ProjectFile, ProjectServiceRow, Registry } from '../src/lib/api-types.ts';
+import { IMAGE_DEPLOY_TIP, IMAGE_RUN_TIP } from '../src/lib/catalog.ts';
 import { formatBytes, formatWhen } from '../src/lib/format.ts';
 import { API_TIMEOUT_MS } from '../src/lib/server/api.ts';
 import { clearSecretField, settleFileSave, showViewedFile } from '../src/lib/secret-field.ts';
@@ -1430,6 +1431,36 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(actionData(conflict).message, 'env set app is referenced by web');
 		assert.equal(actionData(conflict).settingsField ?? null, null);
 		assert.equal(actionData(conflict).message?.includes('Paste the value again.'), false);
+	});
+
+	test('container Run and Deploy tooltips explain the action', () => {
+		const section = readFileSync(new URL('../src/routes/projects/[id]/CatalogSection.svelte', import.meta.url), 'utf8');
+		const run = readFileSync(new URL('../src/routes/projects/[id]/CatalogRunDialog.svelte', import.meta.url), 'utf8');
+		const deploy = readFileSync(new URL('../src/routes/projects/[id]/CatalogDeployDialog.svelte', import.meta.url), 'utf8');
+		const row = readFileSync(new URL('../src/lib/components/RowAction.svelte', import.meta.url), 'utf8');
+		assert.match(section, /entry\.kind === 'image' && action === 'run' \? IMAGE_RUN_TIP : undefined/);
+		assert.match(run, /label="\{label\} \{entryName\}" \{tip\}/);
+		assert.match(deploy, /label="Deploy \{entry\.name\}" tip=\{IMAGE_DEPLOY_TIP\}/);
+		assert.match(row, /const hover = \$derived\(tip \? `\$\{label\}\. \$\{tip\}` : label\)/);
+		assert.match(row, /<Tooltip\.Content>\{hover\}<\/Tooltip\.Content>/);
+		assert.equal(IMAGE_RUN_TIP, 'Starts the container already on this host.');
+		assert.equal(IMAGE_DEPLOY_TIP, 'Pulls the image and creates or replaces the container from this catalog entry.');
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const html = render(CatalogSection, {
+			props: {
+				canOwner: false,
+				entries: [imageEntry(['run', 'deploy'])],
+				omitted: 0,
+				truncated: false,
+				message: null,
+				hosts: [host()],
+				members: []
+			}
+		}).body;
+		assert.match(html, /aria-label="Run web"/);
+		assert.match(html, /aria-label="Deploy web"/);
+		assert.equal(html.includes('Starts the container already on this host.'), false);
+		assert.equal(html.includes('Pulls the image'), false);
 	});
 
 	test('deploy is offered for an image entry only when my_actions includes it', () => {

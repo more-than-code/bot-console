@@ -236,6 +236,7 @@ run/stop/restart/logs/status reuse the wave 1 routes and dispatch by kind. Check
 
   The paste-a-`docker run` prefill keeps refusing unsupported flags.
 - **Deploy dialog:** host (name labels), force, outcome, short digest, exit code, log tail, and a history of 3 with **Roll back** on the older entries.
+- **Row tooltips:** Run on a container says it starts the container already on the host. Deploy says it pulls the image and creates or replaces the container from the catalog entry. The aria-label stays `Run <name>` or `Deploy <name>`.
 - **Project → Settings → Env sets and registries:** paste box (never pre-filled, cleared after save), key list with secret/plain toggles, registry rows with a write-only token field.
 
 ### 4.6 MCP

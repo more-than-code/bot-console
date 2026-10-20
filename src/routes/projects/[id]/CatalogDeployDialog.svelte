@@ -4,6 +4,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import type { Host, ImageEntry } from '$lib/api-types';
+	import { IMAGE_DEPLOY_TIP } from '$lib/catalog';
 	import type { ImageDeployState } from '$lib/project-action';
 	import CatalogDeployForm from './CatalogDeployForm.svelte';
 
@@ -38,7 +39,7 @@
 </script>
 
 <Dialog.Root bind:open>
-	<RowAction label="Deploy {entry.name}" icon={Rocket}>
+	<RowAction label="Deploy {entry.name}" tip={IMAGE_DEPLOY_TIP} icon={Rocket}>
 		{#snippet trigger(props)}
 			<Dialog.Trigger {...props}>
 				<Rocket class="size-4" />
