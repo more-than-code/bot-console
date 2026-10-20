@@ -46,6 +46,35 @@ export function serviceRowStatus(row: {
 }
 
 /**
+ * Tooltip for a live row. Gone rows have no health source.
+ * `docker` is the engine; `check` is a Deploybot check.
+ */
+export function healthSourceLabel(row: {
+	gone_at: string | null;
+	health: { source?: 'docker' | 'check' | null } | null;
+}): string | null {
+	if (row.gone_at != null || row.health == null) return null;
+	if (row.health.source === 'docker') return 'Docker health check';
+	if (row.health.source === 'check') return 'Deploybot check';
+	return null;
+}
+
+/**
+ * Checks column leads with `docker healthcheck` when Docker reported the health.
+ * The services tab does not load catalog specs, so a catalog healthcheck with no docker source is not visible here.
+ */
+export function showsDockerHealthcheck(row: { health: { source?: 'docker' | 'check' | null } | null }): boolean {
+	return row.health?.source === 'docker';
+}
+
+/** Full image digest, or null when the row has none. */
+export function imageDigestText(value: string | null | undefined): string | null {
+	if (value == null) return null;
+	const text = value.trim();
+	return text === '' ? null : text;
+}
+
+/**
  * The deploybot empty line and its link.
  * A search, or any load or action message, keeps the ordinary "No services reported."
  */

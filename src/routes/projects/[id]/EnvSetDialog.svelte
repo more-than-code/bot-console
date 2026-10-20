@@ -1,0 +1,108 @@
+<script lang="ts">
+	import { browser } from '$app/environment';
+	import { enhance } from '$app/forms';
+	import { tick, untrack } from 'svelte';
+	import Notice from '$lib/components/Notice.svelte';
+	import Textarea from '$lib/components/Textarea.svelte';
+	import { clearSecretField } from '$lib/secret-field';
+	import { Button, buttonVariants } from '$lib/components/ui/button';
+	import { Checkbox } from '$lib/components/ui/checkbox';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
+
+	let {
+		action,
+		message,
+		settingsField = null
+	}: {
+		action: string;
+		message: string | null;
+		settingsField?: 'dotenv' | 'token' | 'file' | null;
+	} = $props();
+
+	const failedNow = () => settingsField === 'dotenv' && !!message;
+	let open = $state(untrack(failedNow));
+	let sawFailure = $state(untrack(failedNow));
+	let dotenv = $state('');
+	let setName = $state('');
+	let savedSet = $state<string | null>(null);
+	let newKeysSecret = $state(true);
+
+	// A new failure opens the dialog. Closing it stays closed while that failure is still current.
+	$effect(() => {
+		const next = settingsField === 'dotenv' && !!message;
+		if (next && !untrack(() => sawFailure)) open = true;
+		sawFailure = next;
+	});
+
+	$effect(() => {
+		if (!browser || settingsField !== 'dotenv' || !message) return;
+		void tick().then(() => document.getElementById('env-set-error')?.focus());
+	});
+
+	function clearPaste({ formData }: { formData: FormData }) {
+		const name = String(formData.get('set') ?? '');
+		return async ({ update, result }: { update: () => Promise<void>; result: { type: string } }) => {
+			await clearSecretField((value) => {
+				dotenv = value;
+			}, update);
+			// A save ends in a redirect. Say so, and clear the name so the next paste starts empty.
+			savedSet = result.type === 'redirect' ? name : null;
+			if (savedSet) setName = '';
+			document.getElementById('env-set-error')?.focus();
+		};
+	}
+</script>
+
+<Dialog.Root bind:open>
+	<Dialog.Trigger id="new-env-set" class={buttonVariants({ variant: 'outline' })}>New env set</Dialog.Trigger>
+	<Dialog.Content class="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-xl">
+		<Dialog.Header class="shrink-0 pr-8">
+			<Dialog.Title>Add env set</Dialog.Title>
+			<Dialog.Description>Paste a dotenv file. Existing keys keep the secret flag they already have.</Dialog.Description>
+		</Dialog.Header>
+		<form method="POST" {action} class="grid min-h-0 gap-3 overflow-y-auto" use:enhance={clearPaste}>
+			<Label class="grid gap-1.5" for="env-set-name">
+				Set name
+				<Input id="env-set-name" name="set" bind:value={setName} required maxlength={48} autocomplete="off" spellcheck="false" />
+			</Label>
+			<Label class="grid gap-1.5" for="env-set-dotenv">
+				Dotenv
+				<Textarea
+					id="env-set-dotenv"
+					name="dotenv"
+					bind:value={dotenv}
+					rows={6}
+					spellcheck="false"
+					autocomplete="off"
+					aria-label="Env set dotenv"
+					aria-invalid={settingsField === 'dotenv' && message ? true : undefined}
+					aria-describedby={settingsField === 'dotenv' && message ? 'env-set-error' : undefined}
+				/>
+			</Label>
+			<Input type="hidden" name="new_keys_secret" value={newKeysSecret ? '1' : '0'} />
+			<Label class="flex items-center gap-2">
+				<Checkbox
+					id="env-set-new-secret"
+					checked={newKeysSecret}
+					aria-label="New keys are secret"
+					onCheckedChange={(value) => (newKeysSecret = value === true)}
+				/>
+				New keys are secret
+			</Label>
+			{#if savedSet && !(settingsField === 'dotenv' && message)}
+				<Notice kind="success">Saved env set {savedSet}.</Notice>
+			{/if}
+			{#if settingsField === 'dotenv' && message}
+				<div id="env-set-error" tabindex="-1" class="max-w-full min-w-0 break-words focus-visible:ring-3 focus-visible:ring-ring">
+					<Notice kind="error">{message}</Notice>
+				</div>
+			{/if}
+			<div class="flex flex-wrap items-center gap-2">
+				<Button type="submit">Save</Button>
+				<Dialog.Close type="button">Cancel</Dialog.Close>
+			</div>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>

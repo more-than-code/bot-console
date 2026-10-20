@@ -156,6 +156,15 @@ export type ImageFileMount = {
 	target: string;
 };
 
+/** Docker CMD healthcheck. Null means the image default. Jobs never have one. */
+export type ImageHealthcheck = {
+	test: string[];
+	interval_sec: number;
+	timeout_sec: number;
+	retries: number;
+	start_period_sec: number;
+};
+
 export type ImageSpec = {
 	kind: ImageWorkload;
 	image: string;
@@ -172,6 +181,7 @@ export type ImageSpec = {
 	healthy_after_sec: number;
 	memory_mb: number | null;
 	timeout_sec: number;
+	healthcheck: ImageHealthcheck | null;
 };
 
 type CatalogEntryBase = {
@@ -232,11 +242,15 @@ export type ImageLogs = {
 	truncated: boolean;
 };
 
-/** `value` is null for a secret. The console also drops secret values before they reach the browser. */
+/**
+ * `value` is null for a secret. The console also drops a secret value before it reaches the browser.
+ * `preview` is the short secret preview, or null for a plain key and when the API sent none.
+ */
 export type EnvSetKey = {
 	key: string;
 	is_secret: boolean;
 	value: string | null;
+	preview: string | null;
 };
 
 export type EnvSet = {
@@ -340,6 +354,20 @@ export type HealthStatus = 'up' | 'down' | 'unknown';
 export type Health = {
 	status: HealthStatus;
 	last_checked_at: string | null;
+	/** Null when Docker reported the result, or when no check has run. */
+	latency_ms: number | null;
+	/** `docker` is the engine health, `check` is a Deploybot check, null when no row exists. */
+	source: 'docker' | 'check' | null;
+};
+
+/** One row of `GET /v1/services/{id}/health`. Docker rows leave the check fields null. */
+export type HealthHistoryPoint = {
+	t: string;
+	check_id: string | null;
+	protocol: 'http' | 'tcp' | 'docker';
+	port: number | null;
+	result: 'success' | 'status_mismatch' | 'timeout' | 'connection_refused' | 'error' | 'unhealthy';
+	http_status: number | null;
 	latency_ms: number | null;
 };
 

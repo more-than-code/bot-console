@@ -1,6 +1,7 @@
 import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
 import type { CatalogEntry, EnvSet, Host, Invite, JoinToken, Member, ProjectFile, ProjectService, ProjectServiceRow, Registry } from '$lib/api-types';
 import { catalogForCaller, isCatalogName } from '$lib/catalog';
+import { containersByEntry } from '$lib/catalog-flight';
 import {
 	HEALTH_CHECK_LIMIT,
 	HEALTH_NEEDS_CONFIRMATION,
@@ -39,7 +40,8 @@ import {
 	deleteProjectFile,
 	deleteRegistry,
 	loadProjectSettings,
-	patchEnvKey,
+	putEnvKey,
+	deleteEnvKey,
 	saveEnvSet,
 	saveProjectFile,
 	saveRegistry,
@@ -187,6 +189,8 @@ const empty = {
 	filesMessage: null as string | null,
 	registries: [] as Registry[],
 	registriesMessage: null as string | null,
+	catalogContainers: {} as Record<string, string[]>,
+	catalogContainersKnown: false,
 	...noServices
 };
 
@@ -209,7 +213,8 @@ export const load: PageServerLoad = async (event) => {
 	const tab = tabOf(event.url.searchParams.get('tab'), canAdmin);
 
 	// Each tab loads only what it shows, and independent calls run together.
-	// Services is the one call that waits, because it needs the host list.
+	// The catalog tab also loads one services page, to see which images already have a container.
+	// The services tab waits, because that table needs the host list.
 	const hostsLoad =
 		tab === 'hosts' || tab === 'services' || tab === 'catalog'
 			? loadList(event, `/v1/projects/${id}/hosts`, parseHost)
@@ -218,14 +223,16 @@ export const load: PageServerLoad = async (event) => {
 		tab === 'services'
 			? hostsLoad.then((list) => loadProjectServices(event, id, new Set(list.items.filter(serviceHostReachable).map((host) => host.id))))
 			: Promise.resolve(noServices);
-	const [hostList, memberList, tokenList, inviteList, services, catalogLoad, settings] = await Promise.all([
+	const catalogContainersLoad = tab === 'catalog' ? loadCatalogContainers(event, id) : Promise.resolve(noCatalogContainers);
+	const [hostList, memberList, tokenList, inviteList, services, catalogLoad, settings, catalogContainers] = await Promise.all([
 		hostsLoad,
 		tab === 'members' || tab === 'catalog' ? loadList(event, `/v1/projects/${id}/members`, parseMember) : emptyList<Member>(),
 		tab === 'tokens' && canAdmin ? loadList(event, `/v1/projects/${id}/join-tokens`, parseJoinToken) : emptyList<JoinToken>(),
 		tab === 'members' && canAdmin ? loadList(event, `/v1/projects/${id}/invites`, parseInvite) : emptyList<Invite>(),
 		servicesLoad,
 		tab === 'catalog' ? loadCatalog(event, id, canOwner) : null,
-		tab === 'settings' && canAdmin ? loadProjectSettings(event, id) : null
+		tab === 'settings' && canAdmin ? loadProjectSettings(event, id) : null,
+		catalogContainersLoad
 	]);
 
 	const hosts = hostList.items;
@@ -290,9 +297,39 @@ export const load: PageServerLoad = async (event) => {
 		filesMessage,
 		registries,
 		registriesMessage,
-		...services
+		...services,
+		...catalogContainers
 	});
 };
+
+type CatalogContainerIndex = {
+	catalogContainers: Record<string, string[]>;
+	catalogContainersKnown: boolean;
+};
+
+const noCatalogContainers: CatalogContainerIndex = {
+	catalogContainers: {},
+	catalogContainersKnown: false
+};
+
+/** One services page. A failure, a dropped row, or a further page leaves the index unknown. */
+async function loadCatalogContainers(event: RequestEvent, id: string): Promise<CatalogContainerIndex> {
+	try {
+		const payload = await apiFetch(event, `/v1/projects/${id}/services?view=deploybot&limit=200`);
+		const page = parseServicePage(payload);
+		if (!page || page.nextCursor != null) return noCatalogContainers;
+		const rows: ProjectService[] = [];
+		for (const item of page.raw) {
+			const row = parseProjectService(item);
+			if (!row) return noCatalogContainers;
+			rows.push(row);
+		}
+		return { catalogContainers: containersByEntry(rows), catalogContainersKnown: true };
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return noCatalogContainers;
+	}
+}
 
 type ListLoad<T> = { items: T[]; omitted: number; truncated: boolean; message: string | null };
 
@@ -504,7 +541,8 @@ export const actions: Actions = {
 	catalogEnvSets,
 	catalogFiles,
 	saveEnvSet,
-	patchEnvKey,
+	putEnvKey,
+	deleteEnvKey,
 	deleteEnvSet,
 	saveProjectFile,
 	viewProjectFile,

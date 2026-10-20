@@ -34,7 +34,8 @@ function imageSpec(kind: ImageSpec['kind'] = 'service'): ImageSpec {
 		user: '',
 		healthy_after_sec: 30,
 		memory_mb: null,
-		timeout_sec: 600
+		timeout_sec: 600,
+		healthcheck: null
 	};
 }
 

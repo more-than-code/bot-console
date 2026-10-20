@@ -1,10 +1,14 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import { tick, untrack } from 'svelte';
 	import Activity from '@lucide/svelte/icons/activity';
+	import Fingerprint from '@lucide/svelte/icons/fingerprint';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import type { Host, ProbeView, ProjectServiceRow } from '$lib/api-types';
+	import CopyButton from '$lib/components/CopyButton.svelte';
+	import { COPY_FAILED_NOTE, COPY_FAILURE_MS, COPIED_NOTE, shownDigestFailure } from '$lib/copy-text';
 	import DataTable from '$lib/components/DataTable.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
@@ -17,16 +21,18 @@
 		serviceHostReachable,
 		showProjectColumn
 	} from '$lib/host-view';
-	import { shortDigest } from '$lib/image-spec';
 	import { canEditHealthChecks, SAVED_HEALTH_CHECKS } from '$lib/health-checks';
 	import { serviceLabel } from '$lib/service-label';
 	import {
 		SERVICE_SHOW_LABEL,
 		SERVICE_SHOWS,
 		discoveredListenersHref,
+		healthSourceLabel,
+		imageDigestText,
 		serviceRowStatus,
 		serviceShow,
-		showDeploybotEmpty
+		showDeploybotEmpty,
+		showsDockerHealthcheck
 	} from '$lib/service-view';
 	import { readSearch, serverHostHiddenFields } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
@@ -150,6 +156,40 @@
 		if (renameServiceId === row.id && typedName != null) return typedName;
 		return row.display_name ?? '';
 	}
+
+	type DigestFailure = { value: string; failedAt: number };
+	let digestFailures = $state<Record<string, DigestFailure>>({});
+
+	function onDigestResult(serviceId: string, value: string, note: string) {
+		if (note === COPIED_NOTE) {
+			if (digestFailures[serviceId] == null) return;
+			const next = { ...digestFailures };
+			delete next[serviceId];
+			digestFailures = next;
+			return;
+		}
+		if (note !== COPY_FAILED_NOTE) return;
+		digestFailures = { ...digestFailures, [serviceId]: { value, failedAt: Date.now() } };
+	}
+
+	$effect(() => {
+		if (!browser) return;
+		const pending = Object.entries(digestFailures);
+		if (pending.length === 0) return;
+		const timers = pending.map(([id, failure]) =>
+			setTimeout(() => {
+				const current = digestFailures[id];
+				if (current == null || current.failedAt !== failure.failedAt) return;
+				if (shownDigestFailure(current.value, current.failedAt, Date.now()) != null) return;
+				const next = { ...digestFailures };
+				delete next[id];
+				digestFailures = next;
+			}, Math.max(0, failure.failedAt + COPY_FAILURE_MS - Date.now()))
+		);
+		return () => {
+			for (const timer of timers) clearTimeout(timer);
+		};
+	});
 </script>
 
 {#if message}
@@ -233,52 +273,65 @@
 		{/if}
 	{/snippet}
 	{#snippet row(service)}
+		{@const label = serviceLabel(service)}
+		{@const digest = imageDigestText(service.image_digest)}
+		{@const digestFailure = digestFailures[service.id]}
 		<tr id={serviceDomId(service.id)}>
 			<td class="p-2 align-middle">
-				<span class="mr-2">{serviceLabel(service)}</span>
-				{#if service.source === 'owned' && service.kind === 'container'}
-					{#if service.container_name && service.container_name !== serviceLabel(service)}
-						<span class="text-muted-foreground mr-2 font-mono text-sm">{service.container_name}</span>
+				<div class="flex min-w-0 items-center gap-2">
+					<span class="inline-block max-w-48 min-w-0 truncate" title={label}>{label}</span>
+					{#if service.source === 'owned' && service.kind === 'container' && service.container_name && service.container_name !== label}
+						<span class="text-muted-foreground inline-block max-w-40 min-w-0 truncate font-mono text-sm" title={service.container_name}>{service.container_name}</span>
 					{/if}
-					{#if shortDigest(service.image_digest)}
-						<span class="text-muted-foreground mr-2 font-mono text-sm">{shortDigest(service.image_digest)}</span>
-					{/if}
-				{/if}
-				{#if service.catalog_entry}
-					<Badge variant="secondary">catalog</Badge>
-				{/if}
-				{#if renameAllowed(service)}
-					<RenameService
-						action={actionUrlFrom(page.url, 'rename')}
-						serviceId={service.id}
-						rowLabel={serviceLabel(service)}
-						value={typedFor(service)}
-						failed={renameServiceId === service.id}
-						{message}
-					/>
-					<HealthChecks
-						action={actionUrlFrom(page.url, 'saveHealthChecks')}
-						probeAction={actionUrlFrom(page.url, 'probe')}
-						serviceId={service.id}
-						rowLabel={serviceLabel(service)}
-						ports={service.ports}
-						checks={service.checks}
-						checksMessage={service.checksMessage}
-						health={service.health}
-						failed={healthServiceId === service.id}
-						serverField={healthServiceId === service.id ? healthField : null}
-						serverIndex={healthServiceId === service.id ? healthIndex : null}
-						serverMessage={healthServiceId === service.id ? healthMessage : null}
-						{probe}
-						{probeIndex}
-						{probeMessage}
-						showProbe={editorProbe && probeServiceId === service.id}
-						onSaved={onHealthSaved}
-						onOpened={onHealthOpen}
-					/>
+					<span class="ml-auto inline-flex shrink-0 items-center gap-1">
+						{#if digest}
+							<CopyButton value={digest} label="Image digest {digest}" icon={Fingerprint} iconOnly onResult={(note) => onDigestResult(service.id, digest, note)} />
+						{/if}
+						{#if service.catalog_entry}
+							<Badge variant="secondary">catalog</Badge>
+						{/if}
+						{#if renameAllowed(service)}
+							<RenameService
+								action={actionUrlFrom(page.url, 'rename')}
+								serviceId={service.id}
+								rowLabel={label}
+								value={typedFor(service)}
+								failed={renameServiceId === service.id}
+								{message}
+							/>
+							<HealthChecks
+								action={actionUrlFrom(page.url, 'saveHealthChecks')}
+								probeAction={actionUrlFrom(page.url, 'probe')}
+								serviceId={service.id}
+								rowLabel={label}
+								ports={service.ports}
+								checks={service.checks}
+								checksMessage={service.checksMessage}
+								health={service.health}
+								failed={healthServiceId === service.id}
+								serverField={healthServiceId === service.id ? healthField : null}
+								serverIndex={healthServiceId === service.id ? healthIndex : null}
+								serverMessage={healthServiceId === service.id ? healthMessage : null}
+								{probe}
+								{probeIndex}
+								{probeMessage}
+								showProbe={editorProbe && probeServiceId === service.id}
+								onSaved={onHealthSaved}
+								onOpened={onHealthOpen}
+							/>
+						{/if}
+					</span>
+				</div>
+				{#if digestFailure}
+					<div class="mt-1 grid gap-1">
+						<p class="font-mono text-sm break-all select-text">{digestFailure.value}</p>
+						<p class="text-muted-foreground text-sm" role="status">{COPY_FAILED_NOTE}</p>
+					</div>
 				{/if}
 				{#if savedHealthId === service.id}
-					<Notice kind="success">{SAVED_HEALTH_CHECKS}</Notice>
+					<div class="mt-2">
+						<Notice kind="success">{SAVED_HEALTH_CHECKS}</Notice>
+					</div>
 				{/if}
 			</td>
 			<td class="p-2 align-middle"><a class="text-primary underline-offset-4 hover:underline" href="/hosts/{service.host_id}">{service.host_name}</a></td>
@@ -287,12 +340,15 @@
 			{/if}
 			<td class="p-2 align-middle">{service.kind}</td>
 			<td class="p-2 align-middle font-mono">{ports(service.ports)}</td>
-			<td class="p-2 align-middle"><StatusBadge status={serviceRowStatus(service)} /></td>
-			<td class="p-2 align-middle">{formatWhen(service.last_seen_at)}</td>
-			<td class="p-2 align-middle whitespace-normal">
+			<td class="p-2 align-middle"><StatusBadge status={serviceRowStatus(service)} hint={healthSourceLabel(service)} /></td>
+			<td class="p-2 align-middle whitespace-nowrap">{formatWhen(service.last_seen_at)}</td>
+			<td class="p-2 align-middle">
+				{#if showsDockerHealthcheck(service)}
+					<p class="text-muted-foreground text-sm">docker healthcheck</p>
+				{/if}
 				{#if service.checksMessage}
 					<span class="text-muted-foreground text-sm">{service.checksMessage}</span>
-				{:else if service.checks.length === 0}
+				{:else if service.checks.length === 0 && !showsDockerHealthcheck(service)}
 					<span class="text-muted-foreground text-sm">No health checks.</span>
 				{:else}
 					{#each service.checks as check (check.id)}
@@ -302,7 +358,7 @@
 							<span class="font-mono text-sm">{check.protocol} {check.port}{check.path ?? ''}{check.enabled ? '' : ' (disabled)'}</span>
 							<RowAction
 								type="submit"
-								label="Probe {serviceLabel(service)} {check.protocol} {check.port}"
+								label="Probe {label} {check.protocol} {check.port}"
 								icon={Activity}
 							/>
 						</form>

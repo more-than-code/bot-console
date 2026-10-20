@@ -209,7 +209,7 @@ export const SERVICE_COLUMNS: Column<ProjectServiceRow>[] = [
 	{ key: 'name', label: 'Name', sortable: true, value: (row) => serviceLabel(row) },
 	{ key: 'host', label: 'Host', sortable: true, value: (row) => row.host_name },
 	{ key: 'kind', label: 'Kind', sortable: true, value: (row) => row.kind },
-	{ key: 'ports', label: 'Ports', numeric: true, value: (row) => smallestPort(row.ports) },
+	{ key: 'ports', label: 'Ports', value: (row) => smallestPort(row.ports) },
 	{ key: 'status', label: 'Status', sortable: true, value: (row) => row.health?.status ?? 'unknown' },
 	{ key: 'last_seen', label: 'Last seen', sortable: true, firstDir: 'desc', value: (row) => row.last_seen_at },
 	{ key: 'checks', label: 'Checks' }

@@ -184,6 +184,7 @@
 	{:else if scope === 'catalog'}
 		<CatalogSection
 			canOwner={data.canOwner}
+			canAdmin={data.canAdmin}
 			entries={data.catalog ?? []}
 			omitted={data.catalogOmitted ?? 0}
 			truncated={data.catalogTruncated ?? false}
@@ -198,6 +199,8 @@
 			{savedImage}
 			{onImageSaved}
 			onEditOpen={onCatalogEditOpen}
+			containers={data.catalogContainers ?? {}}
+			containersKnown={data.catalogContainersKnown ?? false}
 		/>
 	{:else if scope === 'members'}
 		<MembersSection

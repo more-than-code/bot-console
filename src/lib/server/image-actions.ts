@@ -385,8 +385,9 @@ export async function saveEnvSet(event: RequestEvent) {
 	if (dotenv.length === 0 || new TextEncoder().encode(dotenv).byteLength > DOTENV_MAX) {
 		return settingsFailure(event, 400, 'Paste a dotenv file of at most 256 KiB.', 'dotenv');
 	}
+	const body = { dotenv, new_keys_secret: formText(form, 'new_keys_secret') !== '0' };
 	try {
-		await apiFetch(event, `/v1/projects/${id}/env-sets/${name}`, { method: 'PUT', body: JSON.stringify({ dotenv }) });
+		await apiFetch(event, `/v1/projects/${id}/env-sets/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify(body) });
 		redirect(303, backTo(event.url));
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
@@ -394,18 +395,50 @@ export async function saveEnvSet(event: RequestEvent) {
 	}
 }
 
-export async function patchEnvKey(event: RequestEvent) {
+function envKeyPath(id: string, name: string, key: string): string | null {
+	if (!isSetName(name) || !ENV_KEY.test(key)) return null;
+	return `/v1/projects/${id}/env-sets/${encodeURIComponent(name)}/keys/${encodeURIComponent(key)}`;
+}
+
+/** The value stays in the body. It is never put in the URL or in the error text. */
+function envValueError(value: string): string | null {
+	if (value.includes('\0') || /[\n\r]/.test(value) || new TextEncoder().encode(value).byteLength > 4096) {
+		return 'A value cannot contain a line break or NUL, and must be at most 4096 bytes.';
+	}
+	return null;
+}
+
+export async function putEnvKey(event: RequestEvent) {
 	requireUser(event);
 	const id = projectIdOf(event.params);
 	const form = await event.request.formData();
 	const name = formText(form, 'set');
 	const key = formText(form, 'key');
-	if (!isSetName(name) || !ENV_KEY.test(key)) return settingsFailure(event, 400, 'That env set key is not valid.');
+	const value = formText(form, 'value');
+	const path = envKeyPath(id, name, key);
+	if (!path) return settingsFailure(event, 400, 'That env set key is not valid.');
+	const invalid = envValueError(value);
+	if (invalid) return settingsFailure(event, 400, invalid);
+	const adding = formText(form, 'op') === 'add';
+	const payload: { value: string; is_secret?: boolean } = { value };
+	if (adding) payload.is_secret = formText(form, 'is_secret') !== '0';
 	try {
-		await apiFetch(event, `/v1/projects/${id}/env-sets/${name}/keys/${key}`, {
-			method: 'PATCH',
-			body: JSON.stringify({ is_secret: formText(form, 'is_secret') === '1' })
-		});
+		await apiFetch(event, path, { method: 'PUT', body: JSON.stringify(payload) });
+		redirect(303, backTo(event.url));
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return settingsFailure(event, apiStatus(err), redactSubmitted(apiMessage(err), value === '' ? [] : [value]));
+	}
+}
+
+export async function deleteEnvKey(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const form = await event.request.formData();
+	const path = envKeyPath(id, formText(form, 'set'), formText(form, 'key'));
+	if (!path) return settingsFailure(event, 400, 'That env set key is not valid.');
+	try {
+		await apiFetch(event, path, { method: 'DELETE' });
 		redirect(303, backTo(event.url));
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;

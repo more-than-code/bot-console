@@ -9,6 +9,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import type { CatalogEntry, Host, Member } from '$lib/api-types';
 	import { IMAGE_RUN_TIP } from '$lib/catalog';
+	import { DEPLOY_FIRST_TIP } from '$lib/catalog-flight';
 	import { imagePortText } from '$lib/image-spec';
 	import type { CatalogEditorState, CatalogPermissionsState, CatalogRunState, ImageDeployState, ImageEditorState } from '$lib/project-action';
 	import type { Column } from '$lib/table';
@@ -40,6 +41,7 @@
 
 	let {
 		canOwner,
+		canAdmin = false,
 		entries,
 		omitted,
 		truncated,
@@ -53,9 +55,12 @@
 		imageDeploy = null,
 		savedImage = null,
 		onImageSaved,
-		onEditOpen
+		onEditOpen,
+		containers = {},
+		containersKnown = false
 	}: {
 		canOwner: boolean;
+		canAdmin?: boolean;
 		entries: CatalogEntry[];
 		omitted: number;
 		truncated: boolean;
@@ -70,7 +75,36 @@
 		savedImage?: string | null;
 		onImageSaved?: (name: string | null) => void;
 		onEditOpen?: () => void;
+		/** Entry name to host ids that have its container. Used only when `containersKnown` is true. */
+		containers?: Record<string, string[]>;
+		/** False until the catalog tab has a complete services page. Image actions stay enabled. */
+		containersKnown?: boolean;
 	} = $props();
+
+	let rowBusy = $state<string | null>(null);
+
+	function setRowBusy(name: string, busy: boolean) {
+		rowBusy = busy ? name : rowBusy === name ? null : rowBusy;
+	}
+
+	function imageUndeployed(entry: CatalogEntry): boolean {
+		if (entry.kind !== 'image' || !containersKnown) return false;
+		return (containers[entry.name] ?? []).length === 0;
+	}
+
+	function actionNeedsDeploy(entry: CatalogEntry, action: (typeof ROW_ACTIONS)[number]): boolean {
+		return action !== 'status' && imageUndeployed(entry);
+	}
+
+	function actionTip(entry: CatalogEntry, action: (typeof ROW_ACTIONS)[number]): string | undefined {
+		if (actionNeedsDeploy(entry, action)) return DEPLOY_FIRST_TIP;
+		return entry.kind === 'image' && action === 'run' ? IMAGE_RUN_TIP : undefined;
+	}
+
+	function deployedHosts(entry: CatalogEntry, action: (typeof ROW_ACTIONS)[number]): string[] | null {
+		if (entry.kind !== 'image' || action === 'status' || !containersKnown) return null;
+		return containers[entry.name] ?? [];
+	}
 
 	const columns: Column<CatalogEntry>[] = [
 		{ key: 'name', label: 'Name', sortable: true, searchable: true, value: (row) => row.name },
@@ -127,7 +161,7 @@
 			<td class="p-2 align-middle">{entry.kind === 'image' ? entry.spec.user : entry.spec.run_as}</td>
 			<td class="p-2 align-middle font-mono">{portOf(entry)}</td>
 			<td class="p-2 align-middle whitespace-normal">
-				<div class="flex flex-wrap items-center gap-1">
+				<fieldset disabled={rowBusy === entry.name} class="m-0 flex min-w-0 flex-wrap items-center gap-1 border-0 p-0">
 					{#each ROW_ACTIONS as action (action)}
 						{#if entry.my_actions.includes(action)}
 							<CatalogRunDialog
@@ -139,7 +173,10 @@
 								action={actionUrlFrom(page.url, RUN_ACTION[action])}
 								result={runFor(entry)?.kind === action ? runFor(entry) : null}
 								entryKind={entry.kind === 'image' ? 'image' : 'program'}
-								tip={entry.kind === 'image' && action === 'run' ? IMAGE_RUN_TIP : undefined}
+								tip={actionTip(entry, action)}
+								disabled={actionNeedsDeploy(entry, action) || rowBusy === entry.name}
+								deployedHostIds={deployedHosts(entry, action)}
+								onRowBusy={(busy) => setRowBusy(entry.name, busy)}
 							/>
 						{/if}
 					{/each}
@@ -153,9 +190,11 @@
 							confirmAction={actionUrlFrom(page.url, 'catalogConfirm')}
 							historyAction={actionUrlFrom(page.url, 'catalogDeploys')}
 							result={imageDeploy?.name === entry.name ? imageDeploy : null}
+							disabled={rowBusy === entry.name}
+							onRowBusy={(busy) => setRowBusy(entry.name, busy)}
 						/>
 					{/if}
-					{#if canOwner && entry.kind === 'program'}
+					{#if (canOwner || canAdmin) && entry.kind === 'program'}
 						<CatalogEntryDialog
 							mode="edit"
 							{entry}
@@ -165,8 +204,9 @@
 							revealed={editor?.mode === 'edit' && editor.name === entry.name}
 							editor={editor?.mode === 'edit' && editor.name === entry.name ? editor : null}
 							onOpened={onEditOpen}
+							disabled={rowBusy === entry.name}
 						/>
-					{:else if canOwner && entry.kind === 'image'}
+					{:else if (canOwner || canAdmin) && entry.kind === 'image'}
 						<CatalogImageDialog
 							mode="edit"
 							{entry}
@@ -176,19 +216,21 @@
 							revealed={imageEditor?.mode === 'edit' && imageEditor.name === entry.name}
 							editor={imageEditor?.mode === 'edit' && imageEditor.name === entry.name ? imageEditor : null}
 							onSaved={onImageSaved}
+							disabled={rowBusy === entry.name}
 						/>
 					{/if}
 					{#if canOwner}
 						<form method="GET" action={page.url.pathname}>
 							<Input type="hidden" name="tab" value="catalog" />
 							<Input type="hidden" name="permissions" value={entry.name} />
-							<RowAction type="submit" label="Permissions {entry.name}" icon={ShieldCheck} />
+							<RowAction type="submit" label="Permissions {entry.name}" icon={ShieldCheck} disabled={rowBusy === entry.name} />
 						</form>
 						<ConfirmAction
 							id="delete-catalog-{entry.id}"
 							action={actionUrlFrom(page.url, 'catalogDelete')}
 							label="Delete"
 							confirmLabel="Delete"
+							disabled={rowBusy === entry.name}
 							message={entry.kind === 'image'
 								? `Delete ${entry.name}? Its containers keep running on their hosts.`
 								: `Delete ${entry.name}? Running units are not stopped.`}
@@ -196,7 +238,7 @@
 							rowLabel="Delete {entry.name}"
 						/>
 					{/if}
-				</div>
+				</fieldset>
 			</td>
 		</tr>
 	{/snippet}

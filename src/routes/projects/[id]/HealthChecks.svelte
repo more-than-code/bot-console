@@ -256,11 +256,16 @@
 			<Dialog.Description>{HEALTH_CHECK_NOTE}</Dialog.Description>
 		</Dialog.Header>
 		<div class="grid min-h-0 gap-3 overflow-y-auto">
+			{#if health?.source === 'docker'}
+				<p class="text-sm">Docker reports this container's health; the checks below are used only when Docker has none.</p>
+			{/if}
 			<p class="text-sm">
 				Latest result
 				<StatusBadge status={health?.status ?? 'unknown'} />
 				<span class="text-muted-foreground">{formatWhen(health?.last_checked_at ?? null)}</span>
-				<span class="text-muted-foreground">{formatLatency(health?.latency_ms)}</span>
+				{#if health?.latency_ms != null}
+					<span class="text-muted-foreground">{formatLatency(health.latency_ms)}</span>
+				{/if}
 			</p>
 			{#if redundancy}
 				<Notice kind="info">{redundancy}</Notice>

@@ -12,11 +12,13 @@ import type {
 	Grant,
 	Health,
 	HealthCheck,
+	HealthHistoryPoint,
 	Host,
 	HostPrograms,
 	HostStatus,
 	ImageDeploy,
 	ImageFileMount,
+	ImageHealthcheck,
 	ImageLogs,
 	ImageOutcome,
 	ImagePort,
@@ -313,14 +315,22 @@ export function parseInviteAccept(value: unknown): { project_id: string } | null
 	return { project_id };
 }
 
+/** Missing or null is no source. Any other string fails the health object. */
+function parseHealthSource(record: Record<string, unknown>): Health['source'] | undefined {
+	if (!Object.hasOwn(record, 'source') || record.source == null) return null;
+	if (record.source === 'docker' || record.source === 'check') return record.source;
+	return undefined;
+}
+
 function parseHealth(value: unknown): Health | null | undefined {
 	if (value == null) return null;
 	if (!isRecord(value)) return undefined;
 	if (value.status !== 'up' && value.status !== 'down' && value.status !== 'unknown') return undefined;
 	const last_checked_at = optionalText(value.last_checked_at, 64);
 	const latency_ms = optionalNumber(value.latency_ms);
-	if (last_checked_at === undefined || latency_ms === undefined) return undefined;
-	return { status: value.status, last_checked_at, latency_ms };
+	const source = parseHealthSource(value);
+	if (last_checked_at === undefined || latency_ms === undefined || source === undefined) return undefined;
+	return { status: value.status, last_checked_at, latency_ms, source };
 }
 
 function parsePorts(value: unknown): number[] | null {
@@ -1126,6 +1136,30 @@ function parseImageVolumes(value: unknown): ImageVolume[] | null {
 	return volumes;
 }
 
+const HEALTHCHECK_KEYS = new Set(['test', 'interval_sec', 'timeout_sec', 'retries', 'start_period_sec']);
+
+/** Absent or null is no healthcheck. A job, an unknown key, or a bad bound drops the spec. */
+function parseHealthcheck(value: unknown, kind: ImageWorkload): ImageHealthcheck | null | undefined {
+	if (value == null) return null;
+	if (kind === 'job' || !isRecord(value)) return undefined;
+	for (const key of Object.keys(value)) {
+		if (!HEALTHCHECK_KEYS.has(key)) return undefined;
+	}
+	if (!Array.isArray(value.test) || value.test.length < 1 || value.test.length > 32) return undefined;
+	const test: string[] = [];
+	for (const item of value.test) {
+		if (typeof item !== 'string' || item.length < 1 || utf8.encode(item).byteLength > 1024 || LINE_BREAK.test(item)) return undefined;
+		test.push(item);
+	}
+	const interval_sec = optionalBounded(value, 'interval_sec', 5, 300, 30);
+	const timeout_sec = optionalBounded(value, 'timeout_sec', 1, 60, 5);
+	const retries = optionalBounded(value, 'retries', 1, 10, 3);
+	const start_period_sec = optionalBounded(value, 'start_period_sec', 0, 600, 0);
+	if (interval_sec == null || timeout_sec == null || retries == null || start_period_sec == null) return undefined;
+	if (timeout_sec >= interval_sec) return undefined;
+	return { test, interval_sec, timeout_sec, retries, start_period_sec };
+}
+
 export function parseImageSpec(value: unknown): ImageSpec | null {
 	if (!isRecord(value)) return null;
 	if (value.kind !== 'service' && value.kind !== 'job') return null;
@@ -1160,6 +1194,8 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 	const healthy = workload === 'service' ? optionalBounded(value, 'healthy_after_sec', 5, 600, 30) : unusedTimer(value, 'healthy_after_sec');
 	const timeout = workload === 'job' ? optionalBounded(value, 'timeout_sec', 10, 3600, 600) : unusedTimer(value, 'timeout_sec');
 	if (healthy === null || timeout === null) return null;
+	const healthcheck = parseHealthcheck(Object.hasOwn(value, 'healthcheck') ? value.healthcheck : null, workload);
+	if (healthcheck === undefined) return null;
 	return {
 		kind: workload,
 		image,
@@ -1175,7 +1211,8 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 		user: value.user,
 		healthy_after_sec: healthy,
 		memory_mb,
-		timeout_sec: timeout
+		timeout_sec: timeout,
+		healthcheck
 	};
 }
 
@@ -1318,14 +1355,35 @@ export function parseImageDeployList(payload: unknown): { items: ImageDeploy[]; 
 	return { items, omitted };
 }
 
+/**
+ * Keep only the shapes the API stores: four bullets, or one to four runes plus U+2026.
+ * Anything else becomes null so a leaked value cannot ride in as `preview`. A non-string fails the key.
+ */
+function secretPreview(value: unknown): string | null | undefined {
+	if (value == null || value === '') return null;
+	if (typeof value !== 'string') return undefined;
+	if (value === '\u2022\u2022\u2022\u2022') return value;
+	const runes = Array.from(value);
+	if (runes.length >= 2 && runes.length <= 5 && runes[runes.length - 1] === '\u2026') {
+		const head = runes.slice(0, -1).join('');
+		if (head !== '' && !CONTROL.test(head) && !LINE_BREAK.test(head)) return value;
+	}
+	return null;
+}
+
 function parseEnvSetKey(value: unknown): EnvSetKey | null {
 	if (!isRecord(value) || typeof value.is_secret !== 'boolean') return null;
 	const key = text(value.key, 64);
 	if (!key || !ENV_KEY.test(key)) return null;
-	if (value.is_secret) return { key, is_secret: true, value: null };
-	if (value.value == null) return { key, is_secret: false, value: null };
-	if (typeof value.value !== 'string' || utf8.encode(value.value).byteLength > 4096 || LINE_BREAK.test(value.value)) return null;
-	return { key, is_secret: false, value: value.value };
+	if (value.is_secret) {
+		const preview = secretPreview(value.preview);
+		if (preview === undefined) return null;
+		return { key, is_secret: true, value: null, preview };
+	}
+	if (value.value != null && (typeof value.value !== 'string' || utf8.encode(value.value).byteLength > 4096 || LINE_BREAK.test(value.value))) {
+		return null;
+	}
+	return { key, is_secret: false, value: value.value == null ? null : value.value, preview: null };
 }
 
 export function parseEnvSet(value: unknown): EnvSet | null {
@@ -1359,6 +1417,55 @@ export function parseEnvSetList(payload: unknown): { items: EnvSet[]; omitted: n
 			seen.add(row.name);
 			items.push(row);
 		}
+	}
+	return { items, omitted };
+}
+
+function nullField(record: Record<string, unknown>, key: string): boolean {
+	return Object.hasOwn(record, key) && record[key] == null;
+}
+
+/** One health-history row. A docker row with a latency, or a check row missing one, is rejected. */
+export function parseHealthPoint(value: unknown): HealthHistoryPoint | null {
+	if (!isRecord(value)) return null;
+	const t = timestamp(value.t);
+	if (!t || !Object.hasOwn(value, 'check_id') || !Object.hasOwn(value, 'port') || !Object.hasOwn(value, 'http_status') || !Object.hasOwn(value, 'latency_ms')) {
+		return null;
+	}
+	if (value.protocol === 'docker') {
+		if (!nullField(value, 'check_id') || !nullField(value, 'port') || !nullField(value, 'http_status') || !nullField(value, 'latency_ms')) return null;
+		if (value.result !== 'success' && value.result !== 'unhealthy') return null;
+		return { t, check_id: null, protocol: 'docker', port: null, result: value.result, http_status: null, latency_ms: null };
+	}
+	if (value.protocol !== 'http' && value.protocol !== 'tcp') return null;
+	const result = value.result;
+	if (result !== 'success' && result !== 'status_mismatch' && result !== 'timeout' && result !== 'connection_refused' && result !== 'error') return null;
+	const check_id = text(value.check_id, 36);
+	const port = boundedInt(value.port, 1, 65535);
+	const latency_ms = optionalNumber(value.latency_ms);
+	if (!check_id || !isUuid(check_id) || port == null || latency_ms == null) return null;
+	let http_status: number | null = null;
+	if (value.protocol === 'tcp') {
+		if (value.http_status != null) return null;
+	} else if (value.http_status != null) {
+		const status = boundedInt(value.http_status, 100, 599);
+		if (status == null) return null;
+		http_status = status;
+	}
+	return { t, check_id, protocol: value.protocol, port, result, http_status, latency_ms };
+}
+
+/** `GET /v1/services/{id}/health`. The API returns at most 1000 points. A bad point is omitted. */
+export function parseHealthHistory(payload: unknown): { items: HealthHistoryPoint[]; omitted: number } | null {
+	const page = parseListPayload(payload);
+	if (!page) return null;
+	const capped = page.raw.slice(0, 1000);
+	let omitted = page.raw.length - capped.length;
+	const items: HealthHistoryPoint[] = [];
+	for (const item of capped) {
+		const row = parseHealthPoint(item);
+		if (row) items.push(row);
+		else omitted += 1;
 	}
 	return { items, omitted };
 }

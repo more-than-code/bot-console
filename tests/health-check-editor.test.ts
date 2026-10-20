@@ -124,7 +124,7 @@ function serviceRow(overrides: Partial<ProjectServiceRow> = {}): ProjectServiceR
 		source: 'discovered',
 		kind: 'process',
 		ports: [80, 443],
-		health: { status: 'up', last_checked_at: '2026-10-14T00:00:00Z', latency_ms: 4 },
+		health: { status: 'up', last_checked_at: '2026-10-14T00:00:00Z', latency_ms: 4, source: null },
 		last_seen_at: null,
 		gone_at: null,
 		display_name: 'Widget',

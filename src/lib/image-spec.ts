@@ -1,4 +1,4 @@
-import type { ImageOutcome, ImageRestart, ImageSpec, ImageWorkload } from '$lib/api-types';
+import type { ImageHealthcheck, ImageOutcome, ImageRestart, ImageSpec, ImageWorkload } from '$lib/api-types';
 import { ENV_KEY, byteLength, isCatalogName } from '$lib/catalog';
 
 /** Shown beside the memory field. Blank still means no limit. */
@@ -52,6 +52,12 @@ export type ImageDraft = {
 	healthyAfter: string;
 	timeoutSec: string;
 	memoryMb: string;
+	/** One argv item per line. Blank means no Docker healthcheck. */
+	healthTest: string;
+	healthInterval: string;
+	healthTimeout: string;
+	healthRetries: string;
+	healthStart: string;
 };
 
 export type KnownSet = { name: string; keys: readonly string[] };
@@ -291,6 +297,41 @@ function integerIn(raw: string, min: number, max: number): number | null | undef
 	return value;
 }
 
+/** Empty command omits the healthcheck. A job never sends one. Messages name the field and never include argv. */
+function cleanHealthcheck(draft: ImageDraft): { ok: true; healthcheck: ImageHealthcheck | null } | { ok: false; field: string; message: string } {
+	const test: string[] = [];
+	for (const line of draft.healthTest.split('\n')) {
+		if (line === '') continue;
+		if (LINE_BREAK.test(line) || byteLength(line) > 1024) {
+			return fail('healthcheck', 'Each health check command line must be at most 1024 bytes, with no NUL.');
+		}
+		test.push(line);
+	}
+	if (test.length === 0) return { ok: true, healthcheck: null };
+	if (test.length > 32) return fail('healthcheck', 'A health check command accepts at most 32 arguments.');
+	const interval = integerIn(draft.healthInterval, 5, 300);
+	if (interval === undefined) return fail('healthcheck.interval_sec', 'Health check interval must be from 5 to 300 seconds.');
+	const timeout = integerIn(draft.healthTimeout, 1, 60);
+	if (timeout === undefined) return fail('healthcheck.timeout_sec', 'Health check timeout must be from 1 to 60 seconds.');
+	const retries = integerIn(draft.healthRetries, 1, 10);
+	if (retries === undefined) return fail('healthcheck.retries', 'Health check retries must be from 1 to 10.');
+	const start = integerIn(draft.healthStart, 0, 600);
+	if (start === undefined) return fail('healthcheck.start_period_sec', 'Health check start period must be from 0 to 600 seconds.');
+	const intervalSec = interval ?? 30;
+	const timeoutSec = timeout ?? 5;
+	if (timeoutSec >= intervalSec) return fail('healthcheck.timeout_sec', 'Health check timeout must be less than the interval.');
+	return {
+		ok: true,
+		healthcheck: {
+			test,
+			interval_sec: intervalSec,
+			timeout_sec: timeoutSec,
+			retries: retries ?? 3,
+			start_period_sec: start ?? 0
+		}
+	};
+}
+
 /**
  * Map a container form onto an ImageSpec. Empty command and entrypoint lists become null.
  * A job's restart is always `no`. A port is public only when the draft says so.
@@ -360,10 +401,14 @@ export function imageSpecFromDraft(
 	}
 	let healthy = 30;
 	let timeout = 600;
+	let healthcheck: ImageHealthcheck | null = null;
 	if (workload === 'service') {
 		const parsed = integerIn(draft.healthyAfter, 5, 600);
 		if (parsed === undefined) return fail('healthy_after_sec', 'Healthy wait must be from 5 to 600 seconds.');
 		healthy = parsed ?? 30;
+		const check = cleanHealthcheck(draft);
+		if (!check.ok) return check;
+		healthcheck = check.healthcheck;
 	} else {
 		const parsed = integerIn(draft.timeoutSec, 10, 3600);
 		if (parsed === undefined) return fail('timeout_sec', 'Job timeout must be from 10 to 3600 seconds.');
@@ -384,7 +429,8 @@ export function imageSpecFromDraft(
 		user,
 		healthy_after_sec: healthy,
 		memory_mb: memory,
-		timeout_sec: timeout
+		timeout_sec: timeout,
+		healthcheck
 	};
 	return { ok: true, spec, name };
 }
@@ -925,7 +971,12 @@ export function blankImageDraft(): ImageDraft {
 		user: '',
 		healthyAfter: '',
 		timeoutSec: '',
-		memoryMb: ''
+		memoryMb: '',
+		healthTest: '',
+		healthInterval: '',
+		healthTimeout: '',
+		healthRetries: '',
+		healthStart: ''
 	};
 }
 
@@ -948,6 +999,7 @@ export function imageRequestBody(spec: ImageSpec, name: string | null): Record<s
 	};
 	if (spec.kind === 'service') payload.healthy_after_sec = spec.healthy_after_sec;
 	else payload.timeout_sec = spec.timeout_sec;
+	if (spec.kind === 'service' && spec.healthcheck) payload.healthcheck = spec.healthcheck;
 	const body: Record<string, unknown> = { kind: 'image', spec: payload };
 	if (name) body.name = name;
 	return body;
@@ -993,6 +1045,23 @@ export function imageDraftFromForm(form: FormData): { draft: ImageDraft; message
 	draft.healthyAfter = formText(form, 'healthy_after_sec').slice(0, 4);
 	draft.timeoutSec = formText(form, 'timeout_sec').slice(0, 5);
 	draft.memoryMb = formText(form, 'memory_mb').slice(0, 6);
+	draft.healthInterval = formText(form, 'health_interval').slice(0, 4);
+	draft.healthTimeout = formText(form, 'health_timeout').slice(0, 4);
+	draft.healthRetries = formText(form, 'health_retries').slice(0, 4);
+	draft.healthStart = formText(form, 'health_start').slice(0, 4);
+	let message: string | null = null;
+	let field: string | null = null;
+	const healthTest = formText(form, 'health_test');
+	const healthLines = healthTest.split('\n');
+	const healthTooBig = byteLength(healthTest) > 32 * 1024 || healthLines.filter((line) => line !== '').length > 32;
+	const healthLineBad = healthLines.some((line) => line !== '' && (LINE_BREAK.test(line) || byteLength(line) > 1024));
+	if (healthTooBig || healthLineBad) {
+		draft.healthTest = '';
+		message = 'Each health check command line must be at most 1024 bytes, with no NUL.';
+		field = 'healthcheck';
+	} else {
+		draft.healthTest = healthTest;
+	}
 	if (lists.some((list) => list.bad)) return { draft, message: 'That form is too large.', field: null };
 	if (portHost.values.length !== portContainer.values.length) return { draft, message: 'Each port needs a host and a container port.', field: 'ports' };
 	if (envKey.values.length !== envValue.values.length) return { draft, message: 'An environment value needs a key.', field: 'env' };
@@ -1005,8 +1074,6 @@ export function imageDraftFromForm(form: FormData): { draft: ImageDraft; message
 	if (fileName.values.length !== fileTarget.values.length) {
 		return { draft, message: 'Each file needs a name and a target.', field: 'files' };
 	}
-	let message: string | null = null;
-	let field: string | null = null;
 	draft.command = command.values.map((item) => clip(item, 4096, () => {
 		message = 'A command argument is too long.';
 		field = 'command';

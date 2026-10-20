@@ -58,6 +58,7 @@
 
 	function fromEntry(item: ImageEntry): ImageDraft {
 		const spec = item.spec;
+		const health = spec.healthcheck;
 		return {
 			name: item.name,
 			workload: spec.kind,
@@ -77,7 +78,12 @@
 			user: spec.user,
 			healthyAfter: spec.kind === 'service' ? String(spec.healthy_after_sec) : '',
 			timeoutSec: spec.kind === 'job' ? String(spec.timeout_sec) : '',
-			memoryMb: spec.memory_mb == null ? '' : String(spec.memory_mb)
+			memoryMb: spec.memory_mb == null ? '' : String(spec.memory_mb),
+			healthTest: health ? health.test.join('\n') : '',
+			healthInterval: health ? String(health.interval_sec) : '',
+			healthTimeout: health ? String(health.timeout_sec) : '',
+			healthRetries: health ? String(health.retries) : '',
+			healthStart: health ? String(health.start_period_sec) : ''
 		};
 	}
 
@@ -456,6 +462,96 @@
 			<Input id="{fieldId}-healthy" name="healthy_after_sec" bind:value={draft.healthyAfter} inputmode="numeric" maxlength={3} placeholder="30" aria-invalid={invalid('healthy_after_sec')} aria-describedby={describedBy('healthy_after_sec')} />
 		</Label>
 		{@render fieldNotice('healthy_after_sec')}
+		<div class="grid gap-3" role="group" aria-label="Health check (Docker)">
+			<p class="text-sm font-medium">Health check (Docker)</p>
+			<p class="text-muted-foreground text-sm">One argument per line. Leave the command empty to use the image default.</p>
+			<Label class="grid gap-1.5" for="{fieldId}-health-test">
+				Command
+				<Textarea
+					id="{fieldId}-health-test"
+					name="health_test"
+					bind:value={draft.healthTest}
+					rows={4}
+					spellcheck="false"
+					autocomplete="off"
+					aria-invalid={invalid('healthcheck') ? true : undefined}
+					aria-describedby={describedBy('healthcheck')}
+				/>
+			</Label>
+			{@render fieldNotice('healthcheck')}
+			<Label class="grid gap-1.5" for="{fieldId}-health-interval">
+				Interval seconds
+				<Input
+					id="{fieldId}-health-interval"
+					name="health_interval"
+					type="number"
+					min={5}
+					max={300}
+					bind:value={
+						() => (draft.healthInterval === '' ? null : Number(draft.healthInterval)),
+						(next) => (draft.healthInterval = next == null || Number.isNaN(next) ? '' : String(next))
+					}
+					placeholder="30"
+					aria-invalid={invalid('healthcheck.interval_sec')}
+					aria-describedby={describedBy('healthcheck.interval_sec')}
+				/>
+			</Label>
+			{@render fieldNotice('healthcheck.interval_sec')}
+			<Label class="grid gap-1.5" for="{fieldId}-health-timeout">
+				Timeout seconds
+				<Input
+					id="{fieldId}-health-timeout"
+					name="health_timeout"
+					type="number"
+					min={1}
+					max={60}
+					bind:value={
+						() => (draft.healthTimeout === '' ? null : Number(draft.healthTimeout)),
+						(next) => (draft.healthTimeout = next == null || Number.isNaN(next) ? '' : String(next))
+					}
+					placeholder="5"
+					aria-invalid={invalid('healthcheck.timeout_sec')}
+					aria-describedby={describedBy('healthcheck.timeout_sec')}
+				/>
+			</Label>
+			{@render fieldNotice('healthcheck.timeout_sec')}
+			<Label class="grid gap-1.5" for="{fieldId}-health-retries">
+				Retries
+				<Input
+					id="{fieldId}-health-retries"
+					name="health_retries"
+					type="number"
+					min={1}
+					max={10}
+					bind:value={
+						() => (draft.healthRetries === '' ? null : Number(draft.healthRetries)),
+						(next) => (draft.healthRetries = next == null || Number.isNaN(next) ? '' : String(next))
+					}
+					placeholder="3"
+					aria-invalid={invalid('healthcheck.retries')}
+					aria-describedby={describedBy('healthcheck.retries')}
+				/>
+			</Label>
+			{@render fieldNotice('healthcheck.retries')}
+			<Label class="grid gap-1.5" for="{fieldId}-health-start">
+				Start period seconds
+				<Input
+					id="{fieldId}-health-start"
+					name="health_start"
+					type="number"
+					min={0}
+					max={600}
+					bind:value={
+						() => (draft.healthStart === '' ? null : Number(draft.healthStart)),
+						(next) => (draft.healthStart = next == null || Number.isNaN(next) ? '' : String(next))
+					}
+					placeholder="0"
+					aria-invalid={invalid('healthcheck.start_period_sec')}
+					aria-describedby={describedBy('healthcheck.start_period_sec')}
+				/>
+			</Label>
+			{@render fieldNotice('healthcheck.start_period_sec')}
+		</div>
 	{:else}
 		<Input type="hidden" name="restart" value="no" />
 		<Label class="grid gap-1.5" for="{fieldId}-timeout">

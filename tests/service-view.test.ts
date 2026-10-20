@@ -48,7 +48,7 @@ function row(id: string, source: ProjectServiceRow['source'], goneAt: string | n
 		source,
 		kind: 'process',
 		ports: [80],
-		health: { status, last_checked_at: null, latency_ms: 1 },
+		health: { status, last_checked_at: null, latency_ms: 1, source: null },
 		last_seen_at: GONE,
 		gone_at: goneAt,
 		display_name: null,

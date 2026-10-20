@@ -71,7 +71,7 @@
 
 <AlertDialog.Root bind:open>
 	{#if rowLabel}
-		<RowAction label={rowLabel} icon={Icon} {destructive}>
+		<RowAction label={rowLabel} icon={Icon} {destructive} {disabled}>
 			{#snippet trigger(props)}
 				<AlertDialog.Trigger {...props}>
 					<Icon class="size-4" />

@@ -128,7 +128,8 @@ function imageSpec(kind: ImageSpec['kind'] = 'service'): ImageSpec {
 		user: '',
 		healthy_after_sec: 30,
 		memory_mb: null,
-		timeout_sec: 600
+		timeout_sec: 600,
+		healthcheck: null
 	};
 }
 
@@ -1377,14 +1378,14 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(loadedJson.includes('app.conf'), true);
 	});
 
-	test('the settings tab renders no secret value, and the paste and token fields start empty', async () => {
+	test('the settings tab shows a plain value, hides a secret, and starts paste and token fields empty', async () => {
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
 		const sets: EnvSet[] = [
 			{
 				name: 'app',
 				keys: [
-					{ key: 'API_TOKEN', is_secret: true, value: SECRET },
-					{ key: 'LOG_LEVEL', is_secret: false, value: PLAIN }
+					{ key: 'API_TOKEN', is_secret: true, value: SECRET, preview: null },
+					{ key: 'LOG_LEVEL', is_secret: false, value: PLAIN, preview: null }
 				],
 				updated_at: '2026-10-14T00:00:00Z',
 				updated_by: USER.id
@@ -1395,7 +1396,10 @@ describe('catalog images', { concurrency: false }, () => {
 			props: { project: PROJECT, canOwner: true, canAdmin: true, message: null, envSets: sets, registries }
 		}).body;
 		assert.equal(html.includes(SECRET), false);
-		assert.equal(html.includes(PLAIN), false);
+		assert.equal(html.includes(PLAIN), true);
+		assert.equal(html.includes('Make secret'), false);
+		assert.equal(html.includes('Make plain'), false);
+		assert.equal(html.includes('patchEnvKey'), false);
 		assert.equal(html.includes(REGISTRY_TOKEN), false);
 		assert.equal(html.includes('API_TOKEN'), true);
 		assert.match(html, /type="password"/);
@@ -1512,7 +1516,7 @@ describe('catalog images', { concurrency: false }, () => {
 
 	test('a saved env set is announced and its name field is cleared', () => {
 		// The enhance callback runs only in the browser, so check its wiring in the source.
-		const settings = readFileSync(new URL('../src/routes/projects/[id]/SettingsSection.svelte', import.meta.url), 'utf8');
+		const settings = readFileSync(new URL('../src/routes/projects/[id]/EnvSetDialog.svelte', import.meta.url), 'utf8');
 		assert.match(settings, /id="env-set-name" name="set" bind:value=\{setName\}/);
 		assert.match(settings, /savedSet = result\.type === 'redirect' \? name : null;\s*if \(savedSet\) setName = '';/);
 		assert.match(settings, /<Notice kind="success">Saved env set \{savedSet\}\.<\/Notice>/);
@@ -1527,7 +1531,7 @@ describe('catalog images', { concurrency: false }, () => {
 		);
 	});
 
-	test('an owned container row shows its name and short digest', () => {
+	test('an owned container row shows its name and the digest icon', () => {
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
 		const row: ProjectServiceRow = {
 			id: '00000000-0000-4000-8000-0000000000bb',
@@ -1571,7 +1575,10 @@ describe('catalog images', { concurrency: false }, () => {
 		}).body;
 		assert.equal(owned.includes('web-1'), true);
 		assert.equal(owned.includes('Web'), true);
-		assert.equal(owned.includes(shortDigest(digest('a')) ?? ''), true);
+		const full = digest('a');
+		assert.equal(owned.includes(`aria-label="Image digest ${full}"`), true);
+		assert.equal(owned.includes(`title="${full}"`), true);
+		assert.equal(owned.split(full).join('').includes(shortDigest(full) ?? ''), false);
 		const unnamed = { ...row, display_name: null };
 		const once = render(ServicesSection, {
 			props: {
@@ -1591,8 +1598,10 @@ describe('catalog images', { concurrency: false }, () => {
 				typedName: null
 			}
 		}).body;
-		assert.equal(once.split('web-1').length - 1, 1);
-		assert.equal(once.includes(shortDigest(digest('a')) ?? ''), true);
+		// The label tooltip repeats the name. The muted container name is omitted when it matches the label.
+		assert.equal(once.replace(/ title="[^"]*"/g, '').split('web-1').length - 1, 1);
+		assert.equal(once.includes(`aria-label="Image digest ${digest('a')}"`), true);
+		assert.equal(once.split(digest('a')).join('').includes(shortDigest(digest('a')) ?? ''), false);
 		const discovered = { ...row, source: 'discovered' as const, display_name: null, catalog_entry: null, image_digest: null };
 		const found = render(ServicesSection, {
 			props: {
@@ -1790,7 +1799,7 @@ describe('catalog images', { concurrency: false }, () => {
 				envSets: [
 					{
 						name: 'app',
-						keys: [{ key: 'A'.repeat(64), is_secret: true, value: null }],
+						keys: [{ key: 'A'.repeat(64), is_secret: true, value: null, preview: null }],
 						updated_at: '2026-10-14T00:00:00Z',
 						updated_by: USER.id
 					}
@@ -1798,16 +1807,22 @@ describe('catalog images', { concurrency: false }, () => {
 				registries: []
 			}
 		}).body;
-		const dotenvAt = dotenvHtml.indexOf('id="env-set-dotenv"');
-		const dotenvError = dotenvHtml.indexOf('id="env-set-error"');
 		const registriesAt = dotenvHtml.indexOf('>Registries<');
-		assert.equal(dotenvAt >= 0 && dotenvError > dotenvAt && registriesAt > dotenvError, true);
-		assert.match(dotenvHtml, /<textarea[^>]*text-base/);
+		// Dialog content is portaled, so SSR HTML has the open trigger and not the textarea.
+		assert.equal(dotenvHtml.indexOf('id="env-set-dotenv"'), -1);
+		assert.equal(registriesAt > 0, true);
+		const newSet = dotenvHtml.match(/<button\b[^>]*id="new-env-set"[^>]*>/)?.[0] ?? '';
+		assert.equal(newSet.includes('aria-expanded="true"'), true);
 		assert.match(dotenvHtml, new RegExp(`break-all[^>]*>${'A'.repeat(64)}`));
-		assert.match(dotenvHtml, /id="env-set-error"[^>]*focus-visible:ring-3/);
-		assert.doesNotMatch(dotenvHtml, /id="env-set-error"[^>]*outline-none/);
-		assert.equal(dotenvHtml.includes('aria-describedby="env-set-error"'), true);
 		assert.equal(dotenvHtml.includes(SECRET), false);
+		const dialog = readFileSync(new URL('../src/routes/projects/[id]/EnvSetDialog.svelte', import.meta.url), 'utf8');
+		const areaAt = dialog.indexOf('id="env-set-dotenv"');
+		const dotenvErrorAt = dialog.indexOf('id="env-set-error"');
+		assert.equal(areaAt >= 0 && dotenvErrorAt > areaAt, true);
+		assert.equal(dialog.includes("aria-describedby={settingsField === 'dotenv' && message ? 'env-set-error' : undefined}"), true);
+		assert.match(dialog, /id="env-set-error"[^>]*focus-visible:ring-3/);
+		assert.doesNotMatch(dialog, /id="env-set-error"[^>]*outline-none/);
+		assert.match(readFileSync(new URL('../src/lib/components/Textarea.svelte', import.meta.url), 'utf8'), /text-base/);
 	});
 
 	test('clearSecretField blanks the value before the result is applied', async () => {

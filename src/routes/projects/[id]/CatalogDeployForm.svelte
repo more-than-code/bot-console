@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { enhance } from '$app/forms';
 	import type { SubmitFunction } from '@sveltejs/kit';
+	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import { untrack, type Snippet } from 'svelte';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
 	import Notice from '$lib/components/Notice.svelte';
@@ -12,9 +13,11 @@
 	import { Label } from '$lib/components/ui/label';
 	import type { Host, ImageDeploy, ImageEntry } from '$lib/api-types';
 	import { imageFilesBlockReason, imageHostBlockReason, isCatalogHost, reuseIdempotencyKey } from '$lib/catalog';
+	import { blockInFlightSubmit, deployProgressNote, flightFocusTarget, flightLabel } from '$lib/catalog-flight';
 	import { formatWhen } from '$lib/format';
 	import { applyHistoryResponse, historyAfterSwitch, historyFetch, historyNotice, imagePortText, nextHistory, nextIdempotencyKey, nextRollbackKey, rollbackChoices, shortDigest } from '$lib/image-spec';
 	import type { ImageDeployState } from '$lib/project-action';
+	import FlightStatus from './FlightStatus.svelte';
 
 	let {
 		entry,
@@ -27,6 +30,9 @@
 		result = null,
 		active = true,
 		historyInFlight = false,
+		inFlight = null,
+		flightDigest = null,
+		onBusy,
 		cancel
 	}: {
 		entry: ImageEntry;
@@ -40,6 +46,11 @@
 		active?: boolean;
 		/** Initial history fetch. The dialog leaves this false; the effect sets it when the request starts. */
 		historyInFlight?: boolean;
+		/** Renders Deploy or Rollback in flight without a browser submit. */
+		inFlight?: 'deploy' | 'rollback' | null;
+		/** Rollback target shown as in flight when `inFlight` is `rollback`. */
+		flightDigest?: string | null;
+		onBusy?: (busy: boolean) => void;
 		cancel?: Snippet;
 	} = $props();
 
@@ -65,8 +76,16 @@
 	let deployRequest = $state<{ hostId: string; force: boolean; key: string } | null>(null);
 	let rollbackRequest = $state<Record<string, { hostId: string; key: string }>>({});
 	let submitting = $state(false);
+	let flightAction = $state<'deploy' | 'rollback' | null>(null);
+	let rollingDigest = $state<string | null>(null);
 	let historyForm = $state<HTMLFormElement | null>(null);
 	let historyHost = $state('');
+	let deploySubmitEl = $state<HTMLButtonElement | null>(null);
+	let noticeEl = $state<HTMLDivElement | null>(null);
+	// Plain values so recording them does not rerun the focus effect.
+	let previousFlight: 'deploy' | 'rollback' | null = null;
+	let previousDigest: string | null = null;
+	const rollbackButtons = new Map<string, HTMLButtonElement>();
 
 	const selectedHost = $derived(eligible.find((host) => host.id === hostId) ?? null);
 	const hostLabel = $derived(selectedHost?.name ?? '');
@@ -77,6 +96,30 @@
 	const digest = $derived(shortDigest(result?.outcome?.digest ?? result?.status?.digest));
 	const portLine = $derived(entry.spec.ports.map((port) => imagePortText(port)).join(', '));
 	const publishesPublic = $derived(entry.spec.ports.some((port) => port.public));
+	const activeFlight = $derived(inFlight ?? (submitting ? flightAction : null));
+	const busy = $derived(activeFlight != null);
+	const shownDigest = $derived(activeFlight === 'rollback' ? (rollingDigest ?? flightDigest) : null);
+
+	$effect(() => {
+		onBusy?.(busy);
+	});
+
+	$effect(() => {
+		const flying = activeFlight;
+		const digestNow = shownDigest;
+		const ended = previousFlight;
+		const endedDigest = previousDigest;
+		const hasNotice = Boolean(result?.message);
+		previousFlight = flying;
+		previousDigest = digestNow;
+		if (!browser || ended == null || flying != null) return;
+		if (flightFocusTarget(hasNotice) === 'notice' && noticeEl != null) {
+			noticeEl.focus();
+			return;
+		}
+		const rollbackEl = ended === 'rollback' && endedDigest != null ? rollbackButtons.get(endedDigest) : null;
+		(rollbackEl ?? deploySubmitEl)?.focus();
+	});
 
 	$effect(() => {
 		const id = result?.resultId ?? null;
@@ -127,11 +170,23 @@
 		return crypto.randomUUID();
 	}
 
+	function rememberRollback(node: HTMLElement, digestValue: string) {
+		const button = node.querySelector('button');
+		if (!(button instanceof HTMLButtonElement)) return;
+		rollbackButtons.set(digestValue, button);
+		return {
+			destroy() {
+				if (rollbackButtons.get(digestValue) === button) rollbackButtons.delete(digestValue);
+			}
+		};
+	}
+
 	const deployEnhance: SubmitFunction = ({ formData, cancel }) => {
-		if (submitting) {
+		if (blockInFlightSubmit(submitting || busy)) {
 			cancel();
 			return async () => {};
 		}
+		flightAction = 'deploy';
 		submitting = true;
 		const key = nextIdempotencyKey(deployRequest, { hostId, force }, freshKey());
 		deployKey = key;
@@ -142,6 +197,7 @@
 				await update({ reset: false });
 			} finally {
 				submitting = false;
+				flightAction = null;
 				if (!reuseIdempotencyKey(actionResult.type)) {
 					deployKey = freshKey();
 					deployRequest = null;
@@ -152,10 +208,12 @@
 
 	function rollbackEnhance(digestValue: string): SubmitFunction {
 		return ({ formData, cancel }) => {
-			if (submitting) {
+			if (blockInFlightSubmit(submitting || busy)) {
 				cancel();
 				return async () => {};
 			}
+			flightAction = 'rollback';
+			rollingDigest = digestValue;
 			submitting = true;
 			const key = nextRollbackKey(rollbackRequest[digestValue] ?? null, hostId, freshKey());
 			rollbackRequest = { ...rollbackRequest, [digestValue]: { hostId, key } };
@@ -165,6 +223,8 @@
 					await update({ reset: false });
 				} finally {
 					submitting = false;
+					flightAction = null;
+					rollingDigest = null;
 					if (!reuseIdempotencyKey(actionResult.type)) {
 						const next = { ...rollbackRequest };
 						delete next[digestValue];
@@ -177,7 +237,7 @@
 
 	// The confirm body is only the idempotency key, so a host change does not rotate it.
 	const confirmEnhance: SubmitFunction = ({ formData, cancel }) => {
-		if (submitting) {
+		if (blockInFlightSubmit(submitting)) {
 			cancel();
 			return async () => {};
 		}
@@ -248,7 +308,10 @@
 					variant={hostId === host.id ? 'secondary' : 'outline'}
 					aria-checked={hostId === host.id}
 					class="h-auto w-full min-w-0 justify-start text-left whitespace-normal break-all"
-					onclick={() => (hostId = host.id)}>{host.name}</Button>
+					disabled={busy}
+					onclick={() => {
+						if (!busy) hostId = host.id;
+					}}>{host.name}</Button>
 			{/each}
 		</div>
 		<Input type="hidden" name="host_id" value={hostId} />
@@ -264,11 +327,11 @@
 		{/each}
 	</div>
 	<Label class="flex items-center gap-2">
-		<Checkbox name="force" value="1" bind:checked={force} />
+		<Checkbox name="force" value="1" bind:checked={force} disabled={busy} />
 		Force
 	</Label>
 	{#if result?.message}
-		<div class="max-w-full min-w-0 break-words">
+		<div bind:this={noticeEl} tabindex="-1" class="max-w-full min-w-0 focus-visible:ring-3 focus-visible:ring-ring break-words">
 			<Notice kind="error">{result.message}</Notice>
 		</div>
 	{/if}
@@ -301,11 +364,30 @@
 		<p class="text-muted-foreground text-sm">Publishes on all of the host's interfaces.</p>
 	{/if}
 	<div class="flex flex-wrap items-center gap-2">
-		<Button type="submit" disabled={submitting || hostId === '' || containerBlocked || filesBlocked}>{actionLabel}</Button>
+		<Button
+			type="submit"
+			bind:ref={deploySubmitEl}
+			disabled={activeFlight === 'deploy' ? undefined : busy || submitting || hostId === '' || containerBlocked || filesBlocked}
+			aria-disabled={activeFlight === 'deploy' ? 'true' : undefined}
+			aria-busy={activeFlight === 'deploy' ? 'true' : undefined}
+			onclick={(event) => {
+				if (blockInFlightSubmit(activeFlight === 'deploy')) event.preventDefault();
+			}}
+		>
+			{#if activeFlight === 'deploy'}
+				<Loader2 class="size-4 motion-safe:animate-spin" />
+				{flightLabel('deploy')}
+			{:else}
+				{actionLabel}
+			{/if}
+		</Button>
 		{#if cancel}
 			{@render cancel()}
 		{/if}
 	</div>
+	{#if activeFlight === 'deploy'}
+		<FlightStatus note={deployProgressNote(entry.spec.healthcheck)} />
+	{/if}
 </form>
 
 {#if result?.confirmation && result.confirmKind}
@@ -321,7 +403,7 @@
 			<Notice kind="info">{result.confirmation.plan}</Notice>
 		</div>
 		<div>
-			<Button type="submit" disabled={submitting}>Confirm</Button>
+			<Button type="submit" disabled={busy || submitting}>Confirm</Button>
 		</div>
 	</form>
 {/if}
@@ -335,7 +417,7 @@
 	{/if}
 	{#if historyError || historyPending || (result?.message && result.history == null && !historyReady)}
 		<div>
-			<Button type="button" variant="outline" onclick={() => historyForm?.requestSubmit()}>Retry</Button>
+			<Button type="button" variant="outline" disabled={busy} onclick={() => historyForm?.requestSubmit()}>Retry</Button>
 		</div>
 	{/if}
 	{#if notice === 'empty'}
@@ -357,6 +439,7 @@
 	{/if}
 	{#if historyReady}
 		{#each targets as item (item.digest)}
+			{@const rollingThis = activeFlight === 'rollback' && shownDigest === item.digest}
 			<form method="POST" action={rollbackAction} class="grid gap-1" use:enhance={rollbackEnhance(item.digest)}>
 				<Input type="hidden" name="name" value={entry.name} />
 				<Input type="hidden" name="host_id" value={hostId} />
@@ -364,13 +447,34 @@
 				<Input type="hidden" name="wait_sec" value={String(waitSec)} />
 				<Input type="hidden" name="digest" value={item.digest} />
 				<div class="flex flex-wrap items-center gap-2">
-					<Button type="submit" variant="outline" disabled={submitting || hostId === '' || containerBlocked}>{item.sameImage ? 'Previous version (same image)' : `Roll back to ${shortDigest(item.digest) ?? item.digest}`}</Button>
+					<span class="contents" use:rememberRollback={item.digest}>
+						<Button
+							type="submit"
+							variant="outline"
+							disabled={rollingThis ? undefined : busy || submitting || hostId === '' || containerBlocked}
+							aria-disabled={rollingThis ? 'true' : undefined}
+							aria-busy={rollingThis ? 'true' : undefined}
+							onclick={(event) => {
+								if (blockInFlightSubmit(rollingThis)) event.preventDefault();
+							}}
+						>
+							{#if rollingThis}
+								<Loader2 class="size-4 motion-safe:animate-spin" />
+								{flightLabel('rollback')}
+							{:else}
+								{item.sameImage ? 'Previous version (same image)' : `Roll back to ${shortDigest(item.digest) ?? item.digest}`}
+							{/if}
+						</Button>
+					</span>
 					{#if !item.sameImage}
 						<span class="font-mono text-sm">{shortDigest(item.digest) ?? item.digest}</span>
 					{/if}
 				</div>
 				{#if item.sameImage}
 					<p class="text-muted-foreground text-sm">Restores the previous container with its earlier files and settings.</p>
+				{/if}
+				{#if activeFlight === 'rollback' && shownDigest === item.digest}
+					<FlightStatus />
 				{/if}
 			</form>
 		{/each}
@@ -382,7 +486,7 @@
 				action={removeAction}
 				label="Remove"
 				confirmLabel="Remove"
-				disabled={containerBlocked}
+				disabled={containerBlocked || busy}
 				message="Remove {entry.name} from {hostLabel}?"
 				hidden={[
 					{ name: 'name', value: entry.name },

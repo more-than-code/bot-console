@@ -28,7 +28,8 @@
 		filesAction,
 		revealed = false,
 		editor = null,
-		onSaved
+		onSaved,
+		disabled = false
 	}: {
 		mode: 'create' | 'edit';
 		entry?: ImageEntry | null;
@@ -38,6 +39,7 @@
 		revealed?: boolean;
 		editor?: ImageEditorState | null;
 		onSaved?: (name: string | null) => void;
+		disabled?: boolean;
 	} = $props();
 
 	let open = $state(untrack(() => revealed));
@@ -176,7 +178,7 @@
 			Container
 		</Dialog.Trigger>
 	{:else if entry}
-		<RowAction label="Edit {entry.name}" icon={Pencil}>
+		<RowAction label="Edit {entry.name}" icon={Pencil} {disabled}>
 			{#snippet trigger(props)}
 				<Dialog.Trigger {...props}>
 					<Pencil class="size-4" />

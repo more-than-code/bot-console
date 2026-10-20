@@ -18,7 +18,8 @@
 		parseAction,
 		revealed = false,
 		editor = null,
-		onOpened
+		onOpened,
+		disabled = false
 	}: {
 		mode: 'create' | 'edit';
 		entry?: ProgramEntry | null;
@@ -28,6 +29,7 @@
 		revealed?: boolean;
 		editor?: CatalogEditorState | null;
 		onOpened?: () => void;
+		disabled?: boolean;
 	} = $props();
 
 	let open = $state(untrack(() => revealed));
@@ -55,7 +57,7 @@
 			New service
 		</Dialog.Trigger>
 	{:else if entry}
-		<RowAction label="Edit {entry.name}" icon={Pencil}>
+		<RowAction label="Edit {entry.name}" icon={Pencil} {disabled}>
 			{#snippet trigger(props)}
 				<Dialog.Trigger {...props}>
 					<Pencil class="size-4" />

@@ -55,6 +55,7 @@
 						<Button
 							type="button"
 							disabled
+							aria-disabled="true"
 							variant="ghost"
 							size="icon-sm"
 							class="pointer-events-none"

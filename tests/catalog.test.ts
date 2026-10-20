@@ -491,8 +491,13 @@ describe('catalog', { concurrency: false }, () => {
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 		const owner = render(ProjectPage, { props: { data: projectData(true) as never, form: null } }).body;
 		assert.equal(owner.includes('New service'), true);
+		assert.equal(owner.includes('Container'), true);
 		const admin = render(ProjectPage, { props: { data: projectData(false) as never, form: null } }).body;
 		assert.equal(admin.includes('New service'), false);
+		assert.equal(admin.includes('Container'), false);
+		assert.equal(admin.includes('Edit web'), true);
+		assert.equal(admin.includes('Delete web'), false);
+		assert.equal(admin.includes('Permissions web'), false);
 		assert.equal(admin.includes('>Catalog<'), true);
 	});
 

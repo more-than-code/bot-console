@@ -191,7 +191,8 @@ describe('project services', { concurrency: false }, () => {
 		const expected: Record<string, string[]> = {
 			hosts: ['hosts'],
 			services: ['hosts', 'services'],
-			catalog: ['catalog', 'hosts', 'members'],
+			// Catalog also loads one deploybot services page so image actions know which hosts have a container.
+			catalog: ['catalog', 'hosts', 'members', 'services'],
 			members: ['invites', 'members'],
 			tokens: ['join-tokens'],
 			settings: ['env-sets', 'files', 'registries']
@@ -220,7 +221,7 @@ describe('project services', { concurrency: false }, () => {
 			assert.deepEqual(sections, want, tab);
 			overlap[tab] = maxInFlight;
 		}
-		assert.equal(overlap.catalog, 3);
+		assert.equal(overlap.catalog, 4);
 		assert.equal(overlap.members, 2);
 		assert.equal(overlap.services, 1);
 	});
@@ -1018,7 +1019,7 @@ function serviceRow(projectName: string, overrides: Partial<ProjectServiceRow> =
 		source: 'discovered',
 		kind: 'process',
 		ports: [80],
-		health: { status: 'up', last_checked_at: null, latency_ms: 1 },
+		health: { status: 'up', last_checked_at: null, latency_ms: 1, source: null },
 		last_seen_at: null,
 		gone_at: null,
 		display_name: 'Widget',
