@@ -48,6 +48,7 @@ Pages render on the server. JavaScript is required for dialogs, the theme switch
 |---|---|
 | `DataTable` | Every table. Client mode passes the rows the page already loaded. `src/lib/table.ts` sorts, searches (case-insensitive substring of searchable columns), and pages them from the URL: `<id>.q`, `<id>.sort`, `<id>.dir`, `<id>.page`. Sort headers and the pager are links. Search is a GET form. Default page size is 25. A table that fits on one page and has no search query shows no pager. The first click on a column uses that column's `firstDir` (ascending when omitted). A later click on the active column toggles. Server mode (`server` prop) does not sort, search, or page in the browser. The same namespaced params drive the API request. The pager says `Showing a–b of total`, and Prev/Next set `<id>.cursor`. A sort, search, or host change drops the cursor. A middle page, whose cursor is opaque, says `Showing n of total`. |
 | `Tabs` | Link strip with `aria-current="page"` for the host page and the project page. |
+| `LocalTime` | One absolute timestamp in the viewer's time zone. |
 | `PageHeader` | Breadcrumbs, `h1`, optional subtitle and actions. |
 | `StatusBadge` | The known host and health statuses, plus `stopped` and `gone` for a service the host no longer reports. Anything else renders as `unknown`. |
 | `Notice` | Error, info, and success text. Errors are alerts. The others are status. |
@@ -71,6 +72,10 @@ Host catalog approvals (`GET /v1/hosts/{id}/catalog-approvals`) render under bot
 ## Theme
 
 Cookie `bot_theme` is `system` (the default), `light`, or `dark`. Any other value counts as `system` and is never written back raw. `POST /theme` is public. It sets the cookie (`HttpOnly`, `SameSite=Lax`, `Path=/`, max-age one year, `Secure` only when the request is https) and redirects to a safe `next`, or to `/` when `next` is unsafe. The server writes `class="dark"` for dark, nothing for light, and `data-theme="system"` for system. An inline script in `src/app.html` (`nonce="%sveltekit.nonce%"`) adds `.dark` before paint when the choice is system and the OS prefers dark, and it follows later OS changes only while that attribute is still `system`. `ThemeSwitch` sets the class immediately, then posts `/theme` (`name="theme"`, hidden `next`) with `use:enhance` and does not reload the page. At 640 px and below the three choices are icons only, and the switch sits on the next header line. The signed-in row wraps, and a long account name truncates.
+
+## Times
+
+Absolute timestamps, including Last seen and chart axis labels, render in the viewer's time zone. `LocalTime` is the shared piece. The layout load reads cookie `bot_tz` (an IANA name; anything else is ignored) and otherwise uses the server's zone, so the server HTML and the first client render match. After mount, a browser whose zone differs switches the visible times and stores `bot_tz` (`SameSite=Lax`, `Path=/`, max-age one year, `Secure` only on https, not `HttpOnly`). The date shape stays day-month-year with a 24-hour clock. The zone abbreviation on a full timestamp is the viewer's.
 
 ## Tests (when implemented)
 

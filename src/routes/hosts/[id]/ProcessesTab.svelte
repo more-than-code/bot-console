@@ -1,9 +1,10 @@
 <script lang="ts">
 	import CommandText from '$lib/components/CommandText.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
+	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import type { ProcessSample } from '$lib/api-types';
-	import { formatBytes, formatPercent, formatWhen } from '$lib/format';
+	import { formatBytes, formatPercent } from '$lib/format';
 	import { hasProcessSample, processColumns, processServiceText, type ProcessSort, type ServiceLink } from '$lib/host-view';
 
 	let {
@@ -44,7 +45,7 @@
 {:else if !sample}
 	<p class="text-muted-foreground text-sm">No process sample yet</p>
 {:else}
-	<p class="text-muted-foreground mb-2 text-sm">Sampled {formatWhen(sample.sampled_at)}.</p>
+	<p class="text-muted-foreground mb-2 text-sm">Sampled <LocalTime iso={sample.sampled_at} />.</p>
 	{#if sample.skipped > 0}
 		<p class="text-muted-foreground mb-2 text-sm">{sample.skipped} rows skipped</p>
 	{/if}
@@ -71,7 +72,7 @@
 					<td class="p-2 text-right font-mono align-middle">{formatBytes(row.memory_rss)}</td>
 					<td class="p-2 text-right font-mono align-middle">{formatPercent(row.memory_usage)}</td>
 					<td class="p-2 text-right font-mono align-middle">{count(row.num_threads)}</td>
-					<td class="p-2 align-middle">{formatWhen(row.started_at)}</td>
+					<td class="p-2 align-middle"><LocalTime iso={row.started_at} /></td>
 				</tr>
 			{/snippet}
 		</DataTable>

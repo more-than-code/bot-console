@@ -5,10 +5,10 @@
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
+	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import type { Invite, InviteRole, Member } from '$lib/api-types';
 	import { formDialogOutcome, nextFormDialog, nextInviteSecret, type DialogOutcome } from '$lib/dialog-open';
-	import { formatWhen } from '$lib/format';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 	import Link from '@lucide/svelte/icons/link';
@@ -143,7 +143,7 @@
 			</td>
 			<td class="p-2 align-middle">{member.email}</td>
 			<td class="p-2 align-middle">{member.role}</td>
-			<td class="p-2 align-middle">{formatWhen(member.created_at)}</td>
+			<td class="p-2 align-middle"><LocalTime iso={member.created_at} /></td>
 			{#if canAdmin}
 				<td class="p-2 align-middle whitespace-normal">
 					{#if member.role !== 'owner'}
@@ -296,7 +296,7 @@
 			<tr>
 				<td class="p-2 align-middle">{invite.role}</td>
 				<td class="p-2 align-middle">{invite.created_by}</td>
-				<td class="p-2 align-middle">{formatWhen(invite.expires_at)}</td>
+				<td class="p-2 align-middle"><LocalTime iso={invite.expires_at} /></td>
 				<td class="p-2 align-middle">{invite.uses}/{invite.max_uses}</td>
 				<td class="p-2 align-middle">{inviteStatus(invite)}</td>
 				<td class="p-2 align-middle">

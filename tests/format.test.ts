@@ -13,20 +13,42 @@ import {
 	formatWhen
 } from '../src/lib/format.ts';
 
-test('formatWhen renders Pacific/Auckland', () => {
-	const text = formatWhen('2026-10-10T17:44:46.000Z');
-	assert.match(text, /11/);
-	assert.match(text, /06:44:46/);
-	assert.match(text, /NZDT/);
-	assert.equal(formatWhen(null), 'n/a');
-	assert.equal(formatWhen('not-a-date'), 'n/a');
+test('formatWhen renders the time zone it is given', () => {
+	const iso = '2026-10-10T17:44:46.000Z';
+	const auckland = formatWhen(iso, 'Pacific/Auckland');
+	assert.match(auckland, /11/);
+	assert.match(auckland, /06:44:46/);
+	assert.match(auckland, /NZDT/);
+	const utc = formatWhen(iso, 'UTC');
+	assert.match(utc, /10/);
+	assert.match(utc, /17:44:46/);
+	assert.match(utc, /UTC/);
+	assert.equal(formatWhen(null, 'UTC'), 'n/a');
+	assert.equal(formatWhen('not-a-date', 'UTC'), 'n/a');
+	assert.equal(formatWhen(iso, 'Not/AZone'), formatWhen(iso));
+});
+
+test('formatWhen without a zone uses the runtime zone', () => {
+	const iso = '2026-10-10T17:44:46.000Z';
+	const local = new Intl.DateTimeFormat('en-NZ', {
+		day: '2-digit',
+		month: 'short',
+		year: 'numeric',
+		hour: '2-digit',
+		minute: '2-digit',
+		second: '2-digit',
+		hourCycle: 'h23',
+		timeZoneName: 'short'
+	}).format(new Date(iso));
+	assert.equal(formatWhen(iso), local);
 });
 
 test('formatTick uses the clock for a short span and the date for a long one', () => {
 	const iso = '2026-10-10T17:44:46.000Z';
-	assert.match(formatTick(iso, 60 * 60 * 1000), /06:44/);
-	assert.match(formatTick(iso, 7 * 24 * 60 * 60 * 1000), /11/);
-	assert.equal(formatTick('nope', 1000), '');
+	assert.match(formatTick(iso, 60 * 60 * 1000, 'Pacific/Auckland'), /06:44/);
+	assert.match(formatTick(iso, 7 * 24 * 60 * 60 * 1000, 'Pacific/Auckland'), /11/);
+	assert.match(formatTick(iso, 60 * 60 * 1000, 'UTC'), /17:44/);
+	assert.equal(formatTick('nope', 1000, 'UTC'), '');
 });
 
 test('formatUptime', () => {

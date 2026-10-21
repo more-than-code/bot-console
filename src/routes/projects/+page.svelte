@@ -2,9 +2,9 @@
 	import { page } from '$app/state';
 	import DataTable from '$lib/components/DataTable.svelte';
 	import Notice from '$lib/components/Notice.svelte';
+	import LocalTime from '$lib/components/LocalTime.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import type { Project } from '$lib/api-types';
-	import { formatWhen } from '$lib/format';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 	import NewProject from './NewProject.svelte';
@@ -52,7 +52,7 @@
 			<td class="p-2 align-middle"><a class="text-primary underline-offset-4 hover:underline" href="/projects/{project.id}">{project.name}</a></td>
 			<td class="p-2 align-middle">{project.slug}</td>
 			<td class="p-2 align-middle">{project.role}</td>
-			<td class="p-2 align-middle">{formatWhen(project.created_at)}</td>
+			<td class="p-2 align-middle"><LocalTime iso={project.created_at} /></td>
 		</tr>
 	{/snippet}
 </DataTable>

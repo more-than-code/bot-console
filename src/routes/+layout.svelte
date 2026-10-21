@@ -1,16 +1,34 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
+	import { onMount, untrack } from 'svelte';
 	import AppWindow from '@lucide/svelte/icons/app-window';
 	import FolderKanban from '@lucide/svelte/icons/folder-kanban';
 	import LogOut from '@lucide/svelte/icons/log-out';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import ThemeSwitch from '$lib/components/ThemeSwitch.svelte';
+	import { browserTimeZone, provideTimeZone, rememberTimeZone } from '$lib/time-zone';
 	import { cn } from '$lib/utils';
 	import '../app.css';
 
 	let { children, data } = $props();
+
+	// The server and the first client render share this value. After mount the
+	// browser replaces it when the viewer is in a different zone.
+	let timeZone = $state(untrack(() => data.timeZone));
+	provideTimeZone({
+		get current() {
+			return timeZone;
+		}
+	});
+
+	onMount(() => {
+		const local = browserTimeZone();
+		if (!local || local === timeZone) return;
+		timeZone = local;
+		rememberTimeZone(local);
+	});
 
 	const path = $derived(page.url.pathname);
 	const onProjects = $derived(

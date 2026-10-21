@@ -10,9 +10,10 @@
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import { COPY_FAILED_NOTE, COPY_FAILURE_MS, COPIED_NOTE, shownDigestFailure } from '$lib/copy-text';
 	import DataTable from '$lib/components/DataTable.svelte';
+	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import { formatLatency, formatWhen } from '$lib/format';
+	import { formatLatency } from '$lib/format';
 	import {
 		SERVICE_DEFAULT_DIR,
 		SERVICE_DEFAULT_SORT,
@@ -208,7 +209,7 @@
 				<div><dt class="text-muted-foreground text-sm">Result</dt><dd>{probe.result ?? 'n/a'}</dd></div>
 				<div><dt class="text-muted-foreground text-sm">HTTP</dt><dd>{probe.http_status ?? 'n/a'}</dd></div>
 				<div><dt class="text-muted-foreground text-sm">Latency</dt><dd>{formatLatency(probe.latency_ms)}</dd></div>
-				<div><dt class="text-muted-foreground text-sm">Checked</dt><dd>{formatWhen(probe.checked_at)}</dd></div>
+				<div><dt class="text-muted-foreground text-sm">Checked</dt><dd><LocalTime iso={probe.checked_at} /></dd></div>
 			</dl>
 		</Card.Content>
 	</Card.Root>
@@ -341,7 +342,7 @@
 			<td class="p-2 align-middle">{service.kind}</td>
 			<td class="p-2 align-middle font-mono">{ports(service.ports)}</td>
 			<td class="p-2 align-middle"><StatusBadge status={serviceRowStatus(service)} hint={healthSourceLabel(service)} /></td>
-			<td class="p-2 align-middle whitespace-nowrap">{formatWhen(service.last_seen_at)}</td>
+			<td class="p-2 align-middle whitespace-nowrap"><LocalTime iso={service.last_seen_at} /></td>
 			<td class="p-2 align-middle">
 				{#if showsDockerHealthcheck(service)}
 					<p class="text-muted-foreground text-sm">docker healthcheck</p>

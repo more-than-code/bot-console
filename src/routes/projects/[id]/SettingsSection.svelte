@@ -2,12 +2,13 @@
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import Textarea from '$lib/components/Textarea.svelte';
 	import EnvSetDialog from './EnvSetDialog.svelte';
 	import EnvSetTable from './EnvSetTable.svelte';
 	import type { EnvSet, Project, ProjectFile, Registry } from '$lib/api-types';
-	import { formatBytes, formatWhen } from '$lib/format';
+	import { formatBytes } from '$lib/format';
 	import { clearSecretField, settleFileSave, showViewedFile } from '$lib/secret-field';
 	import { actionUrlFrom } from '$lib/url';
 	import { Button } from '$lib/components/ui/button';
@@ -172,7 +173,7 @@
 							<span class="font-mono">{file.name}</span>
 							<span class="text-muted-foreground">{file.is_secret ? 'secret' : 'plain'}</span>
 							<span class="text-muted-foreground">{formatBytes(file.size)}</span>
-							<span class="text-muted-foreground">{formatWhen(file.updated_at)}</span>
+							<span class="text-muted-foreground"><LocalTime iso={file.updated_at} /></span>
 						</p>
 						<div class="flex flex-wrap items-center gap-2">
 							{#if !file.is_secret}

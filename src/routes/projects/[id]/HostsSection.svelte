@@ -2,10 +2,10 @@
 	import { page } from '$app/state';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
+	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { Host } from '$lib/api-types';
-	import { formatWhen } from '$lib/format';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 
@@ -47,7 +47,7 @@
 		<tr>
 			<td class="p-2 align-middle"><a class="text-primary underline-offset-4 hover:underline" href="/hosts/{host.id}">{host.name}</a></td>
 			<td class="p-2 align-middle"><StatusBadge status={host.status} /></td>
-			<td class="p-2 align-middle">{formatWhen(host.last_seen_at)}</td>
+			<td class="p-2 align-middle"><LocalTime iso={host.last_seen_at} /></td>
 			<td class="p-2 align-middle font-mono">{host.agent_version ?? 'n/a'}</td>
 			{#if canAdmin}
 				<td class="p-2 align-middle">

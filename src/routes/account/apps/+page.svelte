@@ -3,9 +3,9 @@
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
 	import Notice from '$lib/components/Notice.svelte';
+	import LocalTime from '$lib/components/LocalTime.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import type { Grant } from '$lib/api-types';
-	import { formatWhen } from '$lib/format';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 
@@ -39,8 +39,8 @@
 				<td class="p-2 align-middle">{grant.client_name}</td>
 				<td class="p-2 align-middle font-mono break-all">{grant.redirect_host}</td>
 				<td class="p-2 align-middle">{grant.kind}</td>
-				<td class="p-2 align-middle">{formatWhen(grant.created_at)}</td>
-				<td class="p-2 align-middle">{formatWhen(grant.last_used_at)}</td>
+				<td class="p-2 align-middle"><LocalTime iso={grant.created_at} /></td>
+				<td class="p-2 align-middle"><LocalTime iso={grant.last_used_at} /></td>
 				<td class="p-2 align-middle">
 					<ConfirmAction
 						id="revoke-grant-{grant.id}"

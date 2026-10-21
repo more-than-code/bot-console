@@ -1,43 +1,53 @@
-const aucklandWhen = new Intl.DateTimeFormat('en-NZ', {
-	timeZone: 'Pacific/Auckland',
-	day: '2-digit',
-	month: 'short',
-	year: 'numeric',
-	hour: '2-digit',
-	minute: '2-digit',
-	second: '2-digit',
-	hourCycle: 'h23',
-	timeZoneName: 'short'
-});
+const formatters = new Map<string, Intl.DateTimeFormat>();
 
-const aucklandClock = new Intl.DateTimeFormat('en-NZ', {
-	timeZone: 'Pacific/Auckland',
-	hour: '2-digit',
-	minute: '2-digit',
-	hourCycle: 'h23'
-});
+function dateFormat(kind: 'when' | 'clock' | 'day', timeZone: string | undefined): Intl.DateTimeFormat {
+	const key = `${kind}:${timeZone ?? ''}`;
+	const cached = formatters.get(key);
+	if (cached) return cached;
+	const options: Intl.DateTimeFormatOptions = { hourCycle: 'h23' };
+	if (timeZone) options.timeZone = timeZone;
+	if (kind === 'when') {
+		options.day = '2-digit';
+		options.month = 'short';
+		options.year = 'numeric';
+		options.hour = '2-digit';
+		options.minute = '2-digit';
+		options.second = '2-digit';
+		options.timeZoneName = 'short';
+	} else if (kind === 'clock') {
+		options.hour = '2-digit';
+		options.minute = '2-digit';
+	} else {
+		options.day = 'numeric';
+		options.month = 'short';
+		options.hour = '2-digit';
+		options.minute = '2-digit';
+	}
+	try {
+		const format = new Intl.DateTimeFormat('en-NZ', options);
+		formatters.set(key, format);
+		return format;
+	} catch {
+		// A bad zone name throws. Fall back to the runtime zone instead of blanking the page.
+		if (timeZone) return dateFormat(kind, undefined);
+		throw new Error('could not format a time');
+	}
+}
 
-const aucklandDayClock = new Intl.DateTimeFormat('en-NZ', {
-	timeZone: 'Pacific/Auckland',
-	day: 'numeric',
-	month: 'short',
-	hour: '2-digit',
-	minute: '2-digit',
-	hourCycle: 'h23'
-});
-
-export function formatWhen(iso: string | null): string {
+/** `timeZone` is an IANA name. Omit it to use the runtime zone. */
+export function formatWhen(iso: string | null, timeZone?: string): string {
 	if (!iso) return 'n/a';
 	const date = new Date(iso);
 	if (Number.isNaN(date.getTime())) return 'n/a';
-	return aucklandWhen.format(date);
+	return dateFormat('when', timeZone || undefined).format(date);
 }
 
-export function formatTick(iso: string, spanMs: number): string {
+/** `timeZone` is an IANA name. Omit it to use the runtime zone. */
+export function formatTick(iso: string, spanMs: number, timeZone?: string): string {
 	const date = new Date(iso);
 	if (Number.isNaN(date.getTime())) return '';
-	const formatter = spanMs > 36 * 60 * 60 * 1000 ? aucklandDayClock : aucklandClock;
-	return formatter.format(date);
+	const kind = spanMs > 36 * 60 * 60 * 1000 ? 'day' : 'clock';
+	return dateFormat(kind, timeZone || undefined).format(date);
 }
 
 export function formatPercent(value: number | null | undefined): string {

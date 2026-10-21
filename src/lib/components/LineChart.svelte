@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { formatTick } from '$lib/format';
+	import { timeZoneSource } from '$lib/time-zone';
 
 	type ChartSeries = {
 		label: string;
@@ -32,6 +33,7 @@
 	const pad = { l: 84, r: 12, t: 14, b: 28 };
 
 	let hover = $state<number | null>(null);
+	const zones = timeZoneSource();
 
 	const chartText: Record<string, string> = {
 		'var(--chart-1)': 'text-chart-1',
@@ -49,6 +51,7 @@
 	};
 
 	const layout = $derived.by(() => {
+		const zone = zones?.current;
 		const count = Math.min(times.length, ...series.map((item) => item.values.length));
 		const finite: number[] = [];
 		for (const item of series) {
@@ -94,7 +97,7 @@
 		const xIndex = count === 1 ? [0] : [0, Math.floor((count - 1) / 2), count - 1];
 		const xTicks = [...new Set(xIndex)].map((index) => ({
 			x: xAt(index),
-			label: formatTick(times[index] ?? '', span)
+			label: formatTick(times[index] ?? '', span, zone)
 		}));
 
 		const drawn = series.map((item) => {
@@ -138,11 +141,12 @@
 	});
 
 	const hoverDetail = $derived.by(() => {
+		const zone = zones?.current;
 		if (hover == null || !layout) return null;
 		const index = hover;
 		if (index < 0 || index >= layout.count) return null;
 		return {
-			label: formatTick(times[index] ?? '', layout.span),
+			label: formatTick(times[index] ?? '', layout.span, zone),
 			x: layout.xAt(index),
 			rows: series.map((item) => ({
 				label: item.label,

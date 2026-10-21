@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import Notice from '$lib/components/Notice.svelte';
+	import LocalTime from '$lib/components/LocalTime.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
-	import { formatWhen } from '$lib/format';
 	import { actionUrl } from '$lib/url';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
@@ -32,7 +32,7 @@
 	<p>
 		<strong>{data.device.client_name}</strong> acts as you, with your project roles.
 	</p>
-	<p class="text-muted-foreground text-sm">Code <span class="text-foreground font-mono">{data.device.user_code}</span>. Expires {formatWhen(data.device.expires_at)}.</p>
+	<p class="text-muted-foreground text-sm">Code <span class="text-foreground font-mono">{data.device.user_code}</span>. Expires <LocalTime iso={data.device.expires_at} />.</p>
 	<p class="text-muted-foreground mb-4 text-sm">{statusText[data.device.status] ?? 'This code cannot be used.'}</p>
 	{#if data.device.status === 'pending'}
 		<div class="flex flex-wrap gap-2">

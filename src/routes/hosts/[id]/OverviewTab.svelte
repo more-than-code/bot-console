@@ -4,10 +4,11 @@
 	import CommandText from '$lib/components/CommandText.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
 	import LineChart from '$lib/components/LineChart.svelte';
+	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { Host, SnapshotView } from '$lib/api-types';
-	import { formatBytes, formatCapacity, formatLoad, formatPercent, formatRate, formatTemp, formatUptime, formatWhen } from '$lib/format';
+	import { formatBytes, formatCapacity, formatLoad, formatPercent, formatRate, formatTemp, formatUptime } from '$lib/format';
 	import { alignSeries, METRIC_SPECS, type MetricChart, type MetricFormat } from '$lib/host-view';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
@@ -73,7 +74,7 @@
 
 <dl class="mb-4 grid gap-3 sm:grid-cols-2">
 	<div><dt class="text-muted-foreground text-sm">Status</dt><dd><StatusBadge status={host.status} /></dd></div>
-	<div><dt class="text-muted-foreground text-sm">Last seen</dt><dd>{formatWhen(host.last_seen_at)}</dd></div>
+	<div><dt class="text-muted-foreground text-sm">Last seen</dt><dd><LocalTime iso={host.last_seen_at} /></dd></div>
 	<div><dt class="text-muted-foreground text-sm">Agent</dt><dd class="font-mono">{host.agent_version ?? 'n/a'}</dd></div>
 	<div><dt class="text-muted-foreground text-sm">System</dt><dd>{host.os}/{host.arch}</dd></div>
 	<div><dt class="text-muted-foreground text-sm">Always on</dt><dd>{host.always_on ? 'yes' : 'no'}</dd></div>
@@ -97,7 +98,7 @@
 	<Card.Root class="mb-4">
 		<Card.Header>
 			<Card.Title>Snapshot</Card.Title>
-			<Card.Description>Sampled {formatWhen(snapshot.sampled_at)}.</Card.Description>
+			<Card.Description>Sampled <LocalTime iso={snapshot.sampled_at} />.</Card.Description>
 		</Card.Header>
 		<Card.Content class="grid min-w-0 gap-3">
 			<dl class="grid gap-2 sm:grid-cols-2">

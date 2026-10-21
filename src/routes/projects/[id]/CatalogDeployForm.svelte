@@ -5,6 +5,7 @@
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import { untrack, type Snippet } from 'svelte';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -14,7 +15,6 @@
 	import type { Host, ImageDeploy, ImageEntry } from '$lib/api-types';
 	import { imageFilesBlockReason, imageHostBlockReason, imageLoggingBlockReason, isCatalogHost, reuseIdempotencyKey } from '$lib/catalog';
 	import { blockInFlightSubmit, deployProgressNote, flightFocusTarget, flightLabel } from '$lib/catalog-flight';
-	import { formatWhen } from '$lib/format';
 	import { applyHistoryResponse, historyAfterSwitch, historyFetch, historyNotice, imagePortText, nextHistory, nextIdempotencyKey, nextRollbackKey, rollbackChoices, shortDigest } from '$lib/image-spec';
 	import type { ImageDeployState } from '$lib/project-action';
 	import FlightStatus from './FlightStatus.svelte';
@@ -433,7 +433,7 @@
 				<li class="flex flex-wrap items-center gap-2 text-sm">
 					<StatusBadge status={item.outcome} />
 					<span class="font-mono">{shortDigest(item.digest) ?? 'no digest'}</span>
-					<span class="text-muted-foreground">{formatWhen(item.finished_at ?? item.started_at)}</span>
+					<span class="text-muted-foreground"><LocalTime iso={item.finished_at ?? item.started_at} /></span>
 				</li>
 			{/each}
 		</ul>

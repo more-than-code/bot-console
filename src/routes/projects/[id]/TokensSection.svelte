@@ -4,9 +4,9 @@
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
+	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import type { CreatedJoin, JoinToken } from '$lib/api-types';
-	import { formatWhen } from '$lib/format';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 	import { Button } from '$lib/components/ui/button';
@@ -98,8 +98,8 @@
 		<tr>
 			<td class="p-2 align-middle">{token.host_name_hint ?? 'n/a'}</td>
 			<td class="p-2 align-middle">{stateOf(token)}</td>
-			<td class="p-2 align-middle">{formatWhen(token.created_at)}</td>
-			<td class="p-2 align-middle">{formatWhen(token.expires_at)}</td>
+			<td class="p-2 align-middle"><LocalTime iso={token.created_at} /></td>
+			<td class="p-2 align-middle"><LocalTime iso={token.expires_at} /></td>
 			{#if canAdmin && !token.revoked_at}
 				<td class="p-2 align-middle">
 					<ConfirmAction

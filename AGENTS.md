@@ -39,7 +39,8 @@ src/lib/confirm.ts           type-to-confirm match and submit disabled state
 src/lib/theme.ts             bot_theme cookie, html marker, class apply
 src/lib/components/ui/       shadcn-svelte primitives (generated; import only)
 src/lib/ranges.ts            1h / 6h / 24h / 7d → from/to
-src/lib/format.ts            Pacific/Auckland and number formatting
+src/lib/format.ts            viewer time zone and number formatting
+src/lib/time-zone.ts         bot_tz cookie and the viewer zone shared with LocalTime
 src/lib/series.ts            merge helper kept for the old chart shape (not on the request path)
 src/routes/+page.*           redirect / to /projects
 src/routes/signin/           Google sign-in
@@ -82,8 +83,11 @@ The app shell header is the product name, the Projects link, `ThemeSwitch`, and 
 - `CopyButton` — shadcn `button` with the Copy and Check icons. It stays a text button on the join-token card.
 - `RowAction` — ghost icon button for every action inside a table row, with an `aria-label` and a tooltip (`"<Action> <row label>"`). Catalog Run on a container and Deploy append one sentence to that tooltip. Destructive rows use the destructive text colour. Rename is `Pencil`, probe `Activity`, revoke credential `ShieldOff`, remove member `UserMinus`, change role `UserCog`, revoke join token `Ban`, delete `Trash2`.
 - `ThemeSwitch` — `toggle-group` with System, Light, and Dark (Monitor, Sun, Moon). The form posts `/theme` with `name="theme"` on each item, a hidden `theme`, and a hidden `next`. It sets the class immediately, then posts with `use:enhance` and does not follow the redirect. At 640 px and below the labels hide.
+- `LocalTime` — one absolute timestamp in the viewer's time zone. Pass the ISO string as `iso`. A missing or unparseable value renders `n/a`. Chart axis labels use the same zone through `formatTick`.
 - `ConfirmAction` — `alert-dialog` holding the POST form. Inside a table row the trigger is a `RowAction`. Delete project sets `typeToConfirm` so the user types the project name. Confirm stays disabled until `typeToConfirmMatches` is true. The server check stays the authority. No hidden field carries that name. The dialog body is `ConfirmForm`.
 - `CommandText` — one truncated monospace line for a command, with the full text in `title` and a tooltip.
 - `actionUrl`, `actionUrlFrom`, and `backTo` in `src/lib/url.ts` — named form actions, `?<params>&/<name>`. `actionUrlFrom` keeps the current query (including table state) and drops `confirm` and `/name` keys. Host and project forms use it. `actionUrl` builds a query when there is no current URL. `backTo` is the same path and query after a successful same-page action: it drops `confirm` and `/name` and does not append an action. Project revoke, member, join-token revoke, project rename, and service rename redirects use it. Delete project still redirects to `/projects`. Creating a project still redirects to the new project. Project probe and host snapshot do not redirect. The project `rename` action is shared: a `service_id` field patches the service; without it, the project name is patched.
 
 Theme cookie `bot_theme` is `system`, `light`, or `dark` (`src/lib/theme.ts`). Missing or any other value is `system`. `POST /theme` is public (`isPublicPath`). The action stores the allowlisted value, never the raw form string. Cookie options: `HttpOnly`, `SameSite=Lax`, `Path=/`, max-age 31536000, `Secure` only when `url.protocol` is `https:`. `hooks.server.ts` `transformPageChunk` writes exactly one marker on the first `<html`: `class="dark"`, nothing, or `data-theme="system"`. The inline script in `src/app.html` uses `nonce="%sveltekit.nonce%"`. Early 503 responses return before `resolve`, so they do not get that marker.
+
+Timestamps use the viewer's time zone (`src/lib/time-zone.ts`, `LocalTime`). The layout load reads cookie `bot_tz` and, when it is missing or not an IANA name, uses the server's zone. That same string is what the server HTML and the first client render share. After mount, if the browser zone differs, the page switches to it and stores `bot_tz` (`SameSite=Lax`, `Path=/`, max-age 31536000, `Secure` only on https, not `HttpOnly`). The date shape stays `en-NZ` with a 24-hour clock, and the zone abbreviation is the viewer's (NZDT, PDT, UTC, and so on). Chart ticks use that zone and do not print the abbreviation.

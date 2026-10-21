@@ -5,6 +5,7 @@
 	import HeartPulse from '@lucide/svelte/icons/heart-pulse';
 	import { tick, untrack } from 'svelte';
 	import type { Health, HealthCheck, ProbeView } from '$lib/api-types';
+	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
@@ -15,7 +16,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import * as Select from '$lib/components/ui/select';
 	import { formDialogOutcome } from '$lib/dialog-open';
-	import { formatLatency, formatWhen } from '$lib/format';
+	import { formatLatency } from '$lib/format';
 	import {
 		HEALTH_CHECK_LIMIT,
 		HEALTH_CHECK_NOTE,
@@ -262,7 +263,7 @@
 			<p class="text-sm">
 				Latest result
 				<StatusBadge status={health?.status ?? 'unknown'} />
-				<span class="text-muted-foreground">{formatWhen(health?.last_checked_at ?? null)}</span>
+				<span class="text-muted-foreground"><LocalTime iso={health?.last_checked_at ?? null} /></span>
 				{#if health?.latency_ms != null}
 					<span class="text-muted-foreground">{formatLatency(health.latency_ms)}</span>
 				{/if}
@@ -416,7 +417,7 @@
 									<div><dt class="text-muted-foreground text-sm">Result</dt><dd>{probe.result ?? 'n/a'}</dd></div>
 									<div><dt class="text-muted-foreground text-sm">HTTP</dt><dd>{probe.http_status ?? 'n/a'}</dd></div>
 									<div><dt class="text-muted-foreground text-sm">Latency</dt><dd>{formatLatency(probe.latency_ms)}</dd></div>
-									<div><dt class="text-muted-foreground text-sm">Checked</dt><dd>{formatWhen(probe.checked_at)}</dd></div>
+									<div><dt class="text-muted-foreground text-sm">Checked</dt><dd><LocalTime iso={probe.checked_at} /></dd></div>
 								</dl>
 							</div>
 						</Notice>
