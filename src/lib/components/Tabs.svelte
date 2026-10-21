@@ -3,6 +3,7 @@
 	import Cpu from '@lucide/svelte/icons/cpu';
 	import FolderKanban from '@lucide/svelte/icons/folder-kanban';
 	import KeyRound from '@lucide/svelte/icons/key-round';
+	import Library from '@lucide/svelte/icons/library';
 	import Server from '@lucide/svelte/icons/server';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import Users from '@lucide/svelte/icons/users';
@@ -21,6 +22,7 @@
 	const icons: Record<string, Component> = {
 		Hosts: Server,
 		Services: Boxes,
+		Catalog: Library,
 		Processes: Cpu,
 		Members: Users,
 		'Join tokens': KeyRound,
