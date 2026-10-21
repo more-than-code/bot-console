@@ -1,8 +1,12 @@
-import type { ImageHealthcheck, ImageOutcome, ImageRestart, ImageSpec, ImageWorkload } from '$lib/api-types';
+import type { ImageHealthcheck, ImageLogging, ImageOutcome, ImageRestart, ImageSpec, ImageWorkload } from '$lib/api-types';
 import { ENV_KEY, byteLength, isCatalogName } from '$lib/catalog';
 
 /** Shown beside the memory field. Blank still means no limit. */
 export const SUGGESTED_MEMORY_MB = 256;
+
+/** Agent default when ImageSpec has no logging (api-v1 v1.14): 10 MB × 3 files. */
+export const DEFAULT_LOG_SIZE_MB = 10;
+export const DEFAULT_LOG_FILES = 3;
 
 export const STILL_RUNNING = 'Still running on the host. Check the history in a minute.';
 
@@ -58,6 +62,9 @@ export type ImageDraft = {
 	healthTimeout: string;
 	healthRetries: string;
 	healthStart: string;
+	/** Blank with logMaxFiles blank means no logging object. */
+	logMaxSizeMb: string;
+	logMaxFiles: string;
 };
 
 export type KnownSet = { name: string; keys: readonly string[] };
@@ -332,6 +339,24 @@ function cleanHealthcheck(draft: ImageDraft): { ok: true; healthcheck: ImageHeal
 	};
 }
 
+/** Both empty omits logging. One set requires the other. Messages name the field. */
+function cleanLogging(draft: ImageDraft): { ok: true; logging: ImageLogging | null } | { ok: false; field: string; message: string } {
+	const size = integerIn(draft.logMaxSizeMb, 1, 100);
+	const files = integerIn(draft.logMaxFiles, 1, 10);
+	if (size === undefined) return fail('logging.max_size_mb', 'Max size per file must be an integer from 1 to 100 MB.');
+	if (files === undefined) return fail('logging.max_files', 'Files kept must be an integer from 1 to 10.');
+	if (size == null && files == null) return { ok: true, logging: null };
+	if (size == null) return fail('logging.max_size_mb', 'Max size per file is required when files kept is set.');
+	if (files == null) return fail('logging.max_files', 'Files kept is required when max size per file is set.');
+	return { ok: true, logging: { max_size_mb: size, max_files: files } };
+}
+
+/** In-range pair for the preview. An incomplete or invalid pair is the agent default. */
+export function loggingForPreview(maxSizeMb: string, maxFiles: string): ImageLogging | null {
+	const read = cleanLogging({ ...blankImageDraft(), logMaxSizeMb: maxSizeMb, logMaxFiles: maxFiles });
+	return read.ok ? read.logging : null;
+}
+
 /**
  * Map a container form onto an ImageSpec. Empty command and entrypoint lists become null.
  * A job's restart is always `no`. A port is public only when the draft says so.
@@ -414,6 +439,8 @@ export function imageSpecFromDraft(
 		if (parsed === undefined) return fail('timeout_sec', 'Job timeout must be from 10 to 3600 seconds.');
 		timeout = parsed ?? 600;
 	}
+	const logs = cleanLogging(draft);
+	if (!logs.ok) return logs;
 	const spec: ImageSpec = {
 		kind: workload,
 		image: image.image,
@@ -430,7 +457,8 @@ export function imageSpecFromDraft(
 		healthy_after_sec: healthy,
 		memory_mb: memory,
 		timeout_sec: timeout,
-		healthcheck
+		healthcheck,
+		logging: logs.logging
 	};
 	return { ok: true, spec, name };
 }
@@ -483,6 +511,21 @@ export function rollbackDigests(items: readonly { outcome: string; digest: strin
 	return rollbackChoices(items).map((choice) => choice.digest);
 }
 
+function previewLogOpts(logging: ImageLogging | null | undefined): { size: number; files: number } {
+	if (
+		logging != null &&
+		Number.isInteger(logging.max_size_mb) &&
+		logging.max_size_mb >= 1 &&
+		logging.max_size_mb <= 100 &&
+		Number.isInteger(logging.max_files) &&
+		logging.max_files >= 1 &&
+		logging.max_files <= 10
+	) {
+		return { size: logging.max_size_mb, files: logging.max_files };
+	}
+	return { size: DEFAULT_LOG_SIZE_MB, files: DEFAULT_LOG_FILES };
+}
+
 function shellQuote(value: string): string {
 	if (/^[A-Za-z0-9_./:@=-]+$/.test(value)) return value;
 	return `'${value.replaceAll("'", `'\\''`)}'`;
@@ -512,10 +555,14 @@ export function dockerRunPreview(input: {
 	restart: string;
 	user: string;
 	memoryMb: number | null;
+	/** Set only when both values are in range. Otherwise the preview uses 10m and 3. */
+	logging?: ImageLogging | null;
 }): string {
 	const parts = ['docker run'];
 	if (input.name) parts.push('--name', shellQuote(input.name));
 	if (input.restart) parts.push('--restart', input.restart);
+	const logs = previewLogOpts(input.logging);
+	parts.push('--log-opt', `max-size=${logs.size}m`, '--log-opt', `max-file=${logs.files}`);
 	for (const port of input.ports) {
 		const binding = port.public === true ? `${port.host}:${port.container}` : `127.0.0.1:${port.host}:${port.container}`;
 		parts.push('-p', binding);
@@ -616,7 +663,9 @@ const TAKES_VALUE = new Set([
 	'--net',
 	'--pid',
 	'--cap-add',
-	'--device'
+	'--device',
+	'--log-opt',
+	'--log-driver'
 ]);
 
 const OUTRIGHT = new Set(['--privileged', '--cap-add', '--device', '--env-file']);
@@ -684,10 +733,30 @@ function ignoredShort(name: string): boolean {
 }
 
 /**
+ * `max-size=<n>m` or a bare integer (MB), 1–100. `max-file=<k>`, 1–10.
+ * A bad value names that key and does not include the pasted text.
+ * Null means the key is not one of those two.
+ */
+function readLogOpt(value: string): { key: 'max-size' | 'max-file'; amount: number | null } | null {
+	const eq = value.indexOf('=');
+	if (eq === -1) return null;
+	const key = value.slice(0, eq);
+	if (key !== 'max-size' && key !== 'max-file') return null;
+	const raw = value.slice(eq + 1);
+	const match = key === 'max-size' ? /^([0-9]+)m?$/.exec(raw) : /^([0-9]+)$/.exec(raw);
+	if (!match) return { key, amount: null };
+	const amount = Number(match[1]);
+	const max = key === 'max-size' ? 100 : 10;
+	if (!Number.isInteger(amount) || amount < 1 || amount > max) return { key, amount: null };
+	return { key, amount };
+}
+
+/**
  * Prefill a container form from `docker run`.
  * Detach, name, tty, interactive, and `--rm` are ignored and listed. `--rm` is quiet on a job.
  * Any other unknown flag refuses the whole paste and names that flag.
  * Privileged, capabilities, devices, env files, host network, host pid, and root are refused.
+ * `--log-opt` keeps max-size and max-file only when both are in range. `--log-driver` is refused.
  */
 export function parseDockerRun(line: string, workload: ImageWorkload = 'service'): DockerPrefill {
 	const words = splitWords(line.trim());
@@ -708,6 +777,8 @@ export function parseDockerRun(line: string, workload: ImageWorkload = 'service'
 	const volumes = draft.volumes ?? [];
 	let image = '';
 	const command: string[] = [];
+	let logSize: number | null = null;
+	let logFiles: number | null = null;
 	for (let index = 2; index < words.length; index += 1) {
 		const word = words[index] ?? '';
 		if (image) {
@@ -782,7 +853,29 @@ export function parseDockerRun(line: string, workload: ImageWorkload = 'service'
 			draft.entrypoint = [value];
 			continue;
 		}
+		if (flag.name === '--log-driver') return { ok: false, message: '--log-driver is not supported.' };
+		if (flag.name === '--log-opt') {
+			if (!value) return { ok: false, message: '--log-opt needs a value.' };
+			const read = readLogOpt(value);
+			if (!read) return { ok: false, message: '--log-opt is not supported.' };
+			if (read.amount == null) {
+				const message = read.key === 'max-size'
+					? '--log-opt max-size must be an integer from 1 to 100 MB.'
+					: '--log-opt max-file must be an integer from 1 to 10.';
+				return { ok: false, message };
+			}
+			if (read.key === 'max-size') logSize = read.amount;
+			else logFiles = read.amount;
+			continue;
+		}
 		return { ok: false, message: `${flag.name} is not supported.` };
+	}
+	if ((logSize == null) !== (logFiles == null)) {
+		return { ok: false, message: '--log-opt max-size and max-file must both be set.' };
+	}
+	if (logSize != null && logFiles != null) {
+		draft.logMaxSizeMb = String(logSize);
+		draft.logMaxFiles = String(logFiles);
 	}
 	if (!image) return { ok: false, message: 'The docker run command has no image.' };
 	draft.image = image;
@@ -793,9 +886,19 @@ export function parseDockerRun(line: string, workload: ImageWorkload = 'service'
 	return { ok: true, draft, unsupported };
 }
 
-/** Copy a parsed `docker run` onto the form. File rows are left as they are. */
+/**
+ * Copy a parsed `docker run` onto the form. File rows are left as they are.
+ * The agent default (10 MB, 3 files) leaves the Logs fields blank, so pasting an unmodified preview sends no logging.
+ */
 export function applyDockerPaste(draft: ImageDraft, parsed: Extract<DockerPrefill, { ok: true }>): ImageDraft {
 	const next = parsed.draft;
+	let logMaxSizeMb = draft.logMaxSizeMb;
+	let logMaxFiles = draft.logMaxFiles;
+	if (next.logMaxSizeMb != null && next.logMaxFiles != null) {
+		const agentDefault = next.logMaxSizeMb === String(DEFAULT_LOG_SIZE_MB) && next.logMaxFiles === String(DEFAULT_LOG_FILES);
+		logMaxSizeMb = agentDefault ? '' : next.logMaxSizeMb;
+		logMaxFiles = agentDefault ? '' : next.logMaxFiles;
+	}
 	return {
 		...draft,
 		image: next.image ?? draft.image,
@@ -805,7 +908,9 @@ export function applyDockerPaste(draft: ImageDraft, parsed: Extract<DockerPrefil
 		env: next.env ?? [],
 		volumes: next.volumes ?? [],
 		restart: next.restart ? next.restart : draft.restart,
-		user: next.user != null ? next.user : draft.user
+		user: next.user != null ? next.user : draft.user,
+		logMaxSizeMb,
+		logMaxFiles
 	};
 }
 
@@ -976,7 +1081,9 @@ export function blankImageDraft(): ImageDraft {
 		healthInterval: '',
 		healthTimeout: '',
 		healthRetries: '',
-		healthStart: ''
+		healthStart: '',
+		logMaxSizeMb: '',
+		logMaxFiles: ''
 	};
 }
 
@@ -1000,6 +1107,7 @@ export function imageRequestBody(spec: ImageSpec, name: string | null): Record<s
 	if (spec.kind === 'service') payload.healthy_after_sec = spec.healthy_after_sec;
 	else payload.timeout_sec = spec.timeout_sec;
 	if (spec.kind === 'service' && spec.healthcheck) payload.healthcheck = spec.healthcheck;
+	if (spec.logging) payload.logging = spec.logging;
 	const body: Record<string, unknown> = { kind: 'image', spec: payload };
 	if (name) body.name = name;
 	return body;
@@ -1049,6 +1157,8 @@ export function imageDraftFromForm(form: FormData): { draft: ImageDraft; message
 	draft.healthTimeout = formText(form, 'health_timeout').slice(0, 4);
 	draft.healthRetries = formText(form, 'health_retries').slice(0, 4);
 	draft.healthStart = formText(form, 'health_start').slice(0, 4);
+	draft.logMaxSizeMb = cappedDigits(formText(form, 'log_max_size_mb'), 6);
+	draft.logMaxFiles = cappedDigits(formText(form, 'log_max_files'), 4);
 	let message: string | null = null;
 	let field: string | null = null;
 	const healthTest = formText(form, 'health_test');
@@ -1126,6 +1236,13 @@ export function imageDraftFromForm(form: FormData): { draft: ImageDraft; message
 		return { file, target: shown };
 	});
 	return { draft, message, field };
+}
+
+/** Keep a short digit string. Do not slice it (1000 must not become 100). A longer one fails the integer check. */
+function cappedDigits(raw: string, maxDigits: number): string {
+	const trimmed = raw.trim();
+	if (trimmed.length > maxDigits) return 'x';
+	return trimmed;
 }
 
 function formText(form: FormData, name: string): string {

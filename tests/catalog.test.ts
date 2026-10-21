@@ -46,7 +46,7 @@ const SERVICE_ID = '00000000-0000-4000-8000-0000000000bb';
 const HASH = 'ab'.repeat(32);
 const KEY = 'run-key-1';
 
-const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: false, files: false };
+const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: false, files: false, logging: false };
 
 function host(overrides: Partial<Host> = {}): Host {
 	return {
@@ -775,7 +775,7 @@ describe('catalog', { concurrency: false }, () => {
 
 	test('over-long fields are rejected, and the API env refusal is shown', async () => {
 		const account = `a${'b'.repeat(31)}`;
-		const allowed = host({ programs: { enabled: true, allow_shell: true, run_as: [account, 'joe'], policy_hash: 'policy-1', images: false, docker: false, files: false } });
+		const allowed = host({ programs: { enabled: true, allow_shell: true, run_as: [account, 'joe'], policy_hash: 'policy-1', images: false, docker: false, files: false, logging: false } });
 		async function post(form: Record<string, string>) {
 			const calls = installFetch((call) => {
 				if (call.url.pathname.endsWith('/hosts')) return envelope({ items: [allowed], next_cursor: null });

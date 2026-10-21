@@ -19,6 +19,7 @@ import type {
 	ImageDeploy,
 	ImageFileMount,
 	ImageHealthcheck,
+	ImageLogging,
 	ImageLogs,
 	ImageOutcome,
 	ImagePort,
@@ -220,8 +221,9 @@ export function parseHostPrograms(value: unknown): HostPrograms | null {
 	const images = reportedBool(value, 'images');
 	const docker = reportedBool(value, 'docker');
 	const files = reportedBool(value, 'files');
-	if (images === null || docker === null || files === null) return null;
-	return { enabled: value.enabled, run_as, allow_shell: value.allow_shell, policy_hash: value.policy_hash, images, docker, files };
+	const logging = reportedBool(value, 'logging');
+	if (images === null || docker === null || files === null || logging === null) return null;
+	return { enabled: value.enabled, run_as, allow_shell: value.allow_shell, policy_hash: value.policy_hash, images, docker, files, logging };
 }
 
 /** Missing or null is false. A present non-boolean is not a policy. */
@@ -1137,6 +1139,21 @@ function parseImageVolumes(value: unknown): ImageVolume[] | null {
 }
 
 const HEALTHCHECK_KEYS = new Set(['test', 'interval_sec', 'timeout_sec', 'retries', 'start_period_sec']);
+const LOGGING_KEYS = new Set(['max_size_mb', 'max_files']);
+
+/** Absent or null is the agent default. An unknown key, a missing key, or a bad bound drops the spec. */
+function parseLogging(value: unknown): ImageLogging | null | undefined {
+	if (value == null) return null;
+	if (!isRecord(value)) return undefined;
+	for (const key of Object.keys(value)) {
+		if (!LOGGING_KEYS.has(key)) return undefined;
+	}
+	if (!Object.hasOwn(value, 'max_size_mb') || !Object.hasOwn(value, 'max_files')) return undefined;
+	const max_size_mb = boundedInt(value.max_size_mb, 1, 100);
+	const max_files = boundedInt(value.max_files, 1, 10);
+	if (max_size_mb == null || max_files == null) return undefined;
+	return { max_size_mb, max_files };
+}
 
 /** Absent or null is no healthcheck. A job, an unknown key, or a bad bound drops the spec. */
 function parseHealthcheck(value: unknown, kind: ImageWorkload): ImageHealthcheck | null | undefined {
@@ -1196,6 +1213,8 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 	if (healthy === null || timeout === null) return null;
 	const healthcheck = parseHealthcheck(Object.hasOwn(value, 'healthcheck') ? value.healthcheck : null, workload);
 	if (healthcheck === undefined) return null;
+	const logging = parseLogging(Object.hasOwn(value, 'logging') ? value.logging : null);
+	if (logging === undefined) return null;
 	return {
 		kind: workload,
 		image,
@@ -1212,7 +1231,8 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 		healthy_after_sec: healthy,
 		memory_mb,
 		timeout_sec: timeout,
-		healthcheck
+		healthcheck,
+		logging
 	};
 }
 

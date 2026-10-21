@@ -125,6 +125,8 @@ export type HostPrograms = {
 	docker: boolean;
 	/** True when the agent reported managed files. Missing on older hellos is false. */
 	files: boolean;
+	/** True when the agent reported container log settings. Missing on older hellos is false. */
+	logging: boolean;
 };
 
 export type ProgramSpec = {
@@ -165,6 +167,12 @@ export type ImageHealthcheck = {
 	start_period_sec: number;
 };
 
+/** json-file log cap. Null on the spec means Deploybot's agent default (10 MB × 3). */
+export type ImageLogging = {
+	max_size_mb: number;
+	max_files: number;
+};
+
 export type ImageSpec = {
 	kind: ImageWorkload;
 	image: string;
@@ -182,6 +190,7 @@ export type ImageSpec = {
 	memory_mb: number | null;
 	timeout_sec: number;
 	healthcheck: ImageHealthcheck | null;
+	logging: ImageLogging | null;
 };
 
 type CatalogEntryBase = {

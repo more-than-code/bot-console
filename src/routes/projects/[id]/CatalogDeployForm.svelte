@@ -12,7 +12,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import type { Host, ImageDeploy, ImageEntry } from '$lib/api-types';
-	import { imageFilesBlockReason, imageHostBlockReason, isCatalogHost, reuseIdempotencyKey } from '$lib/catalog';
+	import { imageFilesBlockReason, imageHostBlockReason, imageLoggingBlockReason, isCatalogHost, reuseIdempotencyKey } from '$lib/catalog';
 	import { blockInFlightSubmit, deployProgressNote, flightFocusTarget, flightLabel } from '$lib/catalog-flight';
 	import { formatWhen } from '$lib/format';
 	import { applyHistoryResponse, historyAfterSwitch, historyFetch, historyNotice, imagePortText, nextHistory, nextIdempotencyKey, nextRollbackKey, rollbackChoices, shortDigest } from '$lib/image-spec';
@@ -91,6 +91,7 @@
 	const hostLabel = $derived(selectedHost?.name ?? '');
 	const containerBlocked = $derived(selectedHost != null && imageHostBlockReason(selectedHost) != null);
 	const filesBlocked = $derived(selectedHost != null && imageFilesBlockReason(selectedHost, entry.spec.files.length > 0) != null);
+	const loggingBlocked = $derived(selectedHost != null && imageLoggingBlockReason(selectedHost, entry.spec.logging != null) != null);
 	const notice = $derived(historyNotice({ hostCount: eligible.length, pending: historyPending, ready: historyReady, count: history.length }));
 	const targets = $derived(entry.spec.kind === 'job' ? [] : rollbackChoices(history));
 	const digest = $derived(shortDigest(result?.outcome?.digest ?? result?.status?.digest));
@@ -318,11 +319,15 @@
 		{#each eligible as host (host.id)}
 			{@const reason = imageHostBlockReason(host)}
 			{@const filesReason = imageFilesBlockReason(host, entry.spec.files.length > 0)}
+			{@const loggingReason = imageLoggingBlockReason(host, entry.spec.logging != null)}
 			{#if reason}
 				<p class="text-muted-foreground text-sm">{host.name}: {reason}</p>
 			{/if}
 			{#if filesReason}
 				<p class="text-muted-foreground text-sm">{host.name}: {filesReason}</p>
+			{/if}
+			{#if loggingReason}
+				<p class="text-muted-foreground text-sm">{host.name}: {loggingReason}</p>
 			{/if}
 		{/each}
 	</div>
@@ -367,7 +372,7 @@
 		<Button
 			type="submit"
 			bind:ref={deploySubmitEl}
-			disabled={activeFlight === 'deploy' ? undefined : busy || submitting || hostId === '' || containerBlocked || filesBlocked}
+			disabled={activeFlight === 'deploy' ? undefined : busy || submitting || hostId === '' || containerBlocked || filesBlocked || loggingBlocked}
 			aria-disabled={activeFlight === 'deploy' ? 'true' : undefined}
 			aria-busy={activeFlight === 'deploy' ? 'true' : undefined}
 			onclick={(event) => {

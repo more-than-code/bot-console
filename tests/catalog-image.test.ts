@@ -129,7 +129,8 @@ function imageSpec(kind: ImageSpec['kind'] = 'service'): ImageSpec {
 		healthy_after_sec: 30,
 		memory_mb: null,
 		timeout_sec: 600,
-		healthcheck: null
+		healthcheck: null,
+		logging: null
 	};
 }
 
@@ -190,7 +191,7 @@ function host(): Host {
 		revoked_at: null,
 		relation: 'owner',
 		share_level: null,
-		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false }
+		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false }
 	};
 }
 
@@ -2522,7 +2523,7 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.deepEqual(historyFetch(HOST_ID, '', false), { submit: false, pending: false });
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 		const second = '00000000-0000-4000-8000-0000000000ab';
-		const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: true, files: false };
+		const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: true, files: false, logging: false };
 		const blockedHost = { ...host(), programs };
 		const openHost = { ...host(), id: second, name: 'pi2', programs: { ...programs, images: true, docker: true } };
 		const props = {
@@ -3593,6 +3594,79 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(hostRadios.length, 2);
 		assert.equal(hostRadios[0]?.includes('pi1') && hostRadios[0]?.includes('aria-checked="true"'), true);
 		assert.equal(hostRadios[1]?.includes('pi2') && hostRadios[1]?.includes('aria-checked="false"'), true);
+	});
+
+	test('programs.logging is false when absent, and a host without it is not offered deploy', () => {
+		const base = {
+			enabled: true,
+			allow_shell: false,
+			docker: true,
+			files: true,
+			images: true,
+			policy_hash: 'abc',
+			run_as: ['joe']
+		};
+		assert.equal(parseHostPrograms(base)?.logging, false);
+		assert.equal(parseHostPrograms({ ...base, logging: null })?.logging, false);
+		assert.equal(parseHostPrograms({ ...base, logging: true })?.logging, true);
+		assert.equal(parseHostPrograms({ ...base, logging: false })?.logging, false);
+		assert.equal(parseHostPrograms({ ...base, logging: 'yes' }), null);
+
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		function buttons(html: string): string[] {
+			return [...html.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)].map((match) => match[0]);
+		}
+		function control(html: string, label: string): string {
+			const found = buttons(html).find((tag) => tag.includes(label));
+			assert.equal(found != null, true, label);
+			return found ?? '';
+		}
+		function markedDisabled(tag: string): boolean {
+			const open = tag.slice(0, tag.indexOf('>') + 1);
+			return /\sdisabled(?:=|\s|>)/.test(open);
+		}
+		const plainHost = host();
+		const capable = host();
+		if (capable.programs) capable.programs = { ...capable.programs, logging: true };
+		const withLogging = imageEntry(['deploy']);
+		withLogging.spec.logging = { max_size_mb: 5, max_files: 2 };
+		const props = {
+			deployAction: '?/catalogDeploy',
+			rollbackAction: '?/catalogRollback',
+			removeAction: '?/catalogRemove',
+			confirmAction: '?/catalogConfirm',
+			historyAction: '?/catalogDeploys',
+			result: null
+		};
+		const reason = "This host's agent does not support log settings";
+		const blocked = render(CatalogDeployForm, { props: { ...props, entry: withLogging, hosts: [plainHost] } }).body;
+		assert.equal(blocked.includes(`pi1: ${reason}`), true);
+		assert.equal(markedDisabled(control(blocked, 'Deploy')), true);
+		assert.equal(markedDisabled(control(blocked, 'Remove')), false);
+		const radios = buttons(blocked).filter((tag) => tag.includes('role="radio"'));
+		assert.equal(radios.length, 1);
+		assert.equal(markedDisabled(radios[0] ?? ''), false);
+
+		const open = render(CatalogDeployForm, { props: { ...props, entry: imageEntry(['deploy']), hosts: [plainHost] } }).body;
+		assert.equal(open.includes('does not support log settings'), false);
+		assert.equal(markedDisabled(control(open, 'Deploy')), false);
+
+		const offered = render(CatalogDeployForm, { props: { ...props, entry: withLogging, hosts: [capable] } }).body;
+		assert.equal(offered.includes('does not support log settings'), false);
+		assert.equal(markedDisabled(control(offered, 'Deploy')), false);
+
+		const second = '00000000-0000-4000-8000-0000000000ab';
+		const withoutLogging = { ...host(), id: second, name: 'pi2' };
+		const both = render(CatalogDeployForm, { props: { ...props, entry: withLogging, hosts: [capable, withoutLogging] } }).body;
+		assert.equal(both.includes(`pi1: ${reason}`), false);
+		assert.equal(both.includes(`pi2: ${reason}`), true);
+		assert.equal(markedDisabled(control(both, 'Deploy')), false);
+
+		const job = imageEntry(['deploy']);
+		job.spec = { ...job.spec, kind: 'job', restart: 'no', logging: { max_size_mb: 5, max_files: 2 } };
+		const jobHtml = render(CatalogDeployForm, { props: { ...props, entry: job, hosts: [plainHost] } }).body;
+		assert.equal(jobHtml.includes(`pi1: ${reason}`), true);
+		assert.equal(markedDisabled(control(jobHtml, 'Run job')), true);
 	});
 
 	test('a failed file save does not put the paste back into the box', async () => {

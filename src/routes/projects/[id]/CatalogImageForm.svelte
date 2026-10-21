@@ -11,11 +11,14 @@
 	import Notice from '$lib/components/Notice.svelte';
 	import type { ImageEntry } from '$lib/api-types';
 	import {
+		DEFAULT_LOG_FILES,
+		DEFAULT_LOG_SIZE_MB,
 		SUGGESTED_MEMORY_MB,
 		applyDockerPaste,
 		blankImageDraft,
 		dockerRunPreview,
 		imageSpecFromDraft,
+		loggingForPreview,
 		parseDockerRun,
 		setPortPublic,
 		type ImageDraft,
@@ -83,7 +86,9 @@
 			healthInterval: health ? String(health.interval_sec) : '',
 			healthTimeout: health ? String(health.timeout_sec) : '',
 			healthRetries: health ? String(health.retries) : '',
-			healthStart: health ? String(health.start_period_sec) : ''
+			healthStart: health ? String(health.start_period_sec) : '',
+			logMaxSizeMb: spec.logging ? String(spec.logging.max_size_mb) : '',
+			logMaxFiles: spec.logging ? String(spec.logging.max_files) : ''
 		};
 	}
 
@@ -137,7 +142,8 @@
 				.map((file) => ({ file: file.file.trim(), target: file.target.trim() })),
 			restart: draft.workload === 'job' ? 'no' : draft.restart,
 			user: draft.user.trim(),
-			memoryMb: memory
+			memoryMb: memory,
+			logging: loggingForPreview(draft.logMaxSizeMb, draft.logMaxFiles)
 		});
 	});
 
@@ -560,6 +566,46 @@
 		</Label>
 		{@render fieldNotice('timeout_sec')}
 	{/if}
+	<div class="grid gap-3" role="group" aria-label="Logs">
+		<p class="text-sm font-medium">Logs</p>
+		<p class="text-muted-foreground text-sm">Leave both empty and Deploybot uses {DEFAULT_LOG_SIZE_MB} MB and {DEFAULT_LOG_FILES} files.</p>
+		<Label class="grid gap-1.5" for="{fieldId}-log-size">
+			Max size per file (MB)
+			<Input
+				id="{fieldId}-log-size"
+				name="log_max_size_mb"
+				type="number"
+				min={1}
+				max={100}
+				bind:value={
+					() => (draft.logMaxSizeMb === '' ? null : Number(draft.logMaxSizeMb)),
+					(next) => (draft.logMaxSizeMb = next == null || Number.isNaN(next) ? '' : String(next))
+				}
+				placeholder={String(DEFAULT_LOG_SIZE_MB)}
+				aria-invalid={invalid('logging.max_size_mb')}
+				aria-describedby={describedBy('logging.max_size_mb')}
+			/>
+		</Label>
+		{@render fieldNotice('logging.max_size_mb')}
+		<Label class="grid gap-1.5" for="{fieldId}-log-files">
+			Files kept
+			<Input
+				id="{fieldId}-log-files"
+				name="log_max_files"
+				type="number"
+				min={1}
+				max={10}
+				bind:value={
+					() => (draft.logMaxFiles === '' ? null : Number(draft.logMaxFiles)),
+					(next) => (draft.logMaxFiles = next == null || Number.isNaN(next) ? '' : String(next))
+				}
+				placeholder={String(DEFAULT_LOG_FILES)}
+				aria-invalid={invalid('logging.max_files')}
+				aria-describedby={describedBy('logging.max_files')}
+			/>
+		</Label>
+		{@render fieldNotice('logging.max_files')}
+	</div>
 	<Label class="grid gap-1.5" for="{fieldId}-user">
 		User
 		<Input id="{fieldId}-user" name="user" bind:value={draft.user} maxlength={64} autocomplete="off" spellcheck="false" aria-invalid={invalid('user')} aria-describedby={describedBy('user')} />

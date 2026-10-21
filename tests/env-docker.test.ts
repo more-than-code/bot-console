@@ -4,7 +4,7 @@ import { after, before, describe, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
 import { render } from 'svelte/server';
 import type { EnvSet, Health, Host, ImageEntry, ImageSpec, ProjectServiceRow } from '../src/lib/api-types.ts';
-import { blankImageDraft, imageDraftFromForm, imageRequestBody, imageSpecFromDraft } from '../src/lib/image-spec.ts';
+import { applyDockerPaste, blankImageDraft, dockerRunPreview, imageDraftFromForm, imageRequestBody, imageSpecFromDraft, loggingForPreview, parseDockerRun } from '../src/lib/image-spec.ts';
 import { healthSourceLabel } from '../src/lib/service-view.ts';
 import { parseEnvSet, parseHealthHistory, parseHealthPoint, parseImageSpec, parseService } from '../src/lib/server/shape.ts';
 import StatusBadge from '../src/lib/components/StatusBadge.svelte';
@@ -244,6 +244,353 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 		assert.equal(read.draft.healthTest, '');
 		assert.equal(read.field, 'healthcheck');
 		assert.equal(read.message?.includes('x'.repeat(20)), false);
+	});
+
+	test('logging is omitted unless both bounds are set, and the preview shows the cap', () => {
+		assert.equal(parseImageSpec(spec('service'))?.logging, null);
+		assert.equal(parseImageSpec({ ...spec('service'), logging: null })?.logging, null);
+		const pair = { max_size_mb: 5, max_files: 2 };
+		assert.deepEqual(parseImageSpec({ ...spec('service'), logging: pair })?.logging, pair);
+		assert.deepEqual(parseImageSpec({ ...spec('job'), logging: { max_size_mb: 1, max_files: 1 } })?.logging, { max_size_mb: 1, max_files: 1 });
+		assert.deepEqual(parseImageSpec({ ...spec('service'), logging: { max_size_mb: 100, max_files: 10 } })?.logging, { max_size_mb: 100, max_files: 10 });
+		assert.equal(parseImageSpec({ ...spec('service'), logging: { max_size_mb: 5 } }), null);
+		assert.equal(parseImageSpec({ ...spec('service'), logging: { max_files: 2 } }), null);
+		assert.equal(parseImageSpec({ ...spec('service'), logging: {} }), null);
+		assert.equal(parseImageSpec({ ...spec('service'), logging: [] }), null);
+		assert.equal(parseImageSpec({ ...spec('service'), logging: { ...pair, driver: 'json-file' } }), null);
+		assert.equal(parseImageSpec({ ...spec('service'), logging: { max_size_mb: 1.5, max_files: 2 } }), null);
+		assert.equal(parseImageSpec({ ...spec('service'), logging: { max_size_mb: 0, max_files: 2 } }), null);
+		assert.equal(parseImageSpec({ ...spec('service'), logging: { max_size_mb: 101, max_files: 2 } }), null);
+		assert.equal(parseImageSpec({ ...spec('service'), logging: { max_size_mb: 5, max_files: 0 } }), null);
+		assert.equal(parseImageSpec({ ...spec('service'), logging: { max_size_mb: 5, max_files: 11 } }), null);
+		assert.equal(parseImageSpec({ ...spec('service'), logging: { max_size_mb: '5', max_files: 2 } }), null);
+
+		function built(size: string, files: string, workload: 'service' | 'job' = 'service') {
+			const draft = blankImageDraft();
+			draft.workload = workload;
+			draft.image = 'ghcr.io/acme/web:1';
+			draft.logMaxSizeMb = size;
+			draft.logMaxFiles = files;
+			return imageSpecFromDraft(draft, undefined, false);
+		}
+		const empty = built('', '');
+		assert.equal(empty.ok, true);
+		if (!empty.ok) return;
+		assert.equal(empty.spec.logging, null);
+		assert.equal(Object.hasOwn(imageRequestBody(empty.spec, null).spec as Record<string, unknown>, 'logging'), false);
+
+		const onlySize = built('5', '');
+		assert.equal(onlySize.ok, false);
+		if (onlySize.ok) return;
+		assert.equal(onlySize.field, 'logging.max_files');
+		assert.match(onlySize.message, /Files kept/);
+		const onlyFiles = built('', '2');
+		assert.equal(onlyFiles.ok, false);
+		if (onlyFiles.ok) return;
+		assert.equal(onlyFiles.field, 'logging.max_size_mb');
+		assert.match(onlyFiles.message, /Max size per file/);
+
+		const sizeBounds = 'Max size per file must be an integer from 1 to 100 MB.';
+		const filesBounds = 'Files kept must be an integer from 1 to 10.';
+		for (const size of ['0', '101', '1.5', 'abc']) {
+			const bad = built(size, '2');
+			assert.equal(bad.ok, false, size);
+			if (bad.ok) continue;
+			assert.equal(bad.field, 'logging.max_size_mb', size);
+			assert.equal(bad.message, sizeBounds, size);
+		}
+		const blankSize = built('  ', '2');
+		assert.equal(blankSize.ok, false);
+		if (!blankSize.ok) {
+			assert.equal(blankSize.field, 'logging.max_size_mb');
+			assert.equal(blankSize.message, 'Max size per file is required when files kept is set.');
+		}
+		for (const files of ['0', '11', '2.5']) {
+			const bad = built('5', files);
+			assert.equal(bad.ok, false, files);
+			if (bad.ok) continue;
+			assert.equal(bad.field, 'logging.max_files', files);
+			assert.equal(bad.message, filesBounds, files);
+		}
+
+		const both = built('5', '2');
+		assert.equal(both.ok, true);
+		if (!both.ok) return;
+		assert.deepEqual(both.spec.logging, pair);
+		assert.deepEqual((imageRequestBody(both.spec, 'web').spec as Record<string, unknown>).logging, pair);
+		const edges = built('100', '10');
+		assert.equal(edges.ok, true);
+		if (!edges.ok) return;
+		assert.deepEqual(edges.spec.logging, { max_size_mb: 100, max_files: 10 });
+		const low = built('1', '1');
+		assert.equal(low.ok, true);
+		if (!low.ok) return;
+		assert.deepEqual(low.spec.logging, { max_size_mb: 1, max_files: 1 });
+
+		const job = built('5', '2', 'job');
+		assert.equal(job.ok, true);
+		if (!job.ok) return;
+		assert.equal(job.spec.healthcheck, null);
+		assert.deepEqual(job.spec.logging, pair);
+		assert.deepEqual((imageRequestBody(job.spec, null).spec as Record<string, unknown>).logging, pair);
+
+		const form = new FormData();
+		form.set('workload', 'service');
+		form.set('image', 'ghcr.io/acme/web:1');
+		form.set('log_max_size_mb', '5');
+		form.set('log_max_files', '2');
+		const read = imageDraftFromForm(form);
+		assert.equal(read.draft.logMaxSizeMb, '5');
+		assert.equal(read.draft.logMaxFiles, '2');
+		const fromForm = imageSpecFromDraft(read.draft, undefined, false);
+		assert.equal(fromForm.ok, true);
+		if (!fromForm.ok) return;
+		assert.deepEqual(fromForm.spec.logging, pair);
+		const huge = new FormData();
+		huge.set('image', 'ghcr.io/acme/web:1');
+		huge.set('log_max_size_mb', '1000');
+		huge.set('log_max_files', '2');
+		const hugeDraft = imageDraftFromForm(huge);
+		assert.equal(hugeDraft.draft.logMaxSizeMb, '1000');
+		const clipped = imageSpecFromDraft(hugeDraft.draft, undefined, false);
+		assert.equal(clipped.ok, false);
+		if (clipped.ok) return;
+		assert.equal(clipped.field, 'logging.max_size_mb');
+		assert.equal(clipped.message.includes('1000'), false);
+		const absurd = new FormData();
+		absurd.set('image', 'ghcr.io/acme/web:1');
+		absurd.set('log_max_size_mb', '1'.repeat(20));
+		absurd.set('log_max_files', '2');
+		const absurdDraft = imageDraftFromForm(absurd);
+		assert.equal(absurdDraft.draft.logMaxSizeMb, 'x');
+		assert.equal(absurdDraft.draft.logMaxSizeMb.includes('1'), false);
+
+		assert.equal(loggingForPreview('', ''), null);
+		assert.equal(loggingForPreview('5', ''), null);
+		assert.equal(loggingForPreview('', '2'), null);
+		assert.equal(loggingForPreview('200', '2'), null);
+		assert.deepEqual(loggingForPreview('5', '2'), pair);
+		const previewInput = {
+			name: 'web',
+			image: 'nginx',
+			command: [],
+			entrypoint: [],
+			ports: [],
+			envKeys: [],
+			volumes: [],
+			restart: 'unless-stopped',
+			user: '',
+			memoryMb: null
+		};
+		const defaults = dockerRunPreview(previewInput);
+		assert.match(defaults, /--log-opt max-size=10m --log-opt max-file=3/);
+		const override = dockerRunPreview({ ...previewInput, logging: pair });
+		assert.match(override, /--log-opt max-size=5m --log-opt max-file=2/);
+		assert.equal(override.includes('max-size=10m'), false);
+
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const stored = parseImageSpec({ ...spec('service'), logging: pair });
+		if (!stored) throw new Error('fixture spec');
+		const entry = imageEntry(null);
+		entry.spec = stored;
+		const editHtml = render(CatalogImageForm, {
+			props: { mode: 'edit', entry, saveAction: '?/catalogUpdate', sets: [] }
+		}).body;
+		function inputTag(source: string, id: string): string {
+			const found = [...source.matchAll(/<input\b[^>]*>/g)].map((match) => match[0]).find((tag) => tag.includes(`id="${id}"`));
+			assert.equal(found != null, true, id);
+			return found ?? '';
+		}
+		const sizeInput = inputTag(editHtml, 'catalog-image-web-log-size');
+		const filesInput = inputTag(editHtml, 'catalog-image-web-log-files');
+		assert.match(sizeInput, /name="log_max_size_mb"/);
+		assert.match(sizeInput, /placeholder="10"/);
+		assert.match(sizeInput, /min="1"/);
+		assert.match(sizeInput, /max="100"/);
+		assert.match(sizeInput, /value="5"/);
+		assert.match(filesInput, /name="log_max_files"/);
+		assert.match(filesInput, /placeholder="3"/);
+		assert.match(filesInput, /max="10"/);
+		assert.match(filesInput, /value="2"/);
+		assert.equal(editHtml.includes('>Logs<'), true);
+		assert.equal(editHtml.includes('Max size per file (MB)'), true);
+		assert.equal(editHtml.includes('Files kept'), true);
+		assert.equal(editHtml.includes('Deploybot uses 10 MB and 3 files.'), true);
+		const editPreview = editHtml.slice(editHtml.indexOf('aria-label="docker run preview"'), editHtml.indexOf('</pre>', editHtml.indexOf('aria-label="docker run preview"')));
+		assert.match(editPreview, /--log-opt max-size=5m --log-opt max-file=2/);
+
+		const createHtml = render(CatalogImageForm, {
+			props: { mode: 'create', saveAction: '?/catalogCreate', sets: [], setsStatus: 'ready', editor: null }
+		}).body;
+		const blankSizeInput = inputTag(createHtml, 'catalog-image-new-log-size');
+		assert.match(blankSizeInput, /placeholder="10"/);
+		assert.equal(blankSizeInput.includes('value="'), false);
+		const createPreview = createHtml.slice(createHtml.indexOf('aria-label="docker run preview"'), createHtml.indexOf('</pre>', createHtml.indexOf('aria-label="docker run preview"')));
+		assert.match(createPreview, /--log-opt max-size=10m --log-opt max-file=3/);
+
+		const jobEntry = imageEntry(null);
+		jobEntry.spec = { ...stored, kind: 'job', restart: 'no', healthy_after_sec: 0, timeout_sec: 600 };
+		const jobHtml = render(CatalogImageForm, {
+			props: { mode: 'edit', entry: jobEntry, saveAction: '?/catalogUpdate', sets: [] }
+		}).body;
+		assert.equal(jobHtml.includes('Health check (Docker)'), false);
+		assert.equal(jobHtml.includes('aria-label="Logs"'), true);
+		assert.match(inputTag(jobHtml, 'catalog-image-web-log-size'), /value="5"/);
+
+		const message = 'Max size per file must be an integer from 1 to 100 MB.';
+		const invalidDraft = blankImageDraft();
+		invalidDraft.logMaxSizeMb = '0';
+		invalidDraft.logMaxFiles = '2';
+		const invalidHtml = render(CatalogImageForm, {
+			props: {
+				mode: 'create',
+				saveAction: '?/catalogCreate',
+				sets: [],
+				editor: { mode: 'create', name: null, draft: invalidDraft, field: 'logging.max_size_mb', message }
+			}
+		}).body;
+		const sizeAt = invalidHtml.indexOf('id="catalog-image-new-log-size"');
+		const errorAt = invalidHtml.indexOf(message);
+		const filesAt = invalidHtml.indexOf('Files kept');
+		assert.equal(sizeAt >= 0 && errorAt > sizeAt && filesAt > errorAt, true);
+		assert.match(invalidHtml, /id="catalog-image-new-log-size"[^>]*aria-invalid="true"/);
+		assert.match(invalidHtml, /aria-describedby="catalog-image-new-error"/);
+	});
+
+	test('pasting the docker run preview restores log options and the image', () => {
+		function source(size: string, files: string) {
+			const draft = blankImageDraft();
+			draft.image = 'ghcr.io/acme/web:1';
+			draft.command = ['serve'];
+			draft.entrypoint = ['/entry'];
+			draft.ports = [
+				{ host: '8080', container: '80', public: true },
+				{ host: '9090', container: '90', public: false }
+			];
+			draft.env = [{ key: 'PORT', value: '' }];
+			draft.volumes = [{ name: 'data', target: '/data', readOnly: true }];
+			draft.restart = 'on-failure';
+			draft.user = 'app';
+			draft.logMaxSizeMb = size;
+			draft.logMaxFiles = files;
+			return draft;
+		}
+		function roundTrip(size: string, files: string) {
+			const draft = source(size, files);
+			const line = dockerRunPreview({
+				name: 'web',
+				image: draft.image,
+				command: draft.command,
+				entrypoint: draft.entrypoint,
+				ports: draft.ports.map((port) => ({ host: Number(port.host), container: Number(port.container), public: port.public })),
+				envKeys: draft.env.map((row) => row.key),
+				volumes: draft.volumes,
+				restart: draft.restart,
+				user: draft.user,
+				memoryMb: null,
+				logging: loggingForPreview(draft.logMaxSizeMb, draft.logMaxFiles)
+			});
+			const parsed = parseDockerRun(line);
+			assert.equal(parsed.ok, true, line);
+			if (!parsed.ok) return null;
+			assert.equal(parsed.draft.image, draft.image, line);
+			const applied = applyDockerPaste(blankImageDraft(), parsed);
+			assert.equal(applied.image, draft.image);
+			assert.deepEqual(applied.command, draft.command);
+			assert.deepEqual(applied.entrypoint, draft.entrypoint);
+			assert.deepEqual(applied.ports, draft.ports);
+			assert.deepEqual(applied.env, draft.env);
+			assert.deepEqual(applied.volumes, draft.volumes);
+			assert.equal(applied.restart, draft.restart);
+			assert.equal(applied.user, draft.user);
+			assert.equal(applied.logMaxSizeMb, draft.logMaxSizeMb);
+			assert.equal(applied.logMaxFiles, draft.logMaxFiles);
+			return applied;
+		}
+		const defaults = roundTrip('', '');
+		if (!defaults) return;
+		const defaultSpec = imageSpecFromDraft(defaults);
+		assert.equal(defaultSpec.ok, true);
+		if (!defaultSpec.ok) return;
+		assert.equal(defaultSpec.spec.logging, null);
+		assert.equal(Object.hasOwn(imageRequestBody(defaultSpec.spec, null).spec as Record<string, unknown>, 'logging'), false);
+		const override = roundTrip('5', '2');
+		if (!override) return;
+		const overrideSpec = imageSpecFromDraft(override);
+		assert.equal(overrideSpec.ok, true);
+		if (!overrideSpec.ok) return;
+		assert.deepEqual(overrideSpec.spec.logging, { max_size_mb: 5, max_files: 2 });
+
+		const filled = source('5', '2');
+		const unchanged = parseDockerRun('docker run nginx');
+		assert.equal(unchanged.ok, true);
+		if (!unchanged.ok) return;
+		const kept = applyDockerPaste(filled, unchanged);
+		assert.equal(kept.logMaxSizeMb, '5');
+		assert.equal(kept.logMaxFiles, '2');
+		const cleared = parseDockerRun('docker run --log-opt max-size=10m --log-opt max-file=3 nginx');
+		assert.equal(cleared.ok, true);
+		if (!cleared.ok) return;
+		const blankLogs = applyDockerPaste(filled, cleared);
+		assert.equal(blankLogs.logMaxSizeMb, '');
+		assert.equal(blankLogs.logMaxFiles, '');
+		assert.equal(blankLogs.image, 'nginx');
+
+		for (const line of [
+			'docker run --log-opt max-size=5m --log-opt max-file=2 nginx extra',
+			'docker run --log-opt=max-size=5m --log-opt=max-file=2 nginx extra',
+			'docker run --log-opt max-size=5 --log-opt=max-file=2 nginx extra',
+			'docker run --log-opt=max-file=2 --log-opt max-size=5m nginx extra'
+		]) {
+			const parsed = parseDockerRun(line);
+			assert.equal(parsed.ok, true, line);
+			if (!parsed.ok) continue;
+			assert.equal(parsed.draft.image, 'nginx', line);
+			assert.deepEqual(parsed.draft.command, ['extra'], line);
+			const applied = applyDockerPaste(blankImageDraft(), parsed);
+			assert.equal(applied.logMaxSizeMb, '5', line);
+			assert.equal(applied.logMaxFiles, '2', line);
+		}
+		const edges = parseDockerRun('docker run --log-opt max-size=100m --log-opt max-file=10 ghcr.io/acme/web:1');
+		assert.equal(edges.ok, true);
+		if (!edges.ok) return;
+		assert.equal(edges.draft.image, 'ghcr.io/acme/web:1');
+		assert.equal(applyDockerPaste(blankImageDraft(), edges).logMaxSizeMb, '100');
+		assert.equal(applyDockerPaste(blankImageDraft(), edges).logMaxFiles, '10');
+		const low = parseDockerRun('docker run --log-opt=max-size=1 --log-opt=max-file=1 nginx');
+		assert.equal(low.ok, true);
+		if (!low.ok) return;
+		assert.equal(applyDockerPaste(blankImageDraft(), low).logMaxSizeMb, '1');
+		assert.equal(applyDockerPaste(blankImageDraft(), low).logMaxFiles, '1');
+		const consumed = parseDockerRun('docker run --log-opt max-size=5m --log-opt max-file=2');
+		assert.equal(consumed.ok, false);
+		if (!consumed.ok) assert.equal(consumed.message, 'The docker run command has no image.');
+
+		const sizeBounds = '--log-opt max-size must be an integer from 1 to 100 MB.';
+		const filesBounds = '--log-opt max-file must be an integer from 1 to 10.';
+		const oneKey = '--log-opt max-size and max-file must both be set.';
+		const cases: Array<[string, string, string]> = [
+			['docker run --log-opt max-size=0m --log-opt max-file=2 nginx', sizeBounds, 'nginx'],
+			['docker run --log-opt max-size=101 --log-opt max-file=2 nginx', sizeBounds, '101'],
+			['docker run --log-opt=max-size=10g --log-opt max-file=2 nginx', sizeBounds, '10g'],
+			['docker run --log-opt max-size=5M --log-opt max-file=2 nginx', sizeBounds, '5M'],
+			['docker run --log-opt max-size=5m --log-opt max-file=0 nginx', filesBounds, 'nginx'],
+			['docker run --log-opt max-size=5m --log-opt max-file=11 nginx', filesBounds, '11'],
+			['docker run --log-opt max-size=5m --log-opt=max-file=2m nginx', filesBounds, '2m'],
+			['docker run --log-opt label=SECRETOPT nginx', '--log-opt is not supported.', 'SECRETOPT'],
+			['docker run --log-opt=mode=non-blocking nginx', '--log-opt is not supported.', 'non-blocking'],
+			['docker run --log-driver json-file nginx', '--log-driver is not supported.', 'json-file'],
+			['docker run --log-driver=journald nginx', '--log-driver is not supported.', 'journald'],
+			['docker run --log-opt max-size=5m nginx', oneKey, 'nginx'],
+			['docker run --log-opt=max-file=2 nginx', oneKey, 'nginx']
+		];
+		for (const [line, message, hidden] of cases) {
+			const parsed = parseDockerRun(line);
+			assert.equal(parsed.ok, false, line);
+			if (parsed.ok) continue;
+			assert.equal(parsed.message, message, line);
+			assert.equal(parsed.message.includes(hidden), false, line);
+		}
 	});
 
 	test('putEnvKey sends is_secret only when adding, and deleteEnvKey does not send a value', async () => {

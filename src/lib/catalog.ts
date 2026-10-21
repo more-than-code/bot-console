@@ -72,6 +72,13 @@ export function imageFilesBlockReason(host: Pick<Host, 'programs'>, hasFiles: bo
 	return "This host's agent does not support files";
 }
 
+/** Why Deploy is refused for an entry that sets logging. An entry without it has no reason. */
+export function imageLoggingBlockReason(host: Pick<Host, 'programs'>, hasLogging: boolean): string | null {
+	if (!hasLogging) return null;
+	if (host.programs?.logging === true) return null;
+	return "This host's agent does not support log settings";
+}
+
 /** Union of run-as accounts on eligible hosts. Shell entries only use hosts that allow a shell. */
 export function runAsChoices(hosts: readonly Pick<Host, 'relation' | 'share_level' | 'programs'>[], shell: boolean): string[] {
 	const names = new Set<string>();
