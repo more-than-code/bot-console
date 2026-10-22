@@ -11,7 +11,7 @@ import { setPageUrl } from './stubs/app-state.ts';
 
 const SERVER = 'wss://api.example/agent';
 const RELEASES = 'https://github.com/more-than-code/bot-agent/releases/latest';
-const GUIDE = 'https://github.com/more-than-code/bot-agent/blob/main/docs/install.md';
+const GUIDE = 'https://github.com/more-than-code/bot-agent/blob/dev/docs/install.md';
 const ENROL = `sudo ./install.sh enroll --server '${SERVER}' --runner`;
 const PLACEHOLDER = "sudo ./install.sh enroll --server '<your server URL>' --runner";
 

@@ -3,7 +3,7 @@
 	import * as Card from '$lib/components/ui/card';
 
 	const RELEASES = 'https://github.com/more-than-code/bot-agent/releases/latest';
-	const GUIDE = 'https://github.com/more-than-code/bot-agent/blob/main/docs/install.md';
+	const GUIDE = 'https://github.com/more-than-code/bot-agent/blob/dev/docs/install.md';
 
 	let { slug, open }: { slug: string; open: boolean } = $props();
 	const projectsLine = $derived(`projects = ["${slug}"]`);
