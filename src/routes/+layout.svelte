@@ -43,7 +43,10 @@
 <div class="mx-auto w-full min-w-0 max-w-6xl px-4">
 	<header class="flex flex-col gap-y-2 py-3 sm:flex-row sm:items-center sm:gap-x-3">
 		<div class="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 sm:contents">
-			<a class="shrink-0 text-sm font-semibold" href="/projects">Deploybot</a>
+			<a class="shrink-0" href="/projects" aria-label="Deploybot">
+				<img src="/brand/lockup-light.svg" alt="" class="h-6 w-auto dark:hidden" />
+				<img src="/brand/lockup-dark.svg" alt="" class="hidden h-6 w-auto dark:block" />
+			</a>
 			<nav class="flex shrink-0 items-center" aria-label="Primary">
 				<a
 					href="/projects"

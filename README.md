@@ -2,7 +2,7 @@
 
 SvelteKit console for Deploybot. It is a BFF in front of bot-api-server: the browser never calls the API, and this app has no database login. Sign in with Google, then open a project and a host. A project has a Services tab. A host has Overview and Processes tabs.
 
-JavaScript is required. Search, sort, paging, tabs, and filters stay in the URL. Writes are SvelteKit form actions. The UI is Tailwind CSS v4 and shadcn-svelte (style `nova`, neutral base, Lucide icons). `cn()` lives in `src/lib/utils.ts`. Colours are the tokens in `src/app.css` (light on `:root`, dark on `.dark`), including the Deploybot status tokens. The header theme switch posts to `/theme` and stores `bot_theme` (`system`, `light`, or `dark`; default `system`).
+JavaScript is required. Search, sort, paging, tabs, and filters stay in the URL. Writes are SvelteKit form actions. Brand files (favicons, apple-touch and manifest icons, header lockups) are copied from the umbrella `docs/brand/logo/` into `static/brand/`; `static/manifest.webmanifest` lists the app icons. The UI is Tailwind CSS v4 and shadcn-svelte (style `nova`, neutral base, Lucide icons). `cn()` lives in `src/lib/utils.ts`. Colours are the tokens in `src/app.css` (light on `:root`, dark on `.dark`), including the Deploybot status tokens. The header theme switch posts to `/theme` and stores `bot_theme` (`system`, `light`, or `dark`; default `system`).
 
 ## Setup
 
@@ -77,6 +77,6 @@ Sign-in is one "Sign in with Google" button. The server asks bot-api-server for 
 
 A join token is shown once, on the create result, and is not written to browser storage. The install command is shown with it only when it matches the command the API just issued. Otherwise the page says `Install command not shown: unexpected format` and the copy button is for the token only. An invite link is the same kind of one-time secret: admin+ creates it on the Members tab, the dialog shows the url once, and closing the dialog clears it. The url is shown only when its origin is this console and its path is `/invite/<token>`. The pending list never includes the token. Opening the link does not join; Join is a POST. `/signin` responses send `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. Buttons follow the caller's project role. The API still enforces that role. `forbidden` and `not_found` are messages on the page. Lists that stop at the page or item cap, or that see a repeated cursor, say `More items not shown`.
 
-The header shows the product name, a Projects link, the theme switch (System, Light, Dark), and, when signed in, the user's name, a menu linking to Connected apps, and Sign out.
+The header shows the Deploybot lockup (light or dark to match the theme; it links to `/projects`), a Projects link, the theme switch (System, Light, Dark), and, when signed in, the user's name, a menu linking to Connected apps, and Sign out.
 
 This console has not been run against bot-api-server or Google from the unit tests. They mock `fetch`.
