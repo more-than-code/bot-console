@@ -11,11 +11,6 @@
     "prepare": "svelte-kit sync || echo ''",
     "test": "node --import ./tests/register.mjs --test tests/*.test.ts"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
-  },
   "devDependencies": {
     "@internationalized/date": "3.12.2",
     "@lucide/svelte": "1.23.0",
