@@ -478,9 +478,10 @@ export type DeviceView = {
 	status: 'pending' | 'approved' | 'denied' | 'expired';
 };
 
+/** Token from create, plus the server URL taken from the API install command. The command itself is not kept. */
 export type CreatedJoin = {
 	token: string;
-	install_command: string | null;
+	server: string | null;
 };
 
 /** One row of `GET /v1/hosts/{id}/processes`. */

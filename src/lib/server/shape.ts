@@ -6,6 +6,7 @@ import type {
 	CatalogGrantAction,
 	CatalogPreview,
 	CreatedInvite,
+	CreatedJoin,
 	DeviceView,
 	EnvSet,
 	EnvSetKey,
@@ -54,7 +55,7 @@ import type {
 import { CATALOG_NAME, ENV_KEY, GRANT_ACTIONS, RUN_AS, SPEC_HASH } from '../catalog';
 import { cleanFileTarget, cleanImageUser, cleanVolumeTarget, fileTargetNests, isConfirmationId, isFileName, isRegistryHost, isSetName, redactAssignments } from '../image-spec';
 import { isRole } from './roles';
-import { acceptedInstallCommand, acceptedInviteUrl, consentRedirect, isJoinToken, isOauthRequestId, isUuid } from './validate';
+import { acceptedInstallServer, acceptedInviteUrl, consentRedirect, isJoinToken, isOauthRequestId, isUuid } from './validate';
 
 const CONTROL = /[\u0000-\u001F\u007F]/;
 /** Catalog command, dir, args, and env values forbid NUL and newline. A tab is kept. */
@@ -586,12 +587,12 @@ export function parseDevice(value: unknown): DeviceView | null {
 	return { user_code, client_name, expires_at, status: value.status };
 }
 
-export function parseCreatedJoin(value: unknown): { token: string; install_command: string | null } | null {
+export function parseCreatedJoin(value: unknown): CreatedJoin | null {
 	if (!isRecord(value)) return null;
 	const token = text(value.token, 128);
 	if (!token || !isJoinToken(token)) return null;
 	const command = text(value.install_command, 4096);
-	return { token, install_command: command ? acceptedInstallCommand(command, token) : null };
+	return { token, server: command ? acceptedInstallServer(command, token) : null };
 }
 
 export type ListPage = { raw: unknown[]; next: string | null };

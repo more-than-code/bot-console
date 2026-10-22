@@ -261,11 +261,9 @@ describe('auth routes', { concurrency: false }, () => {
 			assert.fail('expected the join token result');
 		}
 		assert.equal(created.created?.token, JOIN);
-		assert.equal(
-			created.created?.install_command,
-			`printf '%s' '${JOIN}' | sudo -u bot-agent bot-agent init --server 'wss://api.example/[redacted]' --join-token-stdin`
-		);
+		assert.equal(created.created?.server, 'wss://api.example/[redacted]');
 		assert.equal(created.message, null);
+		assert.equal(JSON.stringify(created).includes('install_command'), false);
 		assert.equal(containsToken(created), false);
 		assert.equal(containsToken(created, JOIN), true);
 	});
@@ -674,33 +672,35 @@ describe('auth routes', { concurrency: false }, () => {
 		assert.equal(isActionFailure(shown), false);
 		if (!shown || isRedirect(shown) || isActionFailure(shown)) assert.fail('expected the join token');
 		assert.equal(shown.created?.token, JOIN);
-		assert.equal(shown.created?.install_command, command);
+		assert.equal(shown.created?.server, 'wss://api.example/agent');
 		assert.equal(shown.message, null);
+		assert.equal(JSON.stringify(shown).includes('install_command'), false);
+		assert.equal(JSON.stringify(shown).split(JOIN).length - 1, 1);
 
 		const hidden = await create();
 		if (!hidden || isRedirect(hidden) || isActionFailure(hidden)) assert.fail('expected the join token');
 		assert.equal(hidden.created?.token, JOIN);
-		assert.equal(hidden.created?.install_command, null);
-		assert.equal(hidden.message, 'Install command not shown: unexpected format');
+		assert.equal(hidden.created?.server, null);
+		assert.equal(hidden.message, 'Server URL not shown: unexpected format');
 		assert.equal(JSON.stringify(hidden).includes('rm -rf'), false);
 		assert.equal(containsToken(hidden), false);
 
 		const mismatch = await create();
 		if (!mismatch || isRedirect(mismatch) || isActionFailure(mismatch)) assert.fail('expected the join token');
-		assert.equal(mismatch.created?.install_command, null);
-		assert.equal(mismatch.message, 'Install command not shown: unexpected format');
+		assert.equal(mismatch.created?.server, null);
+		assert.equal(mismatch.message, 'Server URL not shown: unexpected format');
 		assert.equal(JSON.stringify(mismatch).includes(other), false);
 
 		const substituted = await create();
 		if (!substituted || isRedirect(substituted) || isActionFailure(substituted)) assert.fail('expected the join token');
-		assert.equal(substituted.created?.install_command, null);
-		assert.equal(substituted.message, 'Install command not shown: unexpected format');
+		assert.equal(substituted.created?.server, null);
+		assert.equal(substituted.message, 'Server URL not shown: unexpected format');
 		assert.equal(JSON.stringify(substituted).includes('$('), false);
 
 		const legacy = await create();
 		if (!legacy || isRedirect(legacy) || isActionFailure(legacy)) assert.fail('expected the join token');
-		assert.equal(legacy.created?.install_command, null);
-		assert.equal(legacy.message, 'Install command not shown: unexpected format');
+		assert.equal(legacy.created?.server, null);
+		assert.equal(legacy.message, 'Server URL not shown: unexpected format');
 		assert.equal(JSON.stringify(legacy).includes('--join-token '), false);
 
 		const rejected = await create();
@@ -725,8 +725,10 @@ describe('auth routes', { concurrency: false }, () => {
 		));
 		assert.equal(containsToken(again, JOIN), false);
 		const tokensPage = readFileSync(new URL('../src/routes/projects/[id]/TokensSection.svelte', import.meta.url), 'utf8');
-		assert.match(tokensPage, /\{#if created\.install_command\}/);
+		assert.equal(tokensPage.includes('install_command'), false);
+		assert.equal(tokensPage.includes('Copy install command'), false);
 		assert.match(tokensPage, /Copy token/);
+		assert.match(tokensPage, /Copy enrol command/);
 	});
 
 	test('device load, approve, deny, a mismatched code, and an expired status', async () => {

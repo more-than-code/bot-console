@@ -14,13 +14,15 @@
 		omitted,
 		truncated,
 		canAdmin,
-		message
+		message,
+		hostsMessage
 	}: {
 		hosts: Host[];
 		omitted: number;
 		truncated: boolean;
 		canAdmin: boolean;
 		message: string | null;
+		hostsMessage: string | null;
 	} = $props();
 
 	const columns = $derived<Column<Host>[]>([
@@ -43,6 +45,15 @@
 {/if}
 <h2 id="hosts-heading" class="sr-only">Hosts</h2>
 <DataTable rows={hosts} {columns} id="hosts" labelledBy="hosts-heading" empty="No hosts enrolled." rowKey={(host) => host.id}>
+	{#snippet emptyExtra()}
+		{#if !hostsMessage}
+			{#if canAdmin}
+				{' '}<a class="text-primary underline underline-offset-4" href="?tab=tokens">Add a host</a>
+			{:else}
+				{' '}Ask a project admin to add one.
+			{/if}
+		{/if}
+	{/snippet}
 	{#snippet row(host)}
 		<tr>
 			<td class="p-2 align-middle"><a class="text-primary underline-offset-4 hover:underline" href="/hosts/{host.id}">{host.name}</a></td>

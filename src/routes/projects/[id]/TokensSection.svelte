@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
+	import AddHostGuide from './AddHostGuide.svelte';
+	import CommandBlock from '$lib/components/CommandBlock.svelte';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
@@ -20,7 +22,10 @@
 		truncated,
 		canAdmin,
 		created,
-		message
+		message,
+		hostsMessage,
+		slug,
+		hasHosts
 	}: {
 		tokens: JoinToken[];
 		omitted: number;
@@ -28,7 +33,15 @@
 		canAdmin: boolean;
 		created: CreatedJoin | null;
 		message: string | null;
+		hostsMessage: string | null;
+		slug: string;
+		hasHosts: boolean;
 	} = $props();
+
+	const PLACEHOLDER_SERVER = '<your server URL>';
+	const enrol = $derived(
+		created ? `sudo ./install.sh enroll --server '${created.server ?? PLACEHOLDER_SERVER}' --runner` : ''
+	);
 
 	function stateOf(token: JoinToken): string {
 		if (token.revoked_at) return 'revoked';
@@ -48,6 +61,9 @@
 {#if message}
 	<Notice kind="error">{message}</Notice>
 {/if}
+{#if hostsMessage}
+	<Notice kind="error">{hostsMessage}</Notice>
+{/if}
 {#if created}
 	<Card.Root class="mb-4" translate="no">
 		<Card.Content class="grid gap-2">
@@ -55,15 +71,14 @@
 			<p class="text-muted-foreground text-sm">Join token</p>
 			<p class="font-mono text-sm break-all">{created.token}</p>
 			<CopyButton value={created.token} label="Copy token" />
-			{#if created.install_command}
-				<p class="text-muted-foreground text-sm">Install command</p>
-				<pre class="overflow-x-auto font-mono text-sm whitespace-pre-wrap">{created.install_command}</pre>
-				<CopyButton value={created.install_command} label="Copy install command" />
-			{/if}
+			<p class="text-muted-foreground text-sm">Next: enrol the host</p>
+			<CommandBlock command={enrol} label="Copy enrol command" ariaLabel="Enrol command" />
+			<p class="text-sm">Paste the join token at the hidden prompt. Do not put it on the command line.</p>
 		</Card.Content>
 	</Card.Root>
 {/if}
 {#if canAdmin}
+	<AddHostGuide {slug} open={!hasHosts && !hostsMessage} />
 	<Card.Root class="mb-4">
 		<Card.Header>
 			<Card.Title>Create a join token</Card.Title>

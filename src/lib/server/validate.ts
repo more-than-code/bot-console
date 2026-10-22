@@ -162,11 +162,17 @@ export function consentRedirect(value: unknown): string | null {
 	return url.href;
 }
 
-/** The init command is shown only when it matches the fixed form and embeds this token. */
-export function acceptedInstallCommand(command: string, token: string): string | null {
+/**
+ * Server URL from the API install command. Null when the command is not the
+ * fixed form, embeds a different token, contains `$(`, or the server itself
+ * contains the token. The console never shows that command.
+ */
+export function acceptedInstallServer(command: string, token: string): string | null {
 	// The server capture would otherwise allow `$(...)` inside the quotes.
 	if (command.includes('$(')) return null;
 	const match = INSTALL_COMMAND.exec(command);
 	if (!match || match[1] !== token) return null;
-	return command;
+	const server = match[2];
+	if (!server || server.includes(token)) return null;
+	return server;
 }

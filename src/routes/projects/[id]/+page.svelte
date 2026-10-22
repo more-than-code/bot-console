@@ -153,6 +153,7 @@
 			truncated={data.hostsTruncated}
 			canAdmin={data.canAdmin}
 			message={sectionMessage ?? data.hostsMessage}
+			hostsMessage={data.hostsMessage}
 		/>
 	{:else if scope === 'services'}
 		<ServicesSection
@@ -227,6 +228,9 @@
 			canAdmin={data.canAdmin}
 			created={action?.scope === 'tokens' ? (action.created ?? null) : null}
 			message={sectionMessage ?? data.tokensMessage}
+			hostsMessage={data.hostsMessage}
+			slug={data.project.slug}
+			hasHosts={data.hosts.length > 0}
 		/>
 	{:else if scope === 'settings'}
 		<SettingsSection

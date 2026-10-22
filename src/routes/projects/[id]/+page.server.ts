@@ -216,7 +216,7 @@ export const load: PageServerLoad = async (event) => {
 	// The catalog tab also loads one services page, to see which images already have a container.
 	// The services tab waits, because that table needs the host list.
 	const hostsLoad =
-		tab === 'hosts' || tab === 'services' || tab === 'catalog'
+		tab === 'hosts' || tab === 'services' || tab === 'catalog' || tab === 'tokens'
 			? loadList(event, `/v1/projects/${id}/hosts`, parseHost)
 			: Promise.resolve(emptyList<Host>());
 	const servicesLoad =
@@ -702,7 +702,7 @@ export const actions: Actions = {
 			return present(event, {
 				scope: 'tokens' as const,
 				created,
-				message: created.install_command ? null : 'Install command not shown: unexpected format'
+				message: created.server ? null : 'Server URL not shown: unexpected format'
 			});
 		} catch (err) {
 			return actionFailure(event, err, 'tokens');

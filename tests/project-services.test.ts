@@ -194,7 +194,7 @@ describe('project services', { concurrency: false }, () => {
 			// Catalog also loads one Deploybot services page so image actions know which hosts have a container.
 			catalog: ['catalog', 'hosts', 'members', 'services'],
 			members: ['invites', 'members'],
-			tokens: ['join-tokens'],
+			tokens: ['hosts', 'join-tokens'],
 			settings: ['env-sets', 'files', 'registries']
 		};
 		const overlap: Record<string, number> = {};
