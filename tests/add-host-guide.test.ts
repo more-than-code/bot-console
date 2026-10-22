@@ -77,6 +77,14 @@ test('a created token is only in the token display and the Copy token value', ()
 	assert.equal(times(placeholder, JOIN), 1);
 	assert.equal(placeholder.includes('Copy install command'), false);
 
+	const dev = decode(renderTokens({ token: JOIN, server: 'ws://127.0.0.1:8090/agent/v1/ws' }, false));
+	assert.equal(dev.includes("sudo ./install.sh enroll --server 'ws://127.0.0.1:8090/agent/v1/ws' --runner --insecure-dev"), true);
+	assert.equal(decode(html).includes('--insecure-dev'), false);
+	assert.equal(decode(placeholder).includes('--insecure-dev'), false);
+	const remote = decode(renderTokens({ token: JOIN, server: 'ws://evil.example/x' }, false));
+	assert.equal(remote.includes("--server 'ws://evil.example/x' --runner"), true);
+	assert.equal(remote.includes('--insecure-dev'), false);
+
 	const source = readFileSync(new URL('../src/routes/projects/[id]/TokensSection.svelte', import.meta.url), 'utf8');
 	const copies = [...source.matchAll(/<CopyButton\b[^/]*\/>/g)].map((match) => match[0]);
 	assert.deepEqual(copies, ['<CopyButton value={created.token} label="Copy token" />']);

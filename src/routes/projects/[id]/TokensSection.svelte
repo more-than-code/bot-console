@@ -39,8 +39,20 @@
 	} = $props();
 
 	const PLACEHOLDER_SERVER = '<your server URL>';
+	// The agent accepts ws:// only for a loopback dev server, and only with --insecure-dev.
+	function loopbackWs(server: string | null): boolean {
+		if (!server) return false;
+		try {
+			const url = new URL(server);
+			return url.protocol === 'ws:' && !url.username && !url.password && (url.hostname === '127.0.0.1' || url.hostname === 'localhost');
+		} catch {
+			return false;
+		}
+	}
 	const enrol = $derived(
-		created ? `sudo ./install.sh enroll --server '${created.server ?? PLACEHOLDER_SERVER}' --runner` : ''
+		created
+			? `sudo ./install.sh enroll --server '${created.server ?? PLACEHOLDER_SERVER}' --runner${loopbackWs(created.server) ? ' --insecure-dev' : ''}`
+			: ''
 	);
 
 	function stateOf(token: JoinToken): string {
