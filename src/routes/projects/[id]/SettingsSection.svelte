@@ -251,7 +251,7 @@
 			</form>
 		</Card.Content>
 	</Card.Root>
-	<Card.Root class="mt-4">
+	<Card.Root id="registries" class="mt-4">
 		<Card.Header>
 			<Card.Title>Registries</Card.Title>
 			<Card.Description>The token is write-only. It is not shown again.</Card.Description>

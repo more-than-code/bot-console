@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { enhance } from '$app/forms';
+	import { page } from '$app/state';
 	import { tick, untrack, type Snippet } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
+	import * as Combobox from '$lib/components/ui/combobox';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import * as Select from '$lib/components/ui/select';
@@ -27,8 +29,24 @@
 		type ImageDraft,
 		type KnownSet
 	} from '$lib/image-spec';
+	import {
+		TAGS_LOADING,
+		filterTags,
+		imageDescribedBy,
+		imageRepository,
+		moreLabel,
+		tagLookupMessage,
+		tagQuery,
+		tagAnnouncement,
+		taggedRef,
+		type ImageDigestResult,
+		type ImageTagsResult
+	} from '$lib/image-tags';
+	import { ImageTagLookup } from '$lib/image-tag-lookup';
 	import { settleImageForm, type DialogOutcome } from '$lib/dialog-open';
 	import type { ImageEditorState } from '$lib/project-action';
+	import ImageLookupPost from './ImageLookupPost.svelte';
+	import ImageTagNotes from './ImageTagNotes.svelte';
 
 	let {
 		mode,
@@ -43,6 +61,8 @@
 		filesStatus = 'loading',
 		retryFiles,
 		editor = null,
+		tagsAction = null,
+		digestAction = null,
 		onSettled,
 		cancel
 	}: {
@@ -58,6 +78,10 @@
 		filesStatus?: 'loading' | 'ready' | 'error';
 		retryFiles?: () => void;
 		editor?: ImageEditorState | null;
+		/** `?/catalogImageTags`. Without it the Image field never lists tags. */
+		tagsAction?: string | null;
+		/** `?/catalogImageDigest`. Without it a picked tag is not pinned. */
+		digestAction?: string | null;
 		onSettled?: (outcome: DialogOutcome, name: string) => void | Promise<void>;
 		cancel?: Snippet;
 	} = $props();
@@ -211,6 +235,54 @@
 		draft = applyDockerPaste(draft, parsed);
 	}
 
+	// Registry tags (api-v1 v1.16). The rules live in ImageTagLookup; the form re-reads it on each change.
+	let imageFocused = $state(false);
+	let tagListOpen = $state(false);
+	let tagVersion = $state(0);
+	let tagsPost = $state<ImageLookupPost | null>(null);
+	let digestPost = $state<ImageLookupPost | null>(null);
+	const lookup = new ImageTagLookup({
+		schedule: (run, ms) => setTimeout(run, ms),
+		cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+		requestTags: (repo) => tagsPost?.send(repo),
+		requestDigest: (ref) => digestPost?.send(ref),
+		onChange: () => (tagVersion += 1)
+	});
+
+	const imageRepo = $derived(imageRepository(draft.image));
+	const tagLookup = $derived.by(() => {
+		void tagVersion;
+		return lookup.lookup(draft.image);
+	});
+	const pinLine = $derived.by(() => {
+		void tagVersion;
+		return lookup.pinLine(draft.image);
+	});
+	const tagOptions = $derived(tagLookup?.state === 'ready' ? filterTags(tagLookup.tags, tagQuery(draft.image)) : { shown: [], more: 0 });
+	const tagsMessage = $derived(tagLookupMessage(tagLookup));
+	const tagStatus = $derived(tagAnnouncement(tagLookup, pinLine, tagOptions.more > 0 ? tagOptions.shown.length : undefined));
+	const hasTagList = $derived(tagOptions.shown.length > 0);
+	const settingsHref = $derived(`${page.url.pathname}?tab=settings#registries`);
+
+	$effect(() => {
+		if (!browser || !tagsAction) return;
+		lookup.update(draft.image, imageFocused);
+	});
+
+	$effect(() => () => lookup.dispose());
+
+	function pickTag(tag: string) {
+		const next = lookup.pick(draft.image, tag);
+		if (next == null) return;
+		draft.image = next;
+		tagListOpen = false;
+	}
+
+	function takeDigest(requested: string, data: Record<string, unknown>) {
+		const next = lookup.takeDigest(draft.image, requested, (data.catalogImageDigest as ImageDigestResult | undefined) ?? null);
+		if (next != null) draft.image = next;
+	}
+
 	function invalid(name: string): boolean {
 		return field === name;
 	}
@@ -276,8 +348,41 @@
 	</div>
 	<Label class="grid gap-1.5" for="{fieldId}-image">
 		Image
-		<Input id="{fieldId}-image" name="image" bind:value={draft.image} required maxlength={255} autocomplete="off" spellcheck="false" aria-invalid={invalid('image')} aria-describedby={describedBy('image')} />
+		<Combobox.Root bind:open={() => tagListOpen && hasTagList, (next) => (tagListOpen = next)} onPick={pickTag}>
+			<Combobox.Input
+				id="{fieldId}-image"
+				name="image"
+				bind:value={draft.image}
+				required
+				maxlength={255}
+				autocomplete="off"
+				spellcheck="false"
+				aria-invalid={invalid('image')}
+				aria-describedby={imageDescribedBy(fieldId, { error: describedBy('image') != null, tags: tagsMessage != null, pin: pinLine != null })}
+				onfocus={() => {
+					imageFocused = true;
+					tagListOpen = true;
+				}}
+				onblur={() => (imageFocused = false)}
+			/>
+			{#if hasTagList}
+				<Combobox.Content aria-label="Image tags" footer={tagOptions.more > 0 ? moreFooter : undefined}>
+					{#each tagOptions.shown as tag (tag)}
+						<Combobox.Item value={tag} label={imageRepo == null ? tag : taggedRef(imageRepo, tag)}>{tag}</Combobox.Item>
+					{/each}
+				</Combobox.Content>
+			{/if}
+		</Combobox.Root>
 	</Label>
+	{#snippet moreFooter()}
+		{moreLabel(tagOptions.more)}
+	{/snippet}
+	{#if tagLookup?.state === 'loading'}
+		<!-- The live region below announces this; the line is for sighted users. -->
+		<p class="text-muted-foreground text-sm" aria-hidden="true">{TAGS_LOADING}</p>
+	{/if}
+	<div class="sr-only" role="status" aria-live="polite">{tagStatus}</div>
+	<ImageTagNotes {fieldId} message={tagsMessage} authFailed={tagLookup?.state === 'auth_failed'} {settingsHref} {pinLine} />
 	{@render fieldNotice('image')}
 	<div class="grid gap-1.5">
 		<p class="text-sm font-medium">Paste a docker run</p>
@@ -746,3 +851,9 @@
 		{/if}
 	</div>
 </form>
+{#if tagsAction}
+	<ImageLookupPost bind:this={tagsPost} action={tagsAction} onResult={(repo, data) => lookup.takeTags(repo, (data.catalogImageTags as ImageTagsResult | undefined) ?? null)} />
+{/if}
+{#if digestAction}
+	<ImageLookupPost bind:this={digestPost} action={digestAction} onResult={takeDigest} />
+{/if}

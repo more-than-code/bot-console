@@ -1859,7 +1859,8 @@ describe('catalog images', { concurrency: false }, () => {
 		const errorAt = html.indexOf(message);
 		const commandAt = html.indexOf('>Command<');
 		assert.equal(imageAt >= 0 && errorAt > imageAt && commandAt > errorAt, true);
-		assert.match(html, /id="catalog-image-new-image"[^>]*aria-invalid="true"/);
+		// The Image field is a combobox now; its attribute order follows bits-ui, so match within the tag.
+		assert.match(html, /<input\b(?=[^>]*id="catalog-image-new-image")[^>]*aria-invalid="true"/);
 		assert.match(html, /id="catalog-image-new-error"[^>]*tabindex="-1"/);
 		assert.match(html, /aria-pressed="true">(?:<!---->)?Service/);
 		assert.match(html, /aria-pressed="false">(?:<!---->)?Job/);

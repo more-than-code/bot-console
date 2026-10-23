@@ -67,6 +67,7 @@ import {
 	isUnhealthyAction,
 	redactAssignments
 } from '../image-spec';
+import { DIGEST_PATTERN, TAG_PATTERN } from '../image-tags';
 import { isRole } from './roles';
 import { acceptedInstallServer, acceptedInviteUrl, consentRedirect, isJoinToken, isOauthRequestId, isUuid } from './validate';
 
@@ -1621,6 +1622,27 @@ export function parseRegistryList(payload: unknown): { items: Registry[]; omitte
 		}
 	}
 	return { items, omitted };
+}
+
+const IMAGE_TAG_CAP = 200;
+
+/** Registry tags (api-v1 v1.16). A row that is not `{tag}` with a valid tag is dropped; more than 200 rows marks the list truncated. */
+export function parseImageTags(payload: unknown): { tags: string[]; truncated: boolean } | null {
+	if (!isRecord(payload) || !Array.isArray(payload.items) || typeof payload.truncated !== 'boolean') return null;
+	const tags: string[] = [];
+	const seen = new Set<string>();
+	for (const item of payload.items.slice(0, IMAGE_TAG_CAP)) {
+		if (!isRecord(item) || typeof item.tag !== 'string' || !TAG_PATTERN.test(item.tag) || seen.has(item.tag)) continue;
+		seen.add(item.tag);
+		tags.push(item.tag);
+	}
+	return { tags, truncated: payload.truncated || payload.items.length > IMAGE_TAG_CAP };
+}
+
+/** A tag digest (api-v1 v1.16): `sha256:` and 64 lowercase hex, or null. */
+export function parseImageDigest(payload: unknown): string | null {
+	if (!isRecord(payload) || typeof payload.digest !== 'string' || !DIGEST_PATTERN.test(payload.digest)) return null;
+	return payload.digest;
 }
 
 export type CatalogList = { items: CatalogEntry[]; omitted: number; truncated: boolean };

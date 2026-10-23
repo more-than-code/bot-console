@@ -15,6 +15,7 @@ import type {
 } from '$lib/api-types';
 import { nextFormDialog, type DialogState } from '$lib/dialog-open';
 import type { ImageDraft, KnownSet } from '$lib/image-spec';
+import type { ImageDigestResult, ImageTagsResult } from '$lib/image-tags';
 
 export type ProjectScope = 'hosts' | 'services' | 'catalog' | 'members' | 'tokens' | 'settings';
 
@@ -121,6 +122,10 @@ export type ProjectActionData = {
 	/** File names only. Content is never included. */
 	catalogFiles?: Array<{ name: string }>;
 	catalogFilesMessage?: string | null;
+	/** Registry tags for the Image field: tag names and a message key only. */
+	catalogImageTags?: ImageTagsResult;
+	/** Digest of a picked tag, or a message key. */
+	catalogImageDigest?: ImageDigestResult;
 	/** Plain file content from View. Secret files never set this. */
 	viewedFile?: { name: string; content: string } | null;
 	/** Which settings form failed. The secret field is cleared either way. */

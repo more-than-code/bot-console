@@ -137,6 +137,8 @@
 					saveAction={actionUrlFrom(page.url, 'catalogCreate')}
 					setsAction={actionUrlFrom(page.url, 'catalogEnvSets')}
 					filesAction={actionUrlFrom(page.url, 'catalogFiles')}
+					tagsAction={actionUrlFrom(page.url, 'catalogImageTags')}
+					digestAction={actionUrlFrom(page.url, 'catalogImageDigest')}
 					revealed={imageEditor?.mode === 'create'}
 					editor={imageEditor?.mode === 'create' ? imageEditor : null}
 					onSaved={onImageSaved}

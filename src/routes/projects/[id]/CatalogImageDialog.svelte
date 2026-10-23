@@ -26,6 +26,8 @@
 		saveAction,
 		setsAction,
 		filesAction,
+		tagsAction = null,
+		digestAction = null,
 		revealed = false,
 		editor = null,
 		onSaved,
@@ -36,6 +38,8 @@
 		saveAction: string;
 		setsAction: string;
 		filesAction: string;
+		tagsAction?: string | null;
+		digestAction?: string | null;
 		revealed?: boolean;
 		editor?: ImageEditorState | null;
 		onSaved?: (name: string | null) => void;
@@ -214,7 +218,7 @@
 					};
 				}}
 			></form>
-			<CatalogImageForm {mode} {entry} {saveAction} {sets} {setsMessage} {setsStatus} {retrySets} {files} {filesMessage} {filesStatus} {retryFiles} {editor} onSettled={settle}>
+			<CatalogImageForm {mode} {entry} {saveAction} {sets} {setsMessage} {setsStatus} {retrySets} {files} {filesMessage} {filesStatus} {retryFiles} {tagsAction} {digestAction} {editor} onSettled={settle}>
 				{#snippet cancel()}
 					<Dialog.Close type="button">Cancel</Dialog.Close>
 				{/snippet}

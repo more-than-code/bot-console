@@ -50,14 +50,17 @@ export class ApiError extends Error {
 	readonly msg: string;
 	/** Uncut API message. The file-save path redacts this before it clips. */
 	readonly fullMsg: string;
+	/** Error envelope payload, for codes that carry one (for example `registry_unavailable` `{reason}`). Never shown as is. */
+	readonly payload: unknown;
 
-	constructor(status: number, code: string, msg: string, fullMsg?: string) {
+	constructor(status: number, code: string, msg: string, fullMsg?: string, payload: unknown = null) {
 		super(msg);
 		this.name = 'ApiError';
 		this.status = status;
 		this.code = code;
 		this.msg = msg;
 		this.fullMsg = fullMsg ?? msg;
+		this.payload = payload;
 	}
 }
 
@@ -271,7 +274,7 @@ async function callApi(event: RequestEvent, path: string, init: RequestInit | un
 	if (response.status >= 200 && response.status < 300 && envelope.code === 'ok') return envelope.payload;
 	const status = response.status >= 400 ? response.status : (CODE_STATUS[envelope.code] ?? 500);
 	console.error(`bot api ${method} ${target.pathname} ${status} ${envelope.code}`);
-	throw new ApiError(status, envelope.code, envelope.msg || 'The request failed.', envelope.fullMsg);
+	throw new ApiError(status, envelope.code, envelope.msg || 'The request failed.', envelope.fullMsg, envelope.payload);
 }
 
 function rejectUnauthorized(

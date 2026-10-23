@@ -18,6 +18,7 @@ import {
 	type ImageDraft,
 	type KnownSet
 } from '$lib/image-spec';
+import { imageRepository, isTaggedRef, tagLookupError, type ImageDigestResult, type ImageTagsResult, type TagLookupError } from '$lib/image-tags';
 import type { EnvSet, ProjectFile, Registry } from '$lib/api-types';
 import type { ImageDeployState, ImageEditorState } from '$lib/project-action';
 import { ApiError, apiFetch } from '$lib/server/api';
@@ -28,6 +29,8 @@ import {
 	parseDeployPayload,
 	parseEnvSetList,
 	parseImageDeployList,
+	parseImageDigest,
+	parseImageTags,
 	parseProjectFile,
 	parseProjectFileContent,
 	parseProjectFileList,
@@ -332,6 +335,51 @@ export async function catalogEnvSets(event: RequestEvent) {
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
 		return fail(apiStatus(err), present(event, { scope: 'catalog' as const, catalogSets: [], catalogSetsMessage: apiMessage(err) }));
+	}
+}
+
+function lookupError(err: unknown): TagLookupError {
+	if (!(err instanceof ApiError)) {
+		console.error('bot api request failed');
+		return 'failed';
+	}
+	const reason = err.payload != null && typeof err.payload === 'object' ? (err.payload as Record<string, unknown>).reason : undefined;
+	return tagLookupError(err.status, err.code, err.msg, reason);
+}
+
+/** Registry tags for the Image field (api-v1 v1.16). `image` is a repository; the result is a message key, never registry text. */
+export async function catalogImageTags(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const image = formText(await event.request.formData(), 'image');
+	const empty = (state: TagLookupError): ImageTagsResult => ({ state, tags: [], truncated: false });
+	if (imageRepository(image) !== image) return fail(400, present(event, { scope: 'catalog' as const, catalogImageTags: empty('failed') }));
+	try {
+		const parsed = parseImageTags(await apiFetch(event, `/v1/projects/${id}/image-tags?image=${encodeURIComponent(image)}`));
+		if (!parsed) return fail(502, present(event, { scope: 'catalog' as const, catalogImageTags: empty('failed') }));
+		const catalogImageTags: ImageTagsResult = { state: 'ready', tags: parsed.tags, truncated: parsed.truncated };
+		return present(event, { scope: 'catalog' as const, catalogImageTags });
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return fail(apiStatus(err), present(event, { scope: 'catalog' as const, catalogImageTags: empty(lookupError(err)) }));
+	}
+}
+
+/** The digest of a picked tag (api-v1 v1.16). `image` must be `<repo>:<tag>` with no digest. */
+export async function catalogImageDigest(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const image = formText(await event.request.formData(), 'image');
+	const empty = (state: TagLookupError): ImageDigestResult => ({ state, digest: null });
+	if (!isTaggedRef(image)) return fail(400, present(event, { scope: 'catalog' as const, catalogImageDigest: empty('failed') }));
+	try {
+		const digest = parseImageDigest(await apiFetch(event, `/v1/projects/${id}/image-digest?image=${encodeURIComponent(image)}`));
+		if (!digest) return fail(502, present(event, { scope: 'catalog' as const, catalogImageDigest: empty('failed') }));
+		const catalogImageDigest: ImageDigestResult = { state: 'ready', digest };
+		return present(event, { scope: 'catalog' as const, catalogImageDigest });
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return fail(apiStatus(err), present(event, { scope: 'catalog' as const, catalogImageDigest: empty(lookupError(err)) }));
 	}
 }
 
