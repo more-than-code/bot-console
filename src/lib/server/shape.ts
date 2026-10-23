@@ -19,6 +19,7 @@ import type {
 	HostStatus,
 	ImageDeploy,
 	ImageFileMount,
+	ImageHealthPolicy,
 	ImageHealthcheck,
 	ImageLogging,
 	ImageLogs,
@@ -53,7 +54,19 @@ import type {
 	User
 } from '../api-types';
 import { CATALOG_NAME, ENV_KEY, GRANT_ACTIONS, RUN_AS, SPEC_HASH } from '../catalog';
-import { cleanFileTarget, cleanImageUser, cleanVolumeTarget, fileTargetNests, isConfirmationId, isFileName, isRegistryHost, isSetName, redactAssignments } from '../image-spec';
+import {
+	cleanFileTarget,
+	cleanImageUser,
+	cleanVolumeTarget,
+	fileTargetNests,
+	isConfirmationId,
+	isDeployFailureAction,
+	isFileName,
+	isRegistryHost,
+	isSetName,
+	isUnhealthyAction,
+	redactAssignments
+} from '../image-spec';
 import { isRole } from './roles';
 import { acceptedInstallServer, acceptedInviteUrl, consentRedirect, isJoinToken, isOauthRequestId, isUuid } from './validate';
 
@@ -223,8 +236,9 @@ export function parseHostPrograms(value: unknown): HostPrograms | null {
 	const docker = reportedBool(value, 'docker');
 	const files = reportedBool(value, 'files');
 	const logging = reportedBool(value, 'logging');
-	if (images === null || docker === null || files === null || logging === null) return null;
-	return { enabled: value.enabled, run_as, allow_shell: value.allow_shell, policy_hash: value.policy_hash, images, docker, files, logging };
+	const health_policy = reportedBool(value, 'health_policy');
+	if (images === null || docker === null || files === null || logging === null || health_policy === null) return null;
+	return { enabled: value.enabled, run_as, allow_shell: value.allow_shell, policy_hash: value.policy_hash, images, docker, files, logging, health_policy };
 }
 
 /** Missing or null is false. A present non-boolean is not a policy. */
@@ -1032,7 +1046,11 @@ const IMAGE_OUTCOMES = new Set<ImageOutcome>([
 	'rollback_failed',
 	'image_unavailable',
 	'forbidden_spec',
-	'conflict'
+	'conflict',
+	'auto_restarted',
+	'auto_rolled_back',
+	'auto_gave_up',
+	'auto_failed'
 ]);
 
 const IMAGE_STATES = new Set<ImageState>(['running', 'exited', 'created', 'paused', 'restarting', 'dead', 'missing', 'unknown']);
@@ -1141,6 +1159,36 @@ function parseImageVolumes(value: unknown): ImageVolume[] | null {
 
 const HEALTHCHECK_KEYS = new Set(['test', 'interval_sec', 'timeout_sec', 'retries', 'start_period_sec']);
 const LOGGING_KEYS = new Set(['max_size_mb', 'max_files']);
+const HEALTH_POLICY_KEYS = new Set(['on_deploy_failure', 'on_unhealthy', 'unhealthy_after_sec', 'max_actions_per_hour']);
+
+/** Absent or null is all defaults. Keys stay as stored. A job, an unknown key, a bad enum, or a bad bound drops the spec. */
+function parseHealthPolicy(value: unknown, kind: ImageWorkload): ImageHealthPolicy | null | undefined {
+	if (value == null) return null;
+	if (kind === 'job' || !isRecord(value)) return undefined;
+	const policy: ImageHealthPolicy = {};
+	for (const key of Object.keys(value)) {
+		if (!HEALTH_POLICY_KEYS.has(key)) return undefined;
+	}
+	if (value.on_deploy_failure != null) {
+		if (!isDeployFailureAction(value.on_deploy_failure)) return undefined;
+		policy.on_deploy_failure = value.on_deploy_failure;
+	}
+	if (value.on_unhealthy != null) {
+		if (!isUnhealthyAction(value.on_unhealthy)) return undefined;
+		policy.on_unhealthy = value.on_unhealthy;
+	}
+	if (value.unhealthy_after_sec != null) {
+		const after = boundedInt(value.unhealthy_after_sec, 15, 600);
+		if (after == null) return undefined;
+		policy.unhealthy_after_sec = after;
+	}
+	if (value.max_actions_per_hour != null) {
+		const max = boundedInt(value.max_actions_per_hour, 1, 10);
+		if (max == null) return undefined;
+		policy.max_actions_per_hour = max;
+	}
+	return policy;
+}
 
 /** Absent or null is the agent default. An unknown key, a missing key, or a bad bound drops the spec. */
 function parseLogging(value: unknown): ImageLogging | null | undefined {
@@ -1216,6 +1264,8 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 	if (healthcheck === undefined) return null;
 	const logging = parseLogging(Object.hasOwn(value, 'logging') ? value.logging : null);
 	if (logging === undefined) return null;
+	const health_policy = parseHealthPolicy(Object.hasOwn(value, 'health_policy') ? value.health_policy : null, workload);
+	if (health_policy === undefined) return null;
 	return {
 		kind: workload,
 		image,
@@ -1233,7 +1283,8 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 		memory_mb,
 		timeout_sec: timeout,
 		healthcheck,
-		logging
+		logging,
+		health_policy
 	};
 }
 
@@ -1298,16 +1349,22 @@ export function parseImageDeploy(value: unknown): ImageDeploy | null {
 	const entry_id = text(value.entry_id, 36);
 	const host_id = text(value.host_id, 36);
 	const spec_hash = text(value.spec_hash, 64);
-	const by = text(value.by, 36);
 	const started_at = timestamp(value.started_at);
 	const finished_at = optionalText(value.finished_at, 64);
 	const digest = imageDigestOf(value.digest);
 	const exit_code = parseExitCode(value.exit_code);
 	if (!id || !isUuid(id) || !entry_id || !isUuid(entry_id) || !host_id || !isUuid(host_id)) return null;
-	if (!spec_hash || !SPEC_HASH.test(spec_hash) || !by || !isUuid(by) || !started_at || finished_at === undefined) return null;
+	if (!spec_hash || !SPEC_HASH.test(spec_hash) || !started_at || finished_at === undefined) return null;
 	if (digest === undefined || exit_code === undefined) return null;
 	if (typeof value.outcome !== 'string' || !IMAGE_OUTCOMES.has(value.outcome as ImageOutcome)) return null;
-	if (value.via !== 'console' && value.via !== 'mcp') return null;
+	if (value.via !== 'console' && value.via !== 'mcp' && value.via !== 'agent') return null;
+	// Only an automatic action (via agent) may have no user. A named user must be a uuid.
+	let by: string | null = null;
+	if (value.by != null || value.via !== 'agent') {
+		const user = text(value.by, 36);
+		if (!user || !isUuid(user)) return null;
+		by = user;
+	}
 	return {
 		id,
 		entry_id,

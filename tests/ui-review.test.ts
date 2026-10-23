@@ -58,7 +58,7 @@ function host(): Host {
 		revoked_at: null,
 		relation: 'owner',
 		share_level: null,
-		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false }
+		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false, health_policy: false }
 	};
 }
 

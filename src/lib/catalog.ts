@@ -79,6 +79,16 @@ export function imageLoggingBlockReason(host: Pick<Host, 'programs'>, hasLogging
 	return "This host's agent does not support log settings";
 }
 
+/**
+ * Why Deploy, Run, or Roll back is refused for an entry with a non-default health policy (api-v1 v1.15).
+ * The wording is the API's gate message with a capital T, like the other block reasons.
+ */
+export function imageHealthPolicyBlockReason(host: Pick<Host, 'programs'>, hasPolicy: boolean): string | null {
+	if (!hasPolicy) return null;
+	if (host.programs?.health_policy === true) return null;
+	return "This host's agent does not support health policies";
+}
+
 /** Union of run-as accounts on eligible hosts. Shell entries only use hosts that allow a shell. */
 export function runAsChoices(hosts: readonly Pick<Host, 'relation' | 'share_level' | 'programs'>[], shell: boolean): string[] {
 	const names = new Set<string>();

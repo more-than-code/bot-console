@@ -130,7 +130,8 @@ function imageSpec(kind: ImageSpec['kind'] = 'service'): ImageSpec {
 		memory_mb: null,
 		timeout_sec: 600,
 		healthcheck: null,
-		logging: null
+		logging: null,
+		health_policy: null
 	};
 }
 
@@ -191,7 +192,7 @@ function host(): Host {
 		revoked_at: null,
 		relation: 'owner',
 		share_level: null,
-		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false }
+		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false, health_policy: false }
 	};
 }
 
@@ -2523,7 +2524,7 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.deepEqual(historyFetch(HOST_ID, '', false), { submit: false, pending: false });
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 		const second = '00000000-0000-4000-8000-0000000000ab';
-		const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: true, files: false, logging: false };
+		const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: true, files: false, logging: false, health_policy: false };
 		const blockedHost = { ...host(), programs };
 		const openHost = { ...host(), id: second, name: 'pi2', programs: { ...programs, images: true, docker: true } };
 		const props = {

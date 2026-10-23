@@ -13,9 +13,22 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import type { Host, ImageDeploy, ImageEntry } from '$lib/api-types';
-	import { imageFilesBlockReason, imageHostBlockReason, imageLoggingBlockReason, isCatalogHost, reuseIdempotencyKey } from '$lib/catalog';
+	import { imageFilesBlockReason, imageHealthPolicyBlockReason, imageHostBlockReason, imageLoggingBlockReason, isCatalogHost, reuseIdempotencyKey } from '$lib/catalog';
 	import { blockInFlightSubmit, deployProgressNote, flightFocusTarget, flightLabel } from '$lib/catalog-flight';
-	import { applyHistoryResponse, historyAfterSwitch, historyFetch, historyNotice, imagePortText, nextHistory, nextIdempotencyKey, nextRollbackKey, rollbackChoices, shortDigest } from '$lib/image-spec';
+	import {
+		applyHistoryResponse,
+		healthPolicyRule,
+		historyAfterSwitch,
+		historyFetch,
+		historyNotice,
+		imagePortText,
+		isDefaultHealthPolicy,
+		nextHistory,
+		nextIdempotencyKey,
+		nextRollbackKey,
+		rollbackChoices,
+		shortDigest
+	} from '$lib/image-spec';
 	import type { ImageDeployState } from '$lib/project-action';
 	import FlightStatus from './FlightStatus.svelte';
 
@@ -92,6 +105,8 @@
 	const containerBlocked = $derived(selectedHost != null && imageHostBlockReason(selectedHost) != null);
 	const filesBlocked = $derived(selectedHost != null && imageFilesBlockReason(selectedHost, entry.spec.files.length > 0) != null);
 	const loggingBlocked = $derived(selectedHost != null && imageLoggingBlockReason(selectedHost, entry.spec.logging != null) != null);
+	const hasHealthPolicy = $derived(entry.spec.kind === 'service' && !isDefaultHealthPolicy(entry.spec.health_policy));
+	const healthPolicyBlocked = $derived(selectedHost != null && imageHealthPolicyBlockReason(selectedHost, hasHealthPolicy) != null);
 	const notice = $derived(historyNotice({ hostCount: eligible.length, pending: historyPending, ready: historyReady, count: history.length }));
 	const targets = $derived(entry.spec.kind === 'job' ? [] : rollbackChoices(history));
 	const digest = $derived(shortDigest(result?.outcome?.digest ?? result?.status?.digest));
@@ -320,6 +335,7 @@
 			{@const reason = imageHostBlockReason(host)}
 			{@const filesReason = imageFilesBlockReason(host, entry.spec.files.length > 0)}
 			{@const loggingReason = imageLoggingBlockReason(host, entry.spec.logging != null)}
+			{@const policyReason = imageHealthPolicyBlockReason(host, hasHealthPolicy)}
 			{#if reason}
 				<p class="text-muted-foreground text-sm">{host.name}: {reason}</p>
 			{/if}
@@ -329,8 +345,14 @@
 			{#if loggingReason}
 				<p class="text-muted-foreground text-sm">{host.name}: {loggingReason}</p>
 			{/if}
+			{#if policyReason}
+				<p class="text-muted-foreground text-sm">{host.name}: {policyReason}</p>
+			{/if}
 		{/each}
 	</div>
+	{#if entry.spec.kind === 'service'}
+		<p class="text-sm">{healthPolicyRule(entry.spec.health_policy)}</p>
+	{/if}
 	<Label class="flex items-center gap-2">
 		<Checkbox name="force" value="1" bind:checked={force} disabled={busy} />
 		Force
@@ -372,7 +394,7 @@
 		<Button
 			type="submit"
 			bind:ref={deploySubmitEl}
-			disabled={activeFlight === 'deploy' ? undefined : busy || submitting || hostId === '' || containerBlocked || filesBlocked || loggingBlocked}
+			disabled={activeFlight === 'deploy' ? undefined : busy || submitting || hostId === '' || containerBlocked || filesBlocked || loggingBlocked || healthPolicyBlocked}
 			aria-disabled={activeFlight === 'deploy' ? 'true' : undefined}
 			aria-busy={activeFlight === 'deploy' ? 'true' : undefined}
 			onclick={(event) => {
@@ -432,8 +454,13 @@
 			{#each history as item (item.id)}
 				<li class="flex flex-wrap items-center gap-2 text-sm">
 					<StatusBadge status={item.outcome} />
-					<span class="font-mono">{shortDigest(item.digest) ?? 'no digest'}</span>
+					{#if item.outcome !== 'auto_failed'}
+						<span class="font-mono">{shortDigest(item.digest) ?? 'no digest'}</span>
+					{/if}
 					<span class="text-muted-foreground"><LocalTime iso={item.finished_at ?? item.started_at} /></span>
+					{#if item.via === 'agent'}
+						<span class="text-muted-foreground">Deploybot agent</span>
+					{/if}
 				</li>
 			{/each}
 		</ul>
@@ -441,6 +468,11 @@
 		<p class="text-muted-foreground text-sm">No hosts in this project.</p>
 	{:else if notice === 'loading'}
 		<p class="text-muted-foreground text-sm">Loading history…</p>
+	{/if}
+	{#if historyReady && targets.length > 0 && healthPolicyBlocked && selectedHost}
+		<p id="rollback-{entry.name}-blocked" class="text-muted-foreground text-sm">
+			{selectedHost.name}: {imageHealthPolicyBlockReason(selectedHost, hasHealthPolicy)}
+		</p>
 	{/if}
 	{#if historyReady}
 		{#each targets as item (item.digest)}
@@ -456,7 +488,8 @@
 						<Button
 							type="submit"
 							variant="outline"
-							disabled={rollingThis ? undefined : busy || submitting || hostId === '' || containerBlocked}
+							disabled={rollingThis ? undefined : busy || submitting || hostId === '' || containerBlocked || healthPolicyBlocked}
+							aria-describedby={healthPolicyBlocked && !rollingThis ? `rollback-${entry.name}-blocked` : undefined}
 							aria-disabled={rollingThis ? 'true' : undefined}
 							aria-busy={rollingThis ? 'true' : undefined}
 							onclick={(event) => {

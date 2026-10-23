@@ -22,9 +22,21 @@
 		'rollback_failed',
 		'image_unavailable',
 		'forbidden_spec',
-		'conflict'
+		'conflict',
+		'auto_restarted',
+		'auto_rolled_back',
+		'auto_gave_up',
+		'auto_failed'
 	] as const;
 	const text = $derived(known.includes(status as (typeof known)[number]) ? status : 'unknown');
+
+	/** Words for statuses whose wire value does not read well. Others show as sent. */
+	const label: Record<string, string> = {
+		auto_restarted: 'Automatic restart',
+		auto_rolled_back: 'Automatic rollback',
+		auto_gave_up: 'Automatic: gave up',
+		auto_failed: 'Automatic action failed'
+	};
 
 	const tone: Record<string, string> = {
 		online: 'text-status-online',
@@ -44,14 +56,18 @@
 		rollback_failed: 'text-status-down',
 		image_unavailable: 'text-status-down',
 		forbidden_spec: 'text-status-revoked',
-		conflict: 'text-status-offline'
+		conflict: 'text-status-offline',
+		auto_restarted: 'text-status-asleep',
+		auto_rolled_back: 'text-status-asleep',
+		auto_gave_up: 'text-status-down',
+		auto_failed: 'text-status-down'
 	};
 </script>
 
 {#snippet badge()}
 	<Badge variant="outline" class={tone[text] ?? 'text-status-unknown'}>
 		<span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
-		{text}
+		{label[text] ?? text}
 	</Badge>
 {/snippet}
 {#if hint}

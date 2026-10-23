@@ -1,4 +1,14 @@
-import type { ImageHealthcheck, ImageLogging, ImageOutcome, ImageRestart, ImageSpec, ImageWorkload } from '$lib/api-types';
+import type {
+	HealthDeployFailure,
+	HealthUnhealthyAction,
+	ImageHealthPolicy,
+	ImageHealthcheck,
+	ImageLogging,
+	ImageOutcome,
+	ImageRestart,
+	ImageSpec,
+	ImageWorkload
+} from '$lib/api-types';
 import { ENV_KEY, byteLength, isCatalogName } from '$lib/catalog';
 
 /** Shown beside the memory field. Blank still means no limit. */
@@ -7,6 +17,14 @@ export const SUGGESTED_MEMORY_MB = 256;
 /** Agent default when ImageSpec has no logging (api-v1 v1.14): 10 MB × 3 files. */
 export const DEFAULT_LOG_SIZE_MB = 10;
 export const DEFAULT_LOG_FILES = 3;
+
+/** Health failure policy defaults (api-v1 v1.15). They are today's behaviour. */
+export const HEALTH_POLICY_DEFAULTS: Required<ImageHealthPolicy> = {
+	on_deploy_failure: 'rollback',
+	on_unhealthy: 'none',
+	unhealthy_after_sec: 45,
+	max_actions_per_hour: 3
+};
 
 export const STILL_RUNNING = 'Still running on the host. Check the history in a minute.';
 
@@ -65,7 +83,18 @@ export type ImageDraft = {
 	/** Blank with logMaxFiles blank means no logging object. */
 	logMaxSizeMb: string;
 	logMaxFiles: string;
+	/** Health failure policy. Services only. The two numbers are blank for the default and apply only with an action. */
+	healthOnDeployFailure: HealthDeployFailure;
+	healthOnUnhealthy: HealthUnhealthyAction;
+	healthUnhealthyAfter: string;
+	healthMaxActions: string;
+	/** Keys the stored entry had that an edit must keep (see storedHealthKeys). */
+	healthKeepKeys: HealthKeepKey[];
+	/** Stored numbers, sent under Do nothing when a keep key names them. The visible fields may have been edited. */
+	healthStored: { unhealthyAfter: string; maxActions: string };
 };
+
+export type HealthKeepKey = 'on_deploy_failure' | 'on_unhealthy' | 'unhealthy_after_sec' | 'max_actions_per_hour';
 
 export type KnownSet = { name: string; keys: readonly string[] };
 
@@ -85,9 +114,9 @@ function deniedEnvKey(key: string): boolean {
 	return key.startsWith('LD_') || key.startsWith('DYLD_') || DENY_EXACT.has(key);
 }
 
-/** Entry names follow v1.6 and must not end with `-` or `-prev`. */
+/** Entry names follow v1.6 and must not end with `-`, `-prev`, or `-old` (the agent's rollback names, api-v1 v1.15 rev 3). */
 export function isImageEntryName(value: string): boolean {
-	return isCatalogName(value) && !value.endsWith('-') && !value.endsWith('-prev');
+	return isCatalogName(value) && !value.endsWith('-') && !value.endsWith('-prev') && !value.endsWith('-old');
 }
 
 export function cleanImageUser(value: string): string | null {
@@ -351,6 +380,104 @@ function cleanLogging(draft: ImageDraft): { ok: true; logging: ImageLogging | nu
 	return { ok: true, logging: { max_size_mb: size, max_files: files } };
 }
 
+export function isDeployFailureAction(value: unknown): value is HealthDeployFailure {
+	return value === 'rollback' || value === 'stop' || value === 'keep';
+}
+
+export function isUnhealthyAction(value: unknown): value is HealthUnhealthyAction {
+	return value === 'none' || value === 'restart' || value === 'rollback';
+}
+
+/**
+ * An enum key is sent when it differs from its default or the stored entry had it, so editing keeps what was stored.
+ * With an action, a number is sent when its field is filled in. With Do nothing the numbers are hidden and do
+ * nothing, so one is sent only when the stored entry kept it under Do nothing; otherwise sending it would change
+ * spec_hash for no change in behaviour. An action needs the Docker health check and cannot be combined with
+ * Keep running (api-v1 v1.15 rev 2).
+ */
+function cleanHealthPolicy(
+	draft: ImageDraft,
+	healthcheck: ImageHealthcheck | null
+): { ok: true; policy: ImageHealthPolicy | null } | { ok: false; field: string; message: string } {
+	if (!isDeployFailureAction(draft.healthOnDeployFailure)) return fail('health_policy.on_deploy_failure', 'Choose what happens when a deploy fails.');
+	if (!isUnhealthyAction(draft.healthOnUnhealthy)) return fail('health_policy.on_unhealthy', 'Choose what happens when the service turns unhealthy.');
+	const acting = draft.healthOnUnhealthy !== 'none';
+	if (acting && draft.healthOnDeployFailure === 'keep') {
+		return fail('health_policy.on_unhealthy', 'Keep running cannot be combined with an automatic action.');
+	}
+	if (acting && healthcheck == null) {
+		return fail('health_policy.on_unhealthy', 'Restart and Roll back need a Docker health check command. Fill in the Command field above.');
+	}
+	const kept = new Set(draft.healthKeepKeys);
+	let after: number | null | undefined = null;
+	let max: number | null | undefined = null;
+	if (acting) {
+		after = integerIn(draft.healthUnhealthyAfter, 15, 600);
+		max = integerIn(draft.healthMaxActions, 1, 10);
+		if (after === undefined) return fail('health_policy.unhealthy_after_sec', 'Unhealthy for must be from 15 to 600 seconds.');
+		if (max === undefined) return fail('health_policy.max_actions_per_hour', 'Max actions per hour must be from 1 to 10.');
+	} else {
+		// The fields are hidden: keep only what was stored, ignoring any edit made while an action was chosen.
+		if (kept.has('unhealthy_after_sec')) after = integerIn(draft.healthStored.unhealthyAfter, 15, 600) ?? null;
+		if (kept.has('max_actions_per_hour')) max = integerIn(draft.healthStored.maxActions, 1, 10) ?? null;
+	}
+	const policy: ImageHealthPolicy = {};
+	if (draft.healthOnDeployFailure !== HEALTH_POLICY_DEFAULTS.on_deploy_failure || kept.has('on_deploy_failure')) {
+		policy.on_deploy_failure = draft.healthOnDeployFailure;
+	}
+	if (acting || kept.has('on_unhealthy')) policy.on_unhealthy = draft.healthOnUnhealthy;
+	if (after != null) policy.unhealthy_after_sec = after;
+	if (max != null) policy.max_actions_per_hour = max;
+	return { ok: true, policy: Object.keys(policy).length === 0 ? null : policy };
+}
+
+/**
+ * Keys an edit keeps even when they do not differ from the default: the enum keys the entry stored, and the
+ * numbers it stored under Do nothing (an entry with an action sends its numbers from the visible fields).
+ */
+export function storedHealthKeys(policy: ImageHealthPolicy | null | undefined): HealthKeepKey[] {
+	const keys: HealthKeepKey[] = [];
+	if (policy?.on_deploy_failure != null) keys.push('on_deploy_failure');
+	if (policy?.on_unhealthy != null) keys.push('on_unhealthy');
+	if (policy != null && (policy.on_unhealthy ?? 'none') === 'none') {
+		if (policy.unhealthy_after_sec != null) keys.push('unhealthy_after_sec');
+		if (policy.max_actions_per_hour != null) keys.push('max_actions_per_hour');
+	}
+	return keys;
+}
+
+/** Absent keys take their defaults. */
+export function resolveHealthPolicy(policy: ImageHealthPolicy | null | undefined): Required<ImageHealthPolicy> {
+	return { ...HEALTH_POLICY_DEFAULTS, ...(policy ?? {}) };
+}
+
+/** True when the policy behaves exactly as an entry without one. */
+export function isDefaultHealthPolicy(policy: ImageHealthPolicy | null | undefined): boolean {
+	const resolved = resolveHealthPolicy(policy);
+	return (Object.keys(HEALTH_POLICY_DEFAULTS) as Array<keyof ImageHealthPolicy>).every((key) => resolved[key] === HEALTH_POLICY_DEFAULTS[key]);
+}
+
+const DEPLOY_FAILURE_TEXT: Record<HealthDeployFailure, string> = {
+	rollback: 'roll back',
+	stop: 'stop the new container',
+	keep: 'keep the new container running'
+};
+
+function perHour(count: number): string {
+	return count === 1 ? 'once an hour' : `${count} times an hour`;
+}
+
+/** One sentence for the deploy dialog. */
+export function healthPolicyRule(policy: ImageHealthPolicy | null | undefined): string {
+	const resolved = resolveHealthPolicy(policy);
+	const failure = `Health rule: If this deploy fails: ${DEPLOY_FAILURE_TEXT[resolved.on_deploy_failure]}.`;
+	const after = resolved.unhealthy_after_sec;
+	let later = 'do nothing';
+	if (resolved.on_unhealthy === 'restart') later = `restart after ${after} s (up to ${perHour(resolved.max_actions_per_hour)})`;
+	else if (resolved.on_unhealthy === 'rollback') later = `roll back after ${after} s (once per deploy)`;
+	return `${failure} If it turns unhealthy later: ${later}.`;
+}
+
 /** In-range pair for the preview. An incomplete or invalid pair is the agent default. */
 export function loggingForPreview(maxSizeMb: string, maxFiles: string): ImageLogging | null {
 	const read = cleanLogging({ ...blankImageDraft(), logMaxSizeMb: maxSizeMb, logMaxFiles: maxFiles });
@@ -370,7 +497,7 @@ export function imageSpecFromDraft(
 	let name: string | null = null;
 	if (includeName) {
 		if (!isImageEntryName(draft.name)) {
-			return fail('name', 'Name must start with a letter or digit, use lowercase letters, digits, and hyphens, and must not end with - or -prev.');
+			return fail('name', 'Name must start with a letter or digit, use lowercase letters, digits, and hyphens, and must not end with -, -prev, or -old.');
 		}
 		name = draft.name;
 	}
@@ -441,6 +568,12 @@ export function imageSpecFromDraft(
 	}
 	const logs = cleanLogging(draft);
 	if (!logs.ok) return logs;
+	let healthPolicy: ImageHealthPolicy | null = null;
+	if (workload === 'service') {
+		const policy = cleanHealthPolicy(draft, healthcheck);
+		if (!policy.ok) return policy;
+		healthPolicy = policy.policy;
+	}
 	const spec: ImageSpec = {
 		kind: workload,
 		image: image.image,
@@ -458,7 +591,8 @@ export function imageSpecFromDraft(
 		memory_mb: memory,
 		timeout_sec: timeout,
 		healthcheck,
-		logging: logs.logging
+		logging: logs.logging,
+		health_policy: healthPolicy
 	};
 	return { ok: true, spec, name };
 }
@@ -491,6 +625,7 @@ export type RollbackChoice = {
  * redeploy can swap back to the kept container. One occurrence is still dropped.
  */
 export function rollbackChoices(items: readonly { outcome: string; digest: string | null }[]): RollbackChoice[] {
+	const autoCurrent = autoRollbackDigest(items);
 	const distinct: string[] = [];
 	const counts = new Map<string, number>();
 	for (const item of items) {
@@ -499,11 +634,25 @@ export function rollbackChoices(items: readonly { outcome: string; digest: strin
 		counts.set(item.digest, (counts.get(item.digest) ?? 0) + 1);
 		if (distinct.length === 3) break;
 	}
+	// After an automatic rollback its digest is current: never offer it, and the same-image rule does not apply.
+	if (autoCurrent != null) return distinct.filter((digest) => digest !== autoCurrent).map((digest) => ({ digest, sameImage: false }));
 	const current = distinct[0];
 	if (current == null) return [];
 	const older = distinct.slice(1).map((digest) => ({ digest, sameImage: false }));
 	if ((counts.get(current) ?? 0) >= 2) return [{ digest: current, sameImage: true }, ...older];
 	return older;
+}
+
+/**
+ * The digest of the newest `auto_rolled_back` row when no succeeded or unchanged row is newer (api-v1 v1.15 rev 2).
+ * Automatic rows are never targets and never count toward the same-image rule.
+ */
+export function autoRollbackDigest(items: readonly { outcome: string; digest: string | null }[]): string | null {
+	for (const item of items) {
+		if (ROLLBACK.has(item.outcome as ImageOutcome)) return null;
+		if (item.outcome === 'auto_rolled_back' && item.digest) return item.digest;
+	}
+	return null;
 }
 
 /** Digests a service Roll back button may target, newest first. */
@@ -1083,7 +1232,13 @@ export function blankImageDraft(): ImageDraft {
 		healthRetries: '',
 		healthStart: '',
 		logMaxSizeMb: '',
-		logMaxFiles: ''
+		logMaxFiles: '',
+		healthOnDeployFailure: 'rollback',
+		healthOnUnhealthy: 'none',
+		healthUnhealthyAfter: '',
+		healthMaxActions: '',
+		healthKeepKeys: [],
+		healthStored: { unhealthyAfter: '', maxActions: '' }
 	};
 }
 
@@ -1108,6 +1263,7 @@ export function imageRequestBody(spec: ImageSpec, name: string | null): Record<s
 	else payload.timeout_sec = spec.timeout_sec;
 	if (spec.kind === 'service' && spec.healthcheck) payload.healthcheck = spec.healthcheck;
 	if (spec.logging) payload.logging = spec.logging;
+	if (spec.kind === 'service' && spec.health_policy && Object.keys(spec.health_policy).length > 0) payload.health_policy = spec.health_policy;
 	const body: Record<string, unknown> = { kind: 'image', spec: payload };
 	if (name) body.name = name;
 	return body;
@@ -1159,6 +1315,18 @@ export function imageDraftFromForm(form: FormData): { draft: ImageDraft; message
 	draft.healthStart = formText(form, 'health_start').slice(0, 4);
 	draft.logMaxSizeMb = cappedDigits(formText(form, 'log_max_size_mb'), 6);
 	draft.logMaxFiles = cappedDigits(formText(form, 'log_max_files'), 4);
+	const onDeployFailure = formText(form, 'health_on_deploy_failure');
+	const onUnhealthy = formText(form, 'health_on_unhealthy');
+	draft.healthOnDeployFailure = isDeployFailureAction(onDeployFailure) ? onDeployFailure : 'rollback';
+	draft.healthOnUnhealthy = isUnhealthyAction(onUnhealthy) ? onUnhealthy : 'none';
+	draft.healthUnhealthyAfter = cappedDigits(formText(form, 'health_unhealthy_after_sec'), 4);
+	draft.healthMaxActions = cappedDigits(formText(form, 'health_max_actions_per_hour'), 3);
+	const keep = form.getAll('health_keep_key');
+	draft.healthKeepKeys = (['on_deploy_failure', 'on_unhealthy', 'unhealthy_after_sec', 'max_actions_per_hour'] as const).filter((key) => keep.includes(key));
+	draft.healthStored = {
+		unhealthyAfter: cappedDigits(formText(form, 'health_stored_unhealthy_after_sec'), 4),
+		maxActions: cappedDigits(formText(form, 'health_stored_max_actions_per_hour'), 3)
+	};
 	let message: string | null = null;
 	let field: string | null = null;
 	const healthTest = formText(form, 'health_test');

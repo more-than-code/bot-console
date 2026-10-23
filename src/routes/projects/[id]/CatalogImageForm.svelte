@@ -13,6 +13,7 @@
 	import {
 		DEFAULT_LOG_FILES,
 		DEFAULT_LOG_SIZE_MB,
+		HEALTH_POLICY_DEFAULTS,
 		SUGGESTED_MEMORY_MB,
 		applyDockerPaste,
 		blankImageDraft,
@@ -20,7 +21,9 @@
 		imageSpecFromDraft,
 		loggingForPreview,
 		parseDockerRun,
+		resolveHealthPolicy,
 		setPortPublic,
+		storedHealthKeys,
 		type ImageDraft,
 		type KnownSet
 	} from '$lib/image-spec';
@@ -62,6 +65,10 @@
 	function fromEntry(item: ImageEntry): ImageDraft {
 		const spec = item.spec;
 		const health = spec.healthcheck;
+		const policy = resolveHealthPolicy(spec.health_policy);
+		const stored = spec.health_policy ?? {};
+		const storedAfter = stored.unhealthy_after_sec == null ? '' : String(stored.unhealthy_after_sec);
+		const storedMax = stored.max_actions_per_hour == null ? '' : String(stored.max_actions_per_hour);
 		return {
 			name: item.name,
 			workload: spec.kind,
@@ -88,9 +95,18 @@
 			healthRetries: health ? String(health.retries) : '',
 			healthStart: health ? String(health.start_period_sec) : '',
 			logMaxSizeMb: spec.logging ? String(spec.logging.max_size_mb) : '',
-			logMaxFiles: spec.logging ? String(spec.logging.max_files) : ''
+			logMaxFiles: spec.logging ? String(spec.logging.max_files) : '',
+			healthOnDeployFailure: policy.on_deploy_failure,
+			healthOnUnhealthy: policy.on_unhealthy,
+			healthUnhealthyAfter: storedAfter,
+			healthMaxActions: storedMax,
+			healthKeepKeys: storedHealthKeys(spec.health_policy),
+			healthStored: { unhealthyAfter: storedAfter, maxActions: storedMax }
 		};
 	}
+
+	const DEPLOY_FAILURE_LABELS = { rollback: 'Roll back', stop: 'Stop', keep: 'Keep running' } as const;
+	const UNHEALTHY_LABELS = { none: 'Do nothing', restart: 'Restart', rollback: 'Roll back' } as const;
 
 	let draft = $state<ImageDraft>(untrack(() => (editor ? editor.draft : entry ? fromEntry(entry) : blankImageDraft())));
 	let clientMessage = $state<string | null>(null);
@@ -202,6 +218,12 @@
 	function describedBy(name: string): string | undefined {
 		if (message && field === name) return `${fieldId}-error`;
 		return undefined;
+	}
+
+	/** The unhealthy select is described by its hint (when an action is chosen) and then its error. */
+	function unhealthyDescribedBy(): string | undefined {
+		const ids = [draft.healthOnUnhealthy !== 'none' ? `${fieldId}-unhealthy-hint` : null, describedBy('health_policy.on_unhealthy') ?? null].filter((id) => id != null);
+		return ids.length > 0 ? ids.join(' ') : undefined;
 	}
 </script>
 
@@ -557,6 +579,98 @@
 				/>
 			</Label>
 			{@render fieldNotice('healthcheck.start_period_sec')}
+		</div>
+		<div class="grid gap-3" role="group" aria-label="When health fails">
+			<p class="text-sm font-medium">When health fails</p>
+			<Label class="grid gap-1.5" for="{fieldId}-on-deploy-failure">
+				If a deploy fails
+				<Select.Root type="single" name="health_on_deploy_failure" bind:value={draft.healthOnDeployFailure}>
+					<Select.Trigger
+						id="{fieldId}-on-deploy-failure"
+						class="w-full min-w-0"
+						aria-invalid={invalid('health_policy.on_deploy_failure') ? true : undefined}
+						aria-describedby={describedBy('health_policy.on_deploy_failure')}
+					>
+						<Select.Value>{DEPLOY_FAILURE_LABELS[draft.healthOnDeployFailure]}</Select.Value>
+					</Select.Trigger>
+					<Select.Content>
+						<Select.Item value="rollback" label="Roll back">Roll back</Select.Item>
+						<Select.Item value="stop" label="Stop">Stop</Select.Item>
+						<Select.Item value="keep" label="Keep running">Keep running</Select.Item>
+					</Select.Content>
+				</Select.Root>
+			</Label>
+			{@render fieldNotice('health_policy.on_deploy_failure')}
+			<Label class="grid gap-1.5" for="{fieldId}-on-unhealthy">
+				If it turns unhealthy later
+				<Select.Root type="single" name="health_on_unhealthy" bind:value={draft.healthOnUnhealthy}>
+					<Select.Trigger
+						id="{fieldId}-on-unhealthy"
+						class="w-full min-w-0"
+						aria-invalid={invalid('health_policy.on_unhealthy') ? true : undefined}
+						aria-describedby={unhealthyDescribedBy()}
+					>
+						<Select.Value>{UNHEALTHY_LABELS[draft.healthOnUnhealthy]}</Select.Value>
+					</Select.Trigger>
+					<Select.Content>
+						<Select.Item value="none" label="Do nothing">Do nothing</Select.Item>
+						<Select.Item value="restart" label="Restart">Restart</Select.Item>
+						<Select.Item value="rollback" label="Roll back">Roll back</Select.Item>
+					</Select.Content>
+				</Select.Root>
+			</Label>
+			{#if draft.healthOnUnhealthy !== 'none'}
+				<p id="{fieldId}-unhealthy-hint" class="text-muted-foreground text-sm">Needs the Docker health check command above.</p>
+			{/if}
+			{@render fieldNotice('health_policy.on_unhealthy')}
+			{#each draft.healthKeepKeys as key (key)}
+				<Input type="hidden" name="health_keep_key" value={key} />
+			{/each}
+			<!-- Posted with any action so a refused save keeps them; read only under Do nothing. -->
+			{#if draft.healthKeepKeys.includes('unhealthy_after_sec')}
+				<Input type="hidden" name="health_stored_unhealthy_after_sec" value={draft.healthStored.unhealthyAfter} />
+			{/if}
+			{#if draft.healthKeepKeys.includes('max_actions_per_hour')}
+				<Input type="hidden" name="health_stored_max_actions_per_hour" value={draft.healthStored.maxActions} />
+			{/if}
+			{#if draft.healthOnUnhealthy !== 'none'}
+				<Label class="grid gap-1.5" for="{fieldId}-unhealthy-after">
+					Unhealthy for (seconds)
+					<Input
+						id="{fieldId}-unhealthy-after"
+						name="health_unhealthy_after_sec"
+						type="number"
+						min={15}
+						max={600}
+						bind:value={
+							() => (draft.healthUnhealthyAfter === '' ? null : Number(draft.healthUnhealthyAfter)),
+							(next) => (draft.healthUnhealthyAfter = next == null || Number.isNaN(next) ? '' : String(next))
+						}
+						placeholder={String(HEALTH_POLICY_DEFAULTS.unhealthy_after_sec)}
+						aria-invalid={invalid('health_policy.unhealthy_after_sec')}
+						aria-describedby={describedBy('health_policy.unhealthy_after_sec')}
+					/>
+				</Label>
+				{@render fieldNotice('health_policy.unhealthy_after_sec')}
+				<Label class="grid gap-1.5" for="{fieldId}-max-actions">
+					Max actions per hour
+					<Input
+						id="{fieldId}-max-actions"
+						name="health_max_actions_per_hour"
+						type="number"
+						min={1}
+						max={10}
+						bind:value={
+							() => (draft.healthMaxActions === '' ? null : Number(draft.healthMaxActions)),
+							(next) => (draft.healthMaxActions = next == null || Number.isNaN(next) ? '' : String(next))
+						}
+						placeholder={String(HEALTH_POLICY_DEFAULTS.max_actions_per_hour)}
+						aria-invalid={invalid('health_policy.max_actions_per_hour')}
+						aria-describedby={describedBy('health_policy.max_actions_per_hour')}
+					/>
+				</Label>
+				{@render fieldNotice('health_policy.max_actions_per_hour')}
+			{/if}
 		</div>
 	{:else}
 		<Input type="hidden" name="restart" value="no" />

@@ -111,7 +111,11 @@ export type ImageOutcome =
 	| 'rollback_failed'
 	| 'image_unavailable'
 	| 'forbidden_spec'
-	| 'conflict';
+	| 'conflict'
+	| 'auto_restarted'
+	| 'auto_rolled_back'
+	| 'auto_gave_up'
+	| 'auto_failed';
 
 /** Program policy from the agent's hello. Paths and executables stay on the host. */
 export type HostPrograms = {
@@ -127,6 +131,8 @@ export type HostPrograms = {
 	files: boolean;
 	/** True when the agent reported container log settings. Missing on older hellos is false. */
 	logging: boolean;
+	/** True when the agent applies health failure policies (api-v1 v1.15). Missing on older hellos is false. */
+	health_policy: boolean;
 };
 
 export type ProgramSpec = {
@@ -173,6 +179,17 @@ export type ImageLogging = {
 	max_files: number;
 };
 
+export type HealthDeployFailure = 'rollback' | 'stop' | 'keep';
+export type HealthUnhealthyAction = 'none' | 'restart' | 'rollback';
+
+/** Health failure policy as stored (api-v1 v1.15). Every key is optional; an absent key is its default. Services only. */
+export type ImageHealthPolicy = {
+	on_deploy_failure?: HealthDeployFailure;
+	on_unhealthy?: HealthUnhealthyAction;
+	unhealthy_after_sec?: number;
+	max_actions_per_hour?: number;
+};
+
 export type ImageSpec = {
 	kind: ImageWorkload;
 	image: string;
@@ -191,6 +208,8 @@ export type ImageSpec = {
 	timeout_sec: number;
 	healthcheck: ImageHealthcheck | null;
 	logging: ImageLogging | null;
+	/** Null means all defaults (roll back on a failed deploy, no action when unhealthy later). */
+	health_policy: ImageHealthPolicy | null;
 };
 
 type CatalogEntryBase = {
@@ -227,8 +246,9 @@ export type ImageDeploy = {
 	exit_code: number | null;
 	started_at: string;
 	finished_at: string | null;
-	by: string;
-	via: 'console' | 'mcp';
+	/** Null only for automatic actions (`via` agent). */
+	by: string | null;
+	via: 'console' | 'mcp' | 'agent';
 };
 
 export type ImageState = 'running' | 'exited' | 'created' | 'paused' | 'restarting' | 'dead' | 'missing' | 'unknown';

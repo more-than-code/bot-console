@@ -15,6 +15,7 @@ import {
 	healthWaitSeconds,
 	type FlightAction
 } from '../src/lib/catalog-flight.ts';
+import { healthPolicyRule } from '../src/lib/image-spec.ts';
 import CatalogDeployForm from '../src/routes/projects/[id]/CatalogDeployForm.svelte';
 import CatalogRunForm from '../src/routes/projects/[id]/CatalogRunForm.svelte';
 import CatalogSection from '../src/routes/projects/[id]/CatalogSection.svelte';
@@ -63,7 +64,8 @@ function imageSpec(healthcheck: ImageHealthcheck | null = null): ImageSpec {
 		memory_mb: null,
 		timeout_sec: 600,
 		healthcheck,
-		logging: null
+		logging: null,
+		health_policy: null
 	};
 }
 
@@ -124,7 +126,7 @@ function host(id = HOST_ID, name = 'pi1'): Host {
 		revoked_at: null,
 		relation: 'owner',
 		share_level: null,
-		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false }
+		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false, health_policy: false }
 	};
 }
 
@@ -319,7 +321,8 @@ test('an in-flight run or deploy shows a spinner, a label, and a timer', () => {
 	assert.match(deploying, /motion-safe:animate-spin/);
 	assert.match(deploying, /Elapsed 0:00/);
 	assert.match(deploying, /Pulls the image, starts the container\./);
-	assert.equal(deploying.includes('healthy'), false);
+	// The health policy rule line says "unhealthy"; the progress note must not mention a health wait.
+	assert.equal(deploying.replace(healthPolicyRule(null), '').includes('healthy'), false);
 	const deployingButton = openTag(deploying, 'Deploying…', 'button');
 	assert.equal(isDisabled(deployingButton), false);
 	assert.equal(deployingButton.includes('aria-disabled="true"'), true);
