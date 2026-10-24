@@ -8,11 +8,15 @@
 	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import ThemeSwitch from '$lib/components/ThemeSwitch.svelte';
+	import { avatarInitial } from '$lib/avatar';
 	import { browserTimeZone, provideTimeZone, rememberTimeZone } from '$lib/time-zone';
 	import { cn } from '$lib/utils';
 	import '../app.css';
 
 	let { children, data } = $props();
+
+	// A broken or blocked avatar image falls back to the initial.
+	let avatarFailed = $state(false);
 
 	// The server and the first client render share this value. After mount the
 	// browser replaces it when the viewer is in a different zone.
@@ -65,6 +69,21 @@
 								'max-w-full min-w-0 shrink overflow-hidden'
 							)}
 						>
+							{#if data.user.avatarUrl && !avatarFailed}
+								<img
+									src={data.user.avatarUrl}
+									alt=""
+									class="size-6 shrink-0 rounded-full"
+									referrerpolicy="no-referrer"
+									onerror={() => (avatarFailed = true)}
+								/>
+							{:else}
+								<span
+									aria-hidden="true"
+									class="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground"
+									>{avatarInitial(data.user.name)}</span
+								>
+							{/if}
 							<span class="min-w-0 truncate">{data.user.name || 'Account'}</span>
 						</DropdownMenu.Trigger>
 						<DropdownMenu.Content align="end">
