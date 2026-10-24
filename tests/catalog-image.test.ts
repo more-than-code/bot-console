@@ -1434,9 +1434,30 @@ describe('catalog images', { concurrency: false }, () => {
 				form: { set: 'app' }
 			}).event as never
 		);
-		assert.equal(actionData(conflict).message, 'env set app is referenced by web');
+		assert.equal(actionData(conflict).message, 'Env set app is still used by catalog entries. Remove it from those entries first, or delete its variables one by one.');
 		assert.equal(actionData(conflict).settingsField ?? null, null);
 		assert.equal(actionData(conflict).message?.includes('Paste the value again.'), false);
+	});
+
+	test('deleting an env set that entries still use explains why and closes the dialog', async () => {
+		installFetch(() => envelope(null, 409, 'conflict', 'conflict'));
+		const conflict = await projectActions.deleteEnvSet(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings&/deleteEnvSet`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { set: 'services' }
+			}).event as never
+		);
+		assert.equal(isActionFailure(conflict), true);
+		assert.equal(
+			actionData(conflict).message,
+			'Env set services is still used by catalog entries. Remove it from those entries first, or delete its variables one by one.'
+		);
+		const table = readFileSync(new URL('../src/routes/projects/[id]/EnvSetTable.svelte', import.meta.url), 'utf8');
+		assert.match(table, /id="delete-env-\{set\.name\}"[\s\S]*?closeOnFailure[\s\S]*?\/>/);
 	});
 
 	test('container Run and Deploy tooltips explain the action', () => {

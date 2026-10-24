@@ -504,6 +504,13 @@ export async function deleteEnvSet(event: RequestEvent) {
 		redirect(303, backTo(event.url));
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
+		if (err instanceof ApiError && err.code === 'conflict') {
+			return settingsFailure(
+				event,
+				409,
+				`Env set ${name} is still used by catalog entries. Remove it from those entries first, or delete its variables one by one.`
+			);
+		}
 		return settingsFailure(event, apiStatus(err), apiMessage(err));
 	}
 }

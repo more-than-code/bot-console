@@ -102,6 +102,7 @@
 				label="Delete"
 				confirmLabel="Delete"
 				message="Delete env set {set.name}?"
+				closeOnFailure
 				hidden={[{ name: 'set', value: set.name }]}
 			/>
 		</div>
