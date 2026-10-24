@@ -11,13 +11,16 @@
 		value,
 		label,
 		iconOnly = false,
+		tip,
 		icon: Icon = Copy,
 		onResult
 	}: {
 		value: string;
 		label: string;
-		/** Icon button. The tooltip is `value`. The accessible name stays `label`. */
+		/** Icon button. The tooltip is `tip`, else `value`. The accessible name stays `label`. */
 		iconOnly?: boolean;
+		/** Icon-only tooltip text instead of `value` (an env row shows "Copy {KEY}"). */
+		tip?: string;
 		icon?: Component;
 		/** Called with the copy note. Icon-only failure is rendered by the caller. */
 		onResult?: (note: string) => void;
@@ -50,7 +53,7 @@
 							onclick={copy}
 							aria-label={label}
 							aria-live="polite"
-							title={value}
+							title={tip ?? value}
 						>
 							{#if copied}
 								<Check class="size-4" />
@@ -61,7 +64,7 @@
 						</Button>
 					{/snippet}
 				</Tooltip.Trigger>
-				<Tooltip.Content class="max-w-sm font-mono break-all">{value}</Tooltip.Content>
+				<Tooltip.Content class={tip ? 'max-w-sm' : 'max-w-sm font-mono break-all'}>{tip ?? value}</Tooltip.Content>
 			</Tooltip.Root>
 		</Tooltip.Provider>
 	</span>

@@ -23,7 +23,9 @@
 		name,
 		value,
 		trigger,
-		disabled = false
+		disabled = false,
+		id,
+		onclick
 	}: {
 		label: string;
 		/** Extra hover sentence. The aria-label stays `label`. */
@@ -38,7 +40,16 @@
 		trigger?: Snippet<[TriggerProps]>;
 		/** A disabled control does not receive hover, so the tooltip sits on a wrapper. */
 		disabled?: boolean;
+		/** For a plain button (no `trigger`), e.g. a focus target. */
+		id?: string;
+		/** For a plain button: runs after the tooltip's own click handler. */
+		onclick?: (event: MouseEvent) => void;
 	} = $props();
+
+	function runClick(tooltipClick: unknown, event: MouseEvent) {
+		if (typeof tooltipClick === 'function') tooltipClick(event);
+		onclick?.(event);
+	}
 
 	const hover = $derived(tip ? `${label}. ${tip}` : label);
 	const controlClass = $derived(
@@ -73,6 +84,8 @@
 				{:else}
 					<Button
 						{...props}
+						id={id ?? (props.id as string | undefined)}
+						onclick={(event: MouseEvent) => runClick(props.onclick, event)}
 						{type}
 						{name}
 						{value}

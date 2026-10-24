@@ -6,6 +6,7 @@
 	import { tick, type Component } from 'svelte';
 	import ConfirmForm from '$lib/components/ConfirmForm.svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
+	import { confirmIsDestructive } from '$lib/confirm';
 	import { confirmSettle } from '$lib/dialog-open';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { buttonVariants } from '$lib/components/ui/button';
@@ -91,7 +92,7 @@
 		if (focusNotice()) event.preventDefault();
 	}
 
-	const destructive = $derived(/delete|remove|revoke/i.test(label));
+	const destructive = $derived(confirmIsDestructive(label));
 
 	function rowIcon(text: string): Component {
 		if (/credential/i.test(text)) return ShieldOff;
@@ -123,7 +124,7 @@
 			<AlertDialog.Title>{confirmLabel}</AlertDialog.Title>
 			<AlertDialog.Description class={messageClass}>{message}</AlertDialog.Description>
 		</AlertDialog.Header>
-		<ConfirmForm {id} {action} {confirmLabel} {hidden} {typeToConfirm} bind:typed onSettled={settle}>
+		<ConfirmForm {id} {action} {confirmLabel} {destructive} {hidden} {typeToConfirm} bind:typed onSettled={settle}>
 			{#snippet cancel()}
 				<AlertDialog.Cancel type="button">Cancel</AlertDialog.Cancel>
 			{/snippet}

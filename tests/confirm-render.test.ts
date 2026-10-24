@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import { render } from 'svelte/server';
 import ConfirmForm from '../src/lib/components/ConfirmForm.svelte';
 import SettingsSection from '../src/routes/projects/[id]/SettingsSection.svelte';
-import { confirmSubmitDisabled, typeToConfirmMatches } from '../src/lib/confirm.ts';
+import { confirmIsDestructive, confirmSubmitDisabled, typeToConfirmMatches } from '../src/lib/confirm.ts';
+import { readFileSync } from 'node:fs';
 import { PROJECT } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 
@@ -128,4 +129,42 @@ test('settings delete does not submit the project name', () => {
 		inputs.some((tag) => attr(tag, 'type') === 'hidden' && attr(tag, 'value') === PROJECT.name),
 		false
 	);
+});
+
+test('Make secret confirms with the default button; Delete, Remove and Revoke stay destructive', () => {
+	for (const label of ['Delete', 'Delete DB_URL', 'Delete project', 'Remove', 'Revoke', 'Revoke credential']) {
+		assert.equal(confirmIsDestructive(label), true, label);
+	}
+	assert.equal(confirmIsDestructive('Make secret'), false);
+	setPageUrl('http://console.example/projects/1?tab=settings');
+	const submitOf = (destructive: boolean | undefined) => {
+		const body = decode(
+			render(ConfirmForm, {
+				props: { id: 'x', action: '?/makeEnvKeysSecret', confirmLabel: 'Make secret', ...(destructive === undefined ? {} : { destructive }) }
+			}).body
+		);
+		const submit = buttonTags(body).find((tag) => attr(tag, 'type') === 'submit');
+		assert.ok(submit);
+		return attr(submit, 'class') ?? '';
+	};
+	const neutral = submitOf(false);
+	assert.equal(neutral.includes('destructive/10'), false);
+	assert.equal(neutral.includes('text-destructive'), false);
+	assert.match(neutral, /\bbg-primary\b/);
+	// Without the prop (and with true) the confirm stays destructive, as for Delete.
+	for (const value of [undefined, true]) {
+		const red = submitOf(value);
+		assert.match(red, /bg-destructive\/10/);
+		assert.match(red, /\btext-destructive\b/);
+	}
+	// ConfirmAction derives it from its label and passes it to the form.
+	const action = readFileSync(new URL('../src/lib/components/ConfirmAction.svelte', import.meta.url), 'utf8');
+	assert.match(action, /const destructive = \$derived\(confirmIsDestructive\(label\)\);/);
+	assert.match(action, /<ConfirmForm [^>]*\{destructive\}/);
+	// The Make secret row action's label is the fixed "Make secret"; key Delete is "Delete {key}".
+	const table = readFileSync(new URL('../src/routes/projects/[id]/EnvSetTable.svelte', import.meta.url), 'utf8');
+	const makeSecret = table.match(/<ConfirmAction\s+id=\{domId\('make-secret', item\.key\)\}[^]*?\/>/)?.[0] ?? '';
+	assert.match(makeSecret, /\slabel="Make secret"\s/);
+	const keyDelete = table.match(/<ConfirmAction\s+id=\{domId\('delete', item\.key\)\}[^]*?\/>/)?.[0] ?? '';
+	assert.match(keyDelete, /\slabel="Delete \{item\.key\}"\s/);
 });

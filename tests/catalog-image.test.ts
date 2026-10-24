@@ -1563,8 +1563,10 @@ describe('catalog images', { concurrency: false }, () => {
 		// The enhance callback runs only in the browser, so check its wiring in the source.
 		const settings = readFileSync(new URL('../src/routes/projects/[id]/EnvSetDialog.svelte', import.meta.url), 'utf8');
 		assert.match(settings, /id="env-set-name" name="set" bind:value=\{setName\}/);
-		assert.match(settings, /savedSet = result\.type === 'redirect' \? name : null;\s*if \(savedSet\) setName = '';/);
-		assert.match(settings, /<Notice kind="success">Saved env set \{savedSet\}\.<\/Notice>/);
+		assert.match(settings, /saved: \(\) => \{\s*onStatus\(savedEnvSetNote\(name\)\);[\s\S]*?setName = '';\s*newKeysSecret = true;/);
+		// The note is on the card's status line now, not inside the dialog.
+		assert.equal(settings.includes('kind="success"'), false);
+		assert.equal(settings.includes('savedSet'), false);
 	});
 
 	test('the delete confirmation names what keeps running for each entry kind', () => {
@@ -1858,7 +1860,8 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(registriesAt > 0, true);
 		const newSet = dotenvHtml.match(/<button\b[^>]*id="new-env-set"[^>]*>/)?.[0] ?? '';
 		assert.equal(newSet.includes('aria-expanded="true"'), true);
-		assert.match(dotenvHtml, new RegExp(`break-all[^>]*>${'A'.repeat(64)}`));
+		// A long key without an underscore is capped and breaks inside its box instead of widening the table.
+		assert.match(dotenvHtml, new RegExp(`max-w-28[^"]*break-words[^>]*>(?:<!--[^>]*-->)*${'A'.repeat(64)}`));
 		assert.equal(dotenvHtml.includes(SECRET), false);
 		const dialog = readFileSync(new URL('../src/routes/projects/[id]/EnvSetDialog.svelte', import.meta.url), 'utf8');
 		const areaAt = dialog.indexOf('id="env-set-dotenv"');

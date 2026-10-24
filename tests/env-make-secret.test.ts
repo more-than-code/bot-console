@@ -89,7 +89,7 @@ describe('Make secret row action (api-v1 v1.17)', () => {
 	test('the confirm names the key with the exact text and posts set and keys', () => {
 		assert.equal(
 			MAKE_SECRET_MESSAGE,
-			"These values will be encrypted and hidden. This can't be undone; to make a key plain again, delete it and add it again."
+			"This value will be encrypted and hidden. This can't be undone; to make a key plain again, delete it and add it again."
 		);
 		assert.equal(madeSecretNote('DB_URL'), 'Made DB_URL secret.');
 		// The dialog body is portalled and not server-rendered; check the one row ConfirmAction element.

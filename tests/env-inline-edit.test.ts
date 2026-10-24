@@ -25,6 +25,7 @@ import {
 	focusAfterEditSave,
 	focusIsFree,
 	isCancelKey,
+	keyWrapParts,
 	rowEditErrorText,
 	rowEditFailed,
 	secretEditRefusal
@@ -76,10 +77,10 @@ function inputTag(html: string): string {
 	return html.match(/<input\b[^>]*>/)?.[0] ?? '';
 }
 
-/** The Actions cell markup while the row is in edit state. */
+/** The markup of a row in edit state: one cell spanning Value, Kind and Actions. */
 function editBlock(table: string): string {
-	const at = table.indexOf('{#if editingRow}\n\t\t\t\t\t\t\t<form');
-	assert.ok(at > 0, 'no edit block in the Actions cell');
+	const at = table.indexOf('{#if editingRow}');
+	assert.ok(at > 0, 'no edit block in the row');
 	return table.slice(at, table.indexOf('{:else}', at));
 }
 
@@ -286,7 +287,50 @@ describe('env-set inline edit and Add variable dialog', () => {
 		assert.match(save, /if \(free\) focusById\(focusAfterEditSave\(/);
 	});
 
-	test('while a row is edited its Actions cell has only Save and Cancel', () => {
+	test('an edited row spans Value, Kind and Actions, with Save and Cancel under the input on narrow screens', () => {
+		const table = source('EnvSetTable.svelte');
+		const block = editBlock(table);
+		// One cell replaces Value, Kind and Actions, so the row is no wider than the others at 375 px.
+		assert.match(block, /^\{#if editingRow\}\s*<!--[^>]*-->\s*<Table\.Cell colspan=\{3\} class="whitespace-normal">/);
+		assert.equal(block.match(/<Table\.Cell\b/g)?.length, 1);
+		assert.equal(block.includes('<Badge'), false);
+		// Narrow: a grid, the input first and the form with Save and Cancel below. sm: side by side.
+		assert.match(block, /<div class="grid gap-2 sm:flex sm:items-start">\s*<div class="min-w-0 sm:flex-1">\s*<EnvValueEditor\b[\s\S]*?\/>\s*<\/div>\s*<form\b/);
+		assert.ok(block.indexOf('<EnvValueEditor') < block.indexOf('<form'));
+		// The rows that are not edited keep their four cells.
+		const rest = table.slice(table.indexOf('{:else}', table.indexOf('{#if editingRow}')), table.indexOf('</Table.Row>\n\t\t\t{/each}'));
+		assert.equal(rest.match(/<Table\.Cell\b/g)?.length, 3);
+		// The input no longer forces 12rem on a phone.
+		assert.equal(source('EnvValueEditor.svelte').match(/class="min-w-40 sm:min-w-48"/g)?.length, 2);
+	});
+
+	test('a key wraps only after an underscore, and a long part is capped instead of widening the table', () => {
+		assert.deepEqual(keyWrapParts('C_SECRET'), ['C_', 'SECRET']);
+		assert.deepEqual(keyWrapParts('DATABASE_CONNECTION_URL'), ['DATABASE_', 'CONNECTION_', 'URL']);
+		assert.deepEqual(keyWrapParts('_PRIVATE'), ['_', 'PRIVATE']);
+		assert.deepEqual(keyWrapParts('TRAILING_'), ['TRAILING_']);
+		assert.deepEqual(keyWrapParts('PLAIN'), ['PLAIN']);
+		assert.equal(keyWrapParts('A__B').join(''), 'A__B');
+		assert.deepEqual(keyWrapParts('A__B'), ['A_', '_', 'B']);
+		assert.deepEqual(keyWrapParts('_X'), ['_', 'X']);
+		assert.deepEqual(keyWrapParts('X_'), ['X_']);
+		assert.deepEqual(keyWrapParts('X'), ['X']);
+		assert.deepEqual(keyWrapParts(''), []);
+		// No regex lookbehind: Safari before 16.4 throws on it, which would break every env row.
+		const panel = readFileSync(new URL('../src/routes/projects/[id]/env-set-panel.ts', import.meta.url), 'utf8');
+		assert.equal(panel.includes('(?<='), false);
+		assert.equal(panel.includes('(?<!'), false);
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+		const html = render(EnvSetTable, { props: { set: SET, ...TABLE_PROPS } }).body;
+		const key = html.match(/<span class="([^"]*)">(?:<!--[^>]*-->)*DB_(?:<!--[^>]*-->)*<wbr\/>(?:<!--[^>]*-->)*URL/);
+		assert.ok(key, 'DB_URL is not split by <wbr> after the underscore');
+		const classes = key[1]!.split(' ');
+		// No break-all: it broke keys every two letters while a row was edited.
+		assert.equal(classes.includes('break-all'), false);
+		for (const name of ['inline-block', 'max-w-28', 'sm:max-w-48', 'break-words', 'font-mono']) assert.ok(classes.includes(name), name);
+	});
+
+	test('while a row is edited it has only Save and Cancel', () => {
 		const block = editBlock(source('EnvSetTable.svelte'));
 		assert.match(block, /<form\s+id=\{domId\('edit-form', item\.key\)\}/);
 		assert.match(block, /<Button type="submit" size="sm" aria-label="Save \{item\.key\}">Save<\/Button>/);
@@ -352,5 +396,103 @@ describe('env-set inline edit and Add variable dialog', () => {
 		assert.equal(JSON.stringify(local).includes(TYPED), false);
 		const badKey = await projectActions.putEnvKey(fakeEvent({ ...base, url, form: { set: 'app', key: 'bad key', value: TYPED, op: 'add' } }).event as never);
 		assert.equal(isActionFailure(badKey) && (badKey.data as unknown as { message?: string }).message, 'That env set key is not valid.');
+	});
+});
+
+describe('env-set rows: icon-only Copy and Delete (v0.2.14 item 7)', () => {
+	const buttons = (html: string) => [...html.matchAll(/<button\b[^>]*>(?:(?!<\/button>)[\s\S])*<\/button>/g)].map((m) => m[0]);
+	const visibleText = (button: string) =>
+		button
+			.replace(/<span class="sr-only">[^<]*<\/span>/g, '')
+			.replace(/<[^>]*>/g, '')
+			.trim();
+
+	test('Copy and Delete are icon buttons named "Copy {KEY}" and "Delete {KEY}", with no visible key text', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+		const html = render(EnvSetTable, { props: { set: SET, ...TABLE_PROPS } }).body;
+		const all = buttons(html);
+		const copy = all.find((b) => b.includes('aria-label="Copy DB_URL"'));
+		assert.ok(copy, 'no Copy DB_URL button');
+		assert.equal(visibleText(copy), '');
+		assert.match(copy, /data-slot="tooltip-trigger"/);
+		assert.match(copy, /<svg\b/);
+		// A secret row has no Copy.
+		assert.equal(html.includes('aria-label="Copy API_TOKEN"'), false);
+		for (const key of ['DB_URL', 'API_TOKEN']) {
+			const del = all.find((b) => b.includes(`aria-label="Delete ${key}"`));
+			assert.ok(del, `no Delete ${key} button`);
+			assert.equal(visibleText(del), '');
+			assert.match(del, /aria-haspopup="dialog"/);
+			assert.match(del, /lucide-trash-2/);
+			// Still the destructive colour.
+			assert.match(del, /\btext-destructive\b/);
+		}
+		// No "Copy {KEY}" or "Delete {KEY}" text anywhere in the cells (set-level Delete is the plain word).
+		assert.equal(/>\s*(?:<!--[^>]*-->\s*)*(?:Copy|Delete) (?:DB_URL|API_TOKEN)/.test(html), false);
+		assert.equal(html.includes('Copied'), false);
+	});
+
+	test('Edit is a pencil icon row action that keeps its id (the focus target) and name', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+		const html = render(EnvSetTable, { props: { set: SET, ...TABLE_PROPS } }).body;
+		for (const key of ['DB_URL', 'API_TOKEN']) {
+			const edit = buttons(html).find((b) => b.includes(`id="env-edit-app-${key}"`));
+			assert.ok(edit, `no Edit ${key}`);
+			assert.match(edit, new RegExp(`aria-label="Edit ${key}"`));
+			assert.match(edit, /lucide-pencil/);
+			assert.match(edit, /data-slot="tooltip-trigger"/);
+			assert.equal(visibleText(edit), '');
+		}
+		const table = source('EnvSetTable.svelte');
+		assert.match(table, /<RowAction id=\{domId\('edit', item\.key\)\} label="Edit \{item\.key\}" icon=\{Pencil\} onclick=\{\(\) => startEdit\(item\)\} \/>/);
+		// RowAction runs the tooltip's own click handler before the caller's.
+		const row = readFileSync(new URL('../src/lib/components/RowAction.svelte', import.meta.url), 'utf8');
+		assert.match(row, /if \(typeof tooltipClick === 'function'\) tooltipClick\(event\);\s*onclick\?\.\(event\);/);
+		assert.match(row, /id=\{id \?\? \(props\.id as string \| undefined\)\}\s*onclick=\{\(event: MouseEvent\) => runClick\(props\.onclick, event\)\}/);
+	});
+
+	test('the Actions header is visible only from sm and stays for screen readers', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+		const html = render(EnvSetTable, { props: { set: SET, ...TABLE_PROPS } }).body;
+		assert.match(html, /<th\b[^>]*><span class="sr-only sm:not-sr-only">Actions<\/span>(?:<!--[^>]*-->)*<\/th>/);
+	});
+
+	test('Delete keeps its confirm, closeOnFailure and failure focus; Copy keeps its feedback', () => {
+		const table = source('EnvSetTable.svelte');
+		const keyDelete = table.match(/<ConfirmAction\s+id=\{domId\('delete', item\.key\)\}[^]*?\/>/)?.[0] ?? '';
+		assert.match(keyDelete, /\slabel="Delete \{item\.key\}"\s/);
+		assert.match(keyDelete, /\srowLabel="Delete \{item\.key\}"\s/);
+		assert.match(keyDelete, /confirmLabel="Delete"/);
+		assert.match(keyDelete, /\scloseOnFailure\s/);
+		assert.match(keyDelete, /failureFocusId="settings-error"/);
+		assert.match(table, /<CopyButton value=\{item\.value \?\? ''\} label="Copy \{item\.key\}" tip="Copy \{item\.key\}" iconOnly onResult=\{copyResult\} \/>/);
+		// Copied: the button shows a check and announces "Copied" (aria-live); a failure goes to the status line.
+		const copyButton = readFileSync(new URL('../src/lib/components/CopyButton.svelte', import.meta.url), 'utf8');
+		const icon = copyButton.slice(copyButton.indexOf('{#if iconOnly}'), copyButton.indexOf('{:else}\n\t<Button'));
+		assert.match(icon, /aria-live="polite"/);
+		assert.match(icon, /<span class="sr-only">Copied<\/span>/);
+		assert.match(icon, /\{tip \?\? value\}/);
+		assert.match(table, /function copyResult\(note: string\) \{\s*if \(note === COPY_FAILED_NOTE\) statusNote = note;/);
+	});
+
+	test('a plain value wraps at spaces and hyphens before breaking a token', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+		const html = render(EnvSetTable, { props: { set: SET, ...TABLE_PROPS } }).body;
+		const value = html.match(new RegExp(`<span class="([^"]*)">${PLAIN}</span>`));
+		assert.ok(value);
+		assert.equal(value[1]!.split(' ').includes('break-all'), false);
+		assert.ok(value[1]!.split(' ').includes('[overflow-wrap:anywhere]'));
+	});
+
+	test('the edit form names the kind, and other env actions clear "Saved env set"', () => {
+		const table = source('EnvSetTable.svelte');
+		assert.match(table, /aria-label="Edit \{item\.key\} in \{set\.name\} \(\{item\.is_secret \? 'secret' : 'plain'\}\)"/);
+		// Inline save, add, make secret, key delete and set delete each call onAction.
+		assert.match(table, /statusNote = '';\s*onAction\(\);\s*return async/);
+		assert.match(table, /onAdded=\{\(key\) => \{\s*onAction\(\);/);
+		assert.match(table, /async function afterMakeSecret\(form: FormData\) \{\s*onAction\(\);/);
+		assert.equal(table.match(/onSuccess=\{onAction\}/g)?.length, 2);
+		const section = readFileSync(new URL('../src/routes/projects/[id]/SettingsSection.svelte', import.meta.url), 'utf8');
+		assert.match(section, /<EnvSetTable[\s\S]*?onAction=\{\(\) => \(envSetNote = ''\)\}[\s\S]*?\/>/);
 	});
 });

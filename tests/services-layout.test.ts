@@ -200,6 +200,6 @@ test('services cells are middle-aligned and last seen does not wrap', () => {
 	assert.match(source, /icon=\{Fingerprint\} iconOnly/);
 	assert.match(
 		readFileSync(new URL('../src/lib/components/CopyButton.svelte', import.meta.url), 'utf8'),
-		/Tooltip\.Content class="max-w-sm font-mono break-all"/
+		/Tooltip\.Content class=\{tip \? 'max-w-sm' : 'max-w-sm font-mono break-all'\}/
 	);
 });

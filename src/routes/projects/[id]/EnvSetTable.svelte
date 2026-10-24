@@ -2,11 +2,14 @@
 	import { enhance } from '$app/forms';
 	import { tick } from 'svelte';
 	import Lock from '@lucide/svelte/icons/lock';
+	import Pencil from '@lucide/svelte/icons/pencil';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
+	import RowAction from '$lib/components/RowAction.svelte';
 	import type { EnvSet, EnvSetKey } from '$lib/api-types';
+	import { COPY_FAILED_NOTE } from '$lib/copy-text';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -23,6 +26,7 @@
 		focusIsFree,
 		initialEnvSetPanel,
 		isCancelKey,
+		keyWrapParts,
 		madeSecretNote,
 		rowEditErrorText,
 		rowEditFailed,
@@ -36,8 +40,17 @@
 		putAction,
 		deleteAction,
 		deleteSetAction,
-		makeSecretAction
-	}: { set: EnvSet; putAction: string; deleteAction: string; deleteSetAction: string; makeSecretAction: string } = $props();
+		makeSecretAction,
+		onAction = () => {}
+	}: {
+		set: EnvSet;
+		putAction: string;
+		deleteAction: string;
+		deleteSetAction: string;
+		makeSecretAction: string;
+		/** Another env action ran here (save, add, make secret, delete): the card clears "Saved env set …". */
+		onAction?: () => void;
+	} = $props();
 
 	// The panel's one status line ("Made {KEY} secret.", "Added {KEY}.", "Saved {KEY}."). Local only:
 	// the text comes from the submitted key, so it does not depend on reloaded data.
@@ -45,9 +58,16 @@
 
 	// The row's trigger is gone by now (the row reloaded as secret), so the table moves focus.
 	async function afterMakeSecret(form: FormData) {
+		onAction();
 		statusNote = madeSecretNote(String(form.get('keys')));
 		await tick();
 		document.getElementById(domId('status'))?.focus();
+	}
+
+	// An icon-only copy shows "Copied" on the button itself; a failure goes to the status line.
+	function copyResult(note: string) {
+		if (note === COPY_FAILED_NOTE) statusNote = note;
+		else if (statusNote === COPY_FAILED_NOTE) statusNote = '';
 	}
 
 	// Collapse hides the table. It does not clear an edit in progress.
@@ -108,6 +128,7 @@
 				return;
 			}
 			statusNote = '';
+			onAction();
 			return async ({ update, result }: { update: () => Promise<void>; result: { type: string; data?: unknown } }) => {
 				const input = document.getElementById(domId('value', item.key));
 				// A typed secret is not kept in the page after it is sent.
@@ -164,6 +185,7 @@
 				setName={set.name}
 				action={putAction}
 				onAdded={(key) => {
+					onAction();
 					statusNote = `Added ${key}.`;
 					panel = { ...panel, open: true };
 				}}
@@ -174,6 +196,7 @@
 				label="Delete"
 				confirmLabel="Delete"
 				message="Delete env set {set.name}?"
+				onSuccess={onAction}
 				closeOnFailure
 				failureFocusId="settings-error"
 				hidden={[{ name: 'set', value: set.name }]}
@@ -188,7 +211,8 @@
 				<Table.Head>Key</Table.Head>
 				<Table.Head>Value</Table.Head>
 				<Table.Head>Kind</Table.Head>
-				<Table.Head>Actions</Table.Head>
+				<!-- Below sm the word would set the column wider than its icons; it stays for screen readers. -->
+				<Table.Head><span class="sr-only sm:not-sr-only">Actions</span></Table.Head>
 			</Table.Row>
 		</Table.Header>
 		<Table.Body>
@@ -200,52 +224,60 @@
 			{#each set.keys as item (`${set.name}:${item.key}`)}
 				{@const editingRow = edit?.key === item.key}
 				<Table.Row onkeydown={editingRow ? onRowKeydown(item.key) : undefined}>
-					<Table.Cell class="max-w-48 whitespace-normal">
-						<span class="break-all font-mono">{item.key}</span>
-					</Table.Cell>
-					<Table.Cell class="max-w-md whitespace-normal">
-						{#if editingRow}
-							<EnvValueEditor
-								{item}
-								inputId={domId('value', item.key)}
-								errorId={domId('value-error', item.key)}
-								formId={domId('edit-form', item.key)}
-								error={rowEditErrorText(edit)}
-								bind:draft={plainDraft}
-								onInput={clearRowError}
-							/>
-						{:else if item.is_secret}
-							<span class="font-mono text-sm">
-								<span class="sr-only">secret, preview only</span>
-								<span class="select-none" aria-hidden="true">{item.preview ?? ''}</span>
-							</span>
-						{:else}
-							<span class="font-mono text-sm break-all">{item.value ?? ''}</span>
-						{/if}
-					</Table.Cell>
-					<Table.Cell>
-						<Badge variant="outline">{item.is_secret ? 'Secret' : 'Plain'}</Badge>
-					</Table.Cell>
 					<Table.Cell class="whitespace-normal">
-						{#if editingRow}
-							<form
-								id={domId('edit-form', item.key)}
-								method="POST"
-								action={putAction}
-								class="flex flex-wrap items-center gap-2"
-								aria-label="Edit {item.key} in {set.name}"
-								use:enhance={saveEdit(item)}
-							>
-								<Input type="hidden" name="set" value={set.name} />
-								<Input type="hidden" name="key" value={item.key} />
-								<Button type="submit" size="sm" aria-label="Save {item.key}">Save</Button>
-								<Button type="button" variant="outline" size="sm" aria-label="Cancel editing {item.key}" onclick={() => cancelEdit(item.key)}>Cancel</Button>
-							</form>
-						{:else}
-							<div class="flex flex-wrap items-center gap-2">
-								<Button type="button" id={domId('edit', item.key)} variant="outline" size="sm" aria-label="Edit {item.key}" onclick={() => startEdit(item)}>Edit</Button>
+						<!-- Wraps after an underscore (<wbr>); only a part wider than the cap breaks inside. -->
+						<span class="inline-block max-w-28 font-mono break-words sm:max-w-48">{#each keyWrapParts(item.key) as part, i}{#if i > 0}<wbr />{/if}{part}{/each}</span>
+					</Table.Cell>
+					{#if editingRow}
+						<!-- Spans Value, Kind and Actions so Save and Cancel stay on screen at 375 px. -->
+						<Table.Cell colspan={3} class="whitespace-normal">
+							<div class="grid gap-2 sm:flex sm:items-start">
+								<div class="min-w-0 sm:flex-1">
+									<EnvValueEditor
+										{item}
+										inputId={domId('value', item.key)}
+										errorId={domId('value-error', item.key)}
+										formId={domId('edit-form', item.key)}
+										error={rowEditErrorText(edit)}
+										bind:draft={plainDraft}
+										onInput={clearRowError}
+									/>
+								</div>
+								<form
+									id={domId('edit-form', item.key)}
+									method="POST"
+									action={putAction}
+									class="flex flex-wrap items-center gap-2"
+									aria-label="Edit {item.key} in {set.name} ({item.is_secret ? 'secret' : 'plain'})"
+									use:enhance={saveEdit(item)}
+								>
+									<Input type="hidden" name="set" value={set.name} />
+									<Input type="hidden" name="key" value={item.key} />
+									<Button type="submit" size="sm" aria-label="Save {item.key}">Save</Button>
+									<Button type="button" variant="outline" size="sm" aria-label="Cancel editing {item.key}" onclick={() => cancelEdit(item.key)}>Cancel</Button>
+								</form>
+							</div>
+						</Table.Cell>
+					{:else}
+						<Table.Cell class="max-w-md whitespace-normal">
+							{#if item.is_secret}
+								<span class="font-mono text-sm">
+									<span class="sr-only">secret, preview only</span>
+									<span class="select-none" aria-hidden="true">{item.preview ?? ''}</span>
+								</span>
+							{:else}
+								<!-- Wraps at spaces and hyphens first; only a token wider than the column breaks inside. -->
+								<span class="font-mono text-sm [overflow-wrap:anywhere]">{item.value ?? ''}</span>
+							{/if}
+						</Table.Cell>
+						<Table.Cell>
+							<Badge variant="outline">{item.is_secret ? 'Secret' : 'Plain'}</Badge>
+						</Table.Cell>
+						<Table.Cell class="whitespace-normal">
+							<div class="flex flex-wrap items-center gap-1">
+								<RowAction id={domId('edit', item.key)} label="Edit {item.key}" icon={Pencil} onclick={() => startEdit(item)} />
 								{#if !item.is_secret}
-									<CopyButton value={item.value ?? ''} label="Copy {item.key}" />
+									<CopyButton value={item.value ?? ''} label="Copy {item.key}" tip="Copy {item.key}" iconOnly onResult={copyResult} />
 								{/if}
 								{#if !item.is_secret}
 									<!-- `label` stays fixed so a key name such as DELETE_ME never makes it destructive. -->
@@ -271,8 +303,10 @@
 									id={domId('delete', item.key)}
 									action={deleteAction}
 									label="Delete {item.key}"
+									rowLabel="Delete {item.key}"
 									confirmLabel="Delete"
 									message="Delete {item.key} from {set.name}?"
+									onSuccess={onAction}
 									closeOnFailure
 									failureFocusId="settings-error"
 									hidden={[
@@ -281,8 +315,8 @@
 									]}
 								/>
 							</div>
-						{/if}
-					</Table.Cell>
+						</Table.Cell>
+					{/if}
 				</Table.Row>
 			{/each}
 		</Table.Body>

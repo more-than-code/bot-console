@@ -7,6 +7,7 @@
 	import Textarea from '$lib/components/Textarea.svelte';
 	import EnvSetDialog from './EnvSetDialog.svelte';
 	import EnvSetTable from './EnvSetTable.svelte';
+	import { ENV_SET_STATUS_ID } from './env-set-panel';
 	import type { EnvSet, Project, ProjectFile, Registry } from '$lib/api-types';
 	import { formatBytes } from '$lib/format';
 	import { clearSecretField, settleFileSave, showViewedFile } from '$lib/secret-field';
@@ -52,6 +53,8 @@
 	let fileName = $state('');
 	let fileSecret = $state(true);
 	let savedFile = $state<string | null>(null);
+	// The Env sets card's status line ("Saved env set {name}."), set by the New env set dialog.
+	let envSetNote = $state('');
 
 	function clearToken() {
 		return async ({ update }: { update: () => Promise<void> }) => {
@@ -140,10 +143,12 @@
 			<Card.Title>Env sets</Card.Title>
 			<Card.Description>Plain values are shown. A secret shows only a short preview.</Card.Description>
 			<Card.Action>
-				<EnvSetDialog action={actionUrlFrom(page.url, 'saveEnvSet')} {message} {settingsField} />
+				<EnvSetDialog action={actionUrlFrom(page.url, 'saveEnvSet')} {message} {settingsField} onStatus={(text) => (envSetNote = text)} />
 			</Card.Action>
 		</Card.Header>
 		<Card.Content class="grid gap-4">
+			<!-- Always present (sr-only while empty), so the live region exists before text arrives. -->
+			<p id={ENV_SET_STATUS_ID} role="status" tabindex="-1" class={envSetNote ? 'text-sm break-all rounded-md focus-visible:ring-3 focus-visible:ring-ring' : 'sr-only'}>{envSetNote}</p>
 			{#if envSets.length === 0}
 				<p class="text-muted-foreground text-sm">No env sets.</p>
 			{/if}
@@ -154,6 +159,7 @@
 					deleteAction={actionUrlFrom(page.url, 'deleteEnvKey')}
 					deleteSetAction={actionUrlFrom(page.url, 'deleteEnvSet')}
 					makeSecretAction={actionUrlFrom(page.url, 'makeEnvKeysSecret')}
+					onAction={() => (envSetNote = '')}
 				/>
 			{/each}
 		</Card.Content>

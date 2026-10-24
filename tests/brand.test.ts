@@ -28,3 +28,27 @@ test('the header shows the lockup for each theme and names the link Deploybot', 
 	for (const file of ['lockup-light.svg', 'lockup-dark.svg'])
 		assert.ok(existsSync(new URL(`../static/brand/${file}`, import.meta.url)), file);
 });
+
+test('static/favicon.ico is an ICO that embeds the brand PNGs', () => {
+	const ico = readFileSync(new URL('../static/favicon.ico', import.meta.url));
+	// ICONDIR: reserved 0, type 1 (icon), then the image count.
+	assert.deepEqual([...ico.subarray(0, 4)], [0x00, 0x00, 0x01, 0x00]);
+	const count = ico.readUInt16LE(4);
+	assert.equal(count, 2);
+	const sizes: number[] = [];
+	for (let i = 0; i < count; i++) {
+		const entry = 6 + 16 * i;
+		sizes.push(ico[entry] ?? -1);
+		// Square, one plane, 32 bits per pixel.
+		assert.equal(ico[entry + 1], ico[entry]);
+		assert.equal(ico.readUInt16LE(entry + 4), 1);
+		assert.equal(ico.readUInt16LE(entry + 6), 32);
+		const length = ico.readUInt32LE(entry + 8);
+		const offset = ico.readUInt32LE(entry + 12);
+		const png = ico.subarray(offset, offset + length);
+		assert.deepEqual([...png.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+		const brand = readFileSync(new URL(`../static/brand/favicon-${ico[entry]}.png`, import.meta.url));
+		assert.ok(png.equals(brand), `favicon-${ico[entry]}.png`);
+	}
+	assert.deepEqual(sizes, [16, 32]);
+});

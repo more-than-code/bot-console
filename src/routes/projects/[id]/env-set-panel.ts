@@ -23,6 +23,15 @@ export function envDomId(set: string, part: string, key = ''): string {
 	return key === '' ? `env-${part}-${set}` : `env-${part}-${set}-${key}`;
 }
 
+/**
+ * A key split after each underscore. The table puts a `<wbr>` between the parts, so a long key
+ * wraps only at `_` and never between letters (`DB_` / `URL`, not `DB` / `_U` / `RL`).
+ */
+export function keyWrapParts(key: string): string[] {
+	// No regex lookbehind: Safari before 16.4 throws on it.
+	return key.match(/[^_]*_|[^_]+/g) ?? [];
+}
+
 export const RETYPE_VALUE = 'Paste the value again.';
 
 /**
@@ -89,8 +98,58 @@ export function failureMessage(result: { type: string; data?: unknown }): string
 }
 
 export const MAKE_SECRET_MESSAGE =
-	"These values will be encrypted and hidden. This can't be undone; to make a key plain again, delete it and add it again.";
+	"This value will be encrypted and hidden. This can't be undone; to make a key plain again, delete it and add it again.";
 
 export function madeSecretNote(key: string): string {
 	return `Made ${key} secret.`;
+}
+
+/** The Env sets card's status line, outside the dialog and any one set panel. */
+export const ENV_SET_STATUS_ID = 'env-set-status';
+
+export function savedEnvSetNote(name: string): string {
+	return `Saved env set ${name}.`;
+}
+
+export type EnvSetSaveEffects = {
+	/** Blank the dotenv paste. Runs first on every result, so a secret never outlives the request. */
+	clearPaste: () => void;
+	/** Set the card's status line ("Saved env set {name}.") and reset the name and New keys are secret. */
+	saved: () => void;
+	/** Close the dialog (a no-op when it is already closed). */
+	close: () => void;
+	update: () => Promise<void>;
+	tick: () => Promise<void>;
+	focusStatus: () => void;
+	/** Focus the dialog's error notice after the failure is on the page. */
+	focusError: () => void;
+};
+
+/**
+ * The New env set form's `use:enhance` result, in order, like `settleAdd`. A success closes the dialog,
+ * waits for the reload (SvelteKit's navigation resets focus), then focuses the status line, but only
+ * when the dialog was still open when the result arrived. A failure reloads the form result, so the
+ * dialog stays open with the message (and "Paste the value again." from the server), then focuses it.
+ */
+export async function settleEnvSetSave(
+	open: boolean,
+	resultType: string,
+	fx: EnvSetSaveEffects
+): Promise<'saved' | 'failed' | 'other'> {
+	fx.clearPaste();
+	if (resultType === 'redirect') {
+		fx.saved();
+		fx.close();
+		await fx.update();
+		if (!open) return 'saved';
+		await fx.tick();
+		fx.focusStatus();
+		return 'saved';
+	}
+	await fx.update();
+	if (resultType === 'failure') {
+		fx.focusError();
+		return 'failed';
+	}
+	return 'other';
 }

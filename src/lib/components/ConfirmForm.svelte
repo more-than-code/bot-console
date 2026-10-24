@@ -16,6 +16,7 @@
 		id,
 		action,
 		confirmLabel,
+		destructive = true,
 		hidden = [],
 		typeToConfirm = null,
 		typed = $bindable(''),
@@ -25,6 +26,8 @@
 		id: string;
 		action: string;
 		confirmLabel: string;
+		/** The confirm button's style: destructive (default) or the neutral default variant. */
+		destructive?: boolean;
 		hidden?: Array<{ name: string; value: string }>;
 		/** Visible text the user must type. Nothing hidden carries `expected`. */
 		typeToConfirm?: TypeToConfirm | null;
@@ -58,7 +61,7 @@
 		</Label>
 	{/if}
 	<div class="flex flex-wrap items-center gap-2">
-		<Button type="submit" variant="destructive" {disabled}>{confirmLabel}</Button>
+		<Button type="submit" variant={destructive ? 'destructive' : 'default'} {disabled}>{confirmLabel}</Button>
 		{#if cancel}
 			{@render cancel()}
 		{:else}

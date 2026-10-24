@@ -8,3 +8,8 @@ export function confirmSubmitDisabled(typed: string, expected: string | null): b
 	if (expected == null) return false;
 	return !typeToConfirmMatches(typed, expected);
 }
+
+/** Delete, Remove and Revoke confirm in the destructive style; anything else (Make secret) in the default one. */
+export function confirmIsDestructive(label: string): boolean {
+	return /delete|remove|revoke/i.test(label);
+}

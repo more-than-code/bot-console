@@ -4,7 +4,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { editValueField } from './env-set-panel';
 
-	// The inline value input of a row in edit state. It belongs to the row's form in the Actions cell.
+	// The inline value input of a row in edit state. It belongs to the row's form in the row's edit cell.
 	// Escape is handled by the row, so it cancels from anywhere in it.
 	let {
 		item,
@@ -37,7 +37,7 @@
 			form={formId}
 			name="value"
 			type="password"
-			class="min-w-48"
+			class="min-w-40 sm:min-w-48"
 			{placeholder}
 			aria-label="New value for {item.key}"
 			aria-invalid={error ? true : undefined}
@@ -52,7 +52,7 @@
 			form={formId}
 			name="value"
 			type="text"
-			class="min-w-48"
+			class="min-w-40 sm:min-w-48"
 			bind:value={draft}
 			aria-label="Value for {item.key}"
 			aria-invalid={error ? true : undefined}
