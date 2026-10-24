@@ -13,7 +13,7 @@ import { COPY_FAILED_NOTE, COPY_FAILURE_MS, shownDigestFailure } from '../src/li
 import CatalogRunForm from '../src/routes/projects/[id]/CatalogRunForm.svelte';
 import EnvSetTable from '../src/routes/projects/[id]/EnvSetTable.svelte';
 import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
-import { initialEnvSetPanel, setAddSecret } from '../src/routes/projects/[id]/env-set-panel.ts';
+import { initialAddDraft, setAddSecret } from '../src/routes/projects/[id]/env-add-variable.ts';
 import { PROJECT } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 
@@ -239,21 +239,20 @@ test('service label and container name use a definite max width', () => {
 	assert.equal(html.includes('title="a-very-long-container-name"'), true);
 });
 
-test('add and edit forms sit outside the scrolling table', () => {
+test('the edit form sits in its row and the add form in a dialog', () => {
 	const source = readRoute('EnvSetTable.svelte');
-	const rootAt = source.indexOf('<Table.Root');
-	const addAt = source.indexOf('name="op"');
-	const editAt = source.indexOf("id={domId('edit-form'");
-	const hiddenAt = source.indexOf('hidden={!panel.open}');
-	assert.ok(hiddenAt > 0 && hiddenAt < addAt && addAt < rootAt);
-	assert.ok(editAt > addAt && editAt < rootAt);
-	assert.match(source, /class="grid gap-3 sm:flex sm:flex-wrap sm:items-end"/);
-	assert.match(source, /class="grid w-full gap-1\.5 sm:w-auto sm:min-w-36 sm:flex-1"/);
-	assert.equal(source.match(/editing = null/g)?.length, 1);
-	assert.match(source, /panel = beginAddVariable\(panel\)/);
-	assert.match(source, /getElementById\(domId\('add-key'\)\)\?\.focus\(\)/);
-	assert.match(source, /getElementById\(domId\('add-variable'\)\)\?\.focus\(\)/);
-	assert.equal(source.slice(source.indexOf('{#each set.keys')).includes('name="op"'), false);
+	const eachAt = source.indexOf('{#each set.keys');
+	const editAt = source.indexOf("id={domId('edit-form', item.key)}");
+	assert.ok(eachAt > 0 && editAt > eachAt);
+	// The add form is no longer in the panel: it is the Add variable dialog's form.
+	assert.equal(source.includes('name="op"'), false);
+	assert.match(source, /<EnvAddVariableDialog\b/);
+	const dialog = readRoute('EnvAddVariableDialog.svelte');
+	assert.match(dialog, /<Input type="hidden" name="op" value="add" \/>/);
+	assert.match(dialog, /<Dialog\.Trigger id=\{id\('add-variable'\)\}/);
+	// At 375 px the dialog fields stack: one grid column, no side-by-side row.
+	assert.match(dialog, /class="grid min-h-0 gap-3 overflow-y-auto"/);
+	assert.equal(dialog.includes('sm:flex-row'), false);
 });
 
 test('the elapsed timer is the gap since the flight started', () => {
@@ -267,18 +266,21 @@ test('the elapsed timer is the gap since the flight started', () => {
 	assert.doesNotMatch(source, /seconds \+= 1/);
 });
 
-test('toggling Secret on the new row keeps the typed value', () => {
-	const drafted = { ...initialEnvSetPanel(), adding: true, addKey: 'TOKEN', addPlain: 'kept-value', addSecret: true };
+test('toggling Secret in the Add variable dialog keeps the typed value', () => {
+	const drafted = { ...initialAddDraft(), key: 'TOKEN', value: 'kept-value' };
+	assert.equal(drafted.secret, true);
 	const shown = setAddSecret(drafted, false);
-	assert.equal(shown.addPlain, 'kept-value');
-	assert.equal(shown.addSecret, false);
-	assert.equal(shown.addKey, 'TOKEN');
+	assert.equal(shown.value, 'kept-value');
+	assert.equal(shown.secret, false);
+	assert.equal(shown.key, 'TOKEN');
+	// Toggling also ends a paste-again hint.
+	assert.equal(setAddSecret({ ...drafted, retype: true }, false).retype, false);
 	const hidden = setAddSecret(shown, true);
-	assert.equal(hidden.addPlain, 'kept-value');
-	assert.equal(hidden.addSecret, true);
-	const source = readRoute('EnvSetTable.svelte');
-	assert.equal(source.match(/id=\{domId\('add-value'\)\}/g)?.length, 1);
-	assert.match(source, /type=\{panel\.addSecret \? 'password' : 'text'\}/);
-	assert.match(source, /bind:value=\{panel\.addPlain\}/);
-	assert.match(source, /panel = setAddSecret\(panel, value === true\)/);
+	assert.equal(hidden.value, 'kept-value');
+	assert.equal(hidden.secret, true);
+	const source = readRoute('EnvAddVariableDialog.svelte');
+	assert.equal(source.match(/id=\{id\('add-value'\)\}/g)?.length, 1);
+	assert.match(source, /type=\{draft\.secret \? 'password' : 'text'\}/);
+	assert.match(source, /bind:value=\{draft\.value\}/);
+	assert.match(source, /draft = setAddSecret\(draft, value === true\)/);
 });

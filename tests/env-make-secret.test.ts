@@ -106,7 +106,7 @@ describe('Make secret row action (api-v1 v1.17)', () => {
 		// The table, which outlives the row, moves focus to its status line after the reload.
 		const after = table.slice(table.indexOf('async function afterMakeSecret'), table.indexOf('// Collapse hides the table.'));
 		assert.match(after, /await tick\(\)/);
-		assert.match(after, /getElementById\(domId\('made-secret'\)\)\?\.focus\(\)/);
+		assert.match(after, /getElementById\(domId\('status'\)\)\?\.focus\(\)/);
 		// The per-key Delete also closes on failure and focuses the notice.
 		const keyDelete = table.match(/<ConfirmAction\s+id=\{domId\('delete', item\.key\)\}[^]*?\/>/)?.[0] ?? '';
 		assert.match(keyDelete, /\scloseOnFailure\s/);
@@ -210,8 +210,10 @@ describe('Make secret row action (api-v1 v1.17)', () => {
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
 		const html = render(EnvSetTable, { props: { set: SET, ...TABLE_PROPS } }).body;
 		// Empty, it stays in the accessibility tree (sr-only, not display: none), so the live region exists first.
-		assert.equal(html.match(/<p id="env-made-secret-app" role="status" tabindex="-1" class="sr-only"><\/p>/g)?.length, 1);
+		assert.equal(html.match(/<p id="env-status-app" role="status" tabindex="-1" class="sr-only"><\/p>/g)?.length, 1);
 		const table = readFileSync(new URL('../src/routes/projects/[id]/EnvSetTable.svelte', import.meta.url), 'utf8');
-		assert.equal(table.includes('{#if madeNote}'), false);
+		assert.equal(table.includes('{#if statusNote}'), false);
+		// Make secret, Add variable and an inline save share this one line per set panel.
+		assert.equal(table.match(/role="status"/g)?.length, 1);
 	});
 });

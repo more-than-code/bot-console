@@ -13,7 +13,7 @@ import CatalogSection from '../src/routes/projects/[id]/CatalogSection.svelte';
 import HealthChecks from '../src/routes/projects/[id]/HealthChecks.svelte';
 import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import SettingsSection from '../src/routes/projects/[id]/SettingsSection.svelte';
-import { beginAddVariable, cancelAddVariable, initialEnvSetPanel, toggleEnvSet } from '../src/routes/projects/[id]/env-set-panel.ts';
+import { initialEnvSetPanel, toggleEnvSet } from '../src/routes/projects/[id]/env-set-panel.ts';
 import { actions as projectActions, load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
@@ -787,34 +787,19 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 		assert.equal(html.includes('Make plain'), false);
 	});
 
-	test('an env set starts expanded, and Add variable inserts a row at the top', () => {
-		const drafted = { ...beginAddVariable(initialEnvSetPanel()), addKey: 'TOKEN', addPlain: 'x', addSecret: false };
-		const closed = toggleEnvSet(drafted);
-		assert.equal(closed.open, false);
-		assert.equal(closed.adding, true);
-		assert.equal(closed.addKey, 'TOKEN');
-		assert.equal(closed.addSecret, false);
-		const opened = beginAddVariable({ ...initialEnvSetPanel(), open: false });
+	test('an env set starts expanded, and Add variable opens a dialog', () => {
+		const opened = initialEnvSetPanel();
 		assert.equal(opened.open, true);
-		assert.equal(opened.adding, true);
-		assert.equal(opened.addSecret, true);
-		const cleared = cancelAddVariable({ ...opened, addKey: 'TOKEN', addPlain: 'x', addSecret: false });
-		assert.equal(cleared.open, true);
-		assert.equal(cleared.adding, false);
-		assert.equal(cleared.addKey, '');
-		assert.equal(cleared.addPlain, '');
-		assert.equal(cleared.addSecret, true);
+		const closed = toggleEnvSet(opened);
+		assert.equal(closed.open, false);
+		assert.equal(toggleEnvSet(closed).open, true);
 
 		const table = readFileSync(new URL('../src/routes/projects/[id]/EnvSetTable.svelte', import.meta.url), 'utf8');
-		const addAt = table.indexOf('name="op"');
-		const eachAt = table.indexOf('{#each set.keys');
-		assert.equal(addAt > 0 && eachAt > addAt, true);
-		assert.equal(table.slice(eachAt).includes('name="op"'), false);
-		assert.equal(table.includes('onkeydown'), false);
-		assert.equal(table.match(/editing = null/g)?.length, 1);
+		// No inline add form any more: the dialog owns `op=add`.
+		assert.equal(table.includes('name="op"'), false);
+		// One edit state for the whole table, not one per form.
+		assert.equal(table.match(/let edit = \$state<RowEdit>\(null\)/g)?.length, 1);
 		assert.match(table, /panel = toggleEnvSet\(panel\)/);
-		assert.match(table, /panel = beginAddVariable\(panel\)/);
-		assert.match(table, /panel = cancelAddVariable\(panel\)/);
 		assert.match(table, /hidden=\{!panel\.open\}/);
 
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);

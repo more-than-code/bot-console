@@ -9,19 +9,26 @@
 	import type { EnvSet, EnvSetKey } from '$lib/api-types';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
-	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
 	import * as Table from '$lib/components/ui/table';
+	import EnvAddVariableDialog from './EnvAddVariableDialog.svelte';
+	import EnvValueEditor from './EnvValueEditor.svelte';
 	import {
 		MAKE_SECRET_MESSAGE,
-		beginAddVariable,
-		cancelAddVariable,
+		editValueField,
+		envDomId,
 		envSetKeyCount,
+		failureMessage,
+		focusAfterEditSave,
+		focusIsFree,
 		initialEnvSetPanel,
+		isCancelKey,
 		madeSecretNote,
-		setAddSecret,
-		toggleEnvSet
+		rowEditErrorText,
+		rowEditFailed,
+		secretEditRefusal,
+		toggleEnvSet,
+		type RowEdit
 	} from './env-set-panel';
 
 	let {
@@ -32,65 +39,100 @@
 		makeSecretAction
 	}: { set: EnvSet; putAction: string; deleteAction: string; deleteSetAction: string; makeSecretAction: string } = $props();
 
-	// Local only: the key just submitted, so the line does not depend on reloaded data.
-	let madeNote = $state('');
+	// The panel's one status line ("Made {KEY} secret.", "Added {KEY}.", "Saved {KEY}."). Local only:
+	// the text comes from the submitted key, so it does not depend on reloaded data.
+	let statusNote = $state('');
 
 	// The row's trigger is gone by now (the row reloaded as secret), so the table moves focus.
 	async function afterMakeSecret(form: FormData) {
-		madeNote = madeSecretNote(String(form.get('keys')));
+		statusNote = madeSecretNote(String(form.get('keys')));
 		await tick();
-		document.getElementById(domId('made-secret'))?.focus();
+		document.getElementById(domId('status'))?.focus();
 	}
 
-	// Collapse hides the table. It does not clear an edit or a new-row draft.
+	// Collapse hides the table. It does not clear an edit in progress.
 	let panel = $state(initialEnvSetPanel());
-	let editing = $state<string | null>(null);
+	// One row at a time is in edit state; Edit on another row replaces it.
+	let edit = $state<RowEdit>(null);
 	let plainDraft = $state('');
 
 	const tableId = $derived(`env-table-${set.name}`);
-	const editingItem = $derived(set.keys.find((item) => item.key === editing) ?? null);
 
 	function domId(part: string, key = ''): string {
-		return key === '' ? `env-${part}-${set.name}` : `env-${part}-${set.name}-${key}`;
+		return envDomId(set.name, part, key);
+	}
+
+	function focusById(target: string) {
+		document.getElementById(target)?.focus();
 	}
 
 	async function startEdit(item: EnvSetKey) {
-		editing = item.key;
-		plainDraft = item.is_secret ? '' : (item.value ?? '');
+		edit = { key: item.key, error: '', retype: false };
+		plainDraft = editValueField(item).value;
 		await tick();
-		document.getElementById(domId('value', item.key))?.focus();
+		focusById(domId('value', item.key));
 	}
 
 	async function cancelEdit(key: string) {
-		editing = null;
+		edit = null;
 		plainDraft = '';
 		await tick();
-		document.getElementById(domId('edit', key))?.focus();
+		focusById(domId('edit', key));
 	}
 
-	async function startAdd() {
-		panel = beginAddVariable(panel);
+	function onRowKeydown(key: string) {
+		return (event: KeyboardEvent) => {
+			if (!isCancelKey(event)) return;
+			event.preventDefault();
+			void cancelEdit(key);
+		};
+	}
+
+	function clearRowError() {
+		if (edit && edit.error !== '') edit = { ...edit, error: '', retype: false };
+	}
+
+	async function showRowError(key: string, message: string, retype: boolean) {
+		edit = rowEditFailed(edit, key, message, retype);
 		await tick();
-		document.getElementById(domId('add-key'))?.focus();
+		focusById(domId('value', key));
 	}
 
-	async function cancelAdd() {
-		panel = cancelAddVariable(panel);
-		await tick();
-		document.getElementById(domId('add-variable'))?.focus();
-	}
-
-	function afterKey(secret: boolean, clearAdd = false) {
-		return ({ formElement }: { formElement: HTMLFormElement }) => {
-			madeNote = '';
-			return async ({ update, result }: { update: () => Promise<void>; result: { type: string } }) => {
-				if (secret) {
-					const input = formElement.querySelector('input[name="value"]');
-					if (input instanceof HTMLInputElement) input.value = '';
-					if (clearAdd) panel.addPlain = '';
+	function saveEdit(item: EnvSetKey) {
+		return ({ formData, formElement, cancel }: { formData: FormData; formElement: HTMLFormElement; cancel: () => void }) => {
+			// An empty secret would replace the stored value with nothing: refuse before sending.
+			const refused = secretEditRefusal(item, String(formData.get('value') ?? ''));
+			if (refused) {
+				cancel();
+				void showRowError(item.key, refused, false);
+				return;
+			}
+			statusNote = '';
+			return async ({ update, result }: { update: () => Promise<void>; result: { type: string; data?: unknown } }) => {
+				const input = document.getElementById(domId('value', item.key));
+				// A typed secret is not kept in the page after it is sent.
+				if (item.is_secret && input instanceof HTMLInputElement) input.value = '';
+				if (result.type === 'failure') {
+					// Stay in edit state; the message (never the value) shows under the input.
+					await showRowError(item.key, failureMessage(result), item.is_secret);
+					return;
 				}
+				if (result.type !== 'redirect') {
+					await update();
+					return;
+				}
+				statusNote = `Saved ${item.key}.`;
+				// Leave edit state only once the reloaded value is there, so the old one does not flash.
+				const savedRow = formElement.closest('tr');
 				await update();
-				if (result.type !== 'redirect') document.getElementById('settings-error')?.focus();
+				// A late result must not pull focus away from where the user has moved since.
+				const free = focusIsFree(document.activeElement, document.body, savedRow);
+				if (edit?.key === item.key) {
+					edit = null;
+					plainDraft = '';
+				}
+				await tick();
+				if (free) focusById(focusAfterEditSave(set.name, set.keys.map((row) => row.key), item.key));
 			};
 		};
 	}
@@ -106,7 +148,7 @@
 			aria-controls={tableId}
 			onclick={() => {
 				panel = toggleEnvSet(panel);
-				madeNote = '';
+				statusNote = '';
 			}}
 		>
 			{#if panel.open}
@@ -118,9 +160,14 @@
 			<span class="text-muted-foreground">{envSetKeyCount(set.keys.length)}</span>
 		</Button>
 		<div class="flex flex-wrap items-center gap-2">
-			<Button type="button" id={domId('add-variable')} variant="outline" size="sm" aria-label="Add variable to {set.name}" onclick={startAdd}>
-				Add variable
-			</Button>
+			<EnvAddVariableDialog
+				setName={set.name}
+				action={putAction}
+				onAdded={(key) => {
+					statusNote = `Added ${key}.`;
+					panel = { ...panel, open: true };
+				}}
+			/>
 			<ConfirmAction
 				id="delete-env-{set.name}"
 				action={deleteSetAction}
@@ -133,55 +180,8 @@
 			/>
 		</div>
 	</div>
-	<p id={domId('made-secret')} role="status" tabindex="-1" class={madeNote ? 'text-sm break-all rounded-md focus-visible:ring-3 focus-visible:ring-ring' : 'sr-only'}>{madeNote}</p>
+	<p id={domId('status')} role="status" tabindex="-1" class={statusNote ? 'text-sm break-all rounded-md focus-visible:ring-3 focus-visible:ring-ring' : 'sr-only'}>{statusNote}</p>
 	<div class="grid gap-3" hidden={!panel.open}>
-		{#if panel.adding}
-			<form method="POST" action={putAction} class="grid gap-3 sm:flex sm:flex-wrap sm:items-end" aria-label="New variable in {set.name}" use:enhance={afterKey(panel.addSecret, true)}>
-				<Input type="hidden" name="set" value={set.name} />
-				<Input type="hidden" name="op" value="add" />
-				<Input type="hidden" name="is_secret" value={panel.addSecret ? '1' : '0'} />
-				<Label class="grid w-full gap-1.5 sm:w-auto sm:min-w-36 sm:flex-1" for={domId('add-key')}>
-					Key
-					<Input id={domId('add-key')} name="key" bind:value={panel.addKey} required maxlength={64} autocomplete="off" spellcheck="false" />
-				</Label>
-				<Label class="grid w-full gap-1.5 sm:w-auto sm:min-w-36 sm:flex-1" for={domId('add-value')}>
-					Value
-					<Input id={domId('add-value')} name="value" type={panel.addSecret ? 'password' : 'text'} bind:value={panel.addPlain} autocomplete="off" spellcheck="false" />
-				</Label>
-				<Label class="flex items-center gap-2 pb-1">
-					<Checkbox
-						id={domId('add-secret')}
-						checked={panel.addSecret}
-						aria-label="Secret"
-						onCheckedChange={(value) => (panel = setAddSecret(panel, value === true))}
-					/>
-					Secret
-				</Label>
-				<Button type="submit" aria-label="Save new variable in {set.name}">Save</Button>
-				<Button type="button" variant="outline" aria-label="Cancel new variable in {set.name}" onclick={cancelAdd}>Cancel</Button>
-			</form>
-		{/if}
-		{#if editingItem}
-			{@const item = editingItem}
-			<form id={domId('edit-form', item.key)} method="POST" action={putAction} class="grid gap-3 sm:flex sm:flex-wrap sm:items-end" aria-label="Edit {item.key} in {set.name}" use:enhance={afterKey(item.is_secret)}>
-				<Input type="hidden" name="set" value={set.name} />
-				<Input type="hidden" name="key" value={item.key} />
-				<p class="w-full font-mono text-sm break-all sm:w-auto">{item.key}</p>
-				{#if item.is_secret}
-					<Label class="grid w-full gap-1.5 sm:w-auto sm:min-w-36 sm:flex-1" for={domId('value', item.key)}>
-						New value
-						<Input id={domId('value', item.key)} name="value" type="password" autocomplete="off" spellcheck="false" />
-					</Label>
-				{:else}
-					<Label class="grid w-full gap-1.5 sm:w-auto sm:min-w-36 sm:flex-1" for={domId('value', item.key)}>
-						Value
-						<Input id={domId('value', item.key)} name="value" type="text" bind:value={plainDraft} autocomplete="off" spellcheck="false" />
-					</Label>
-				{/if}
-				<Button type="submit" aria-label="Save {item.key}">Save</Button>
-				<Button type="button" variant="outline" aria-label="Cancel editing {item.key}" onclick={() => cancelEdit(item.key)}>Cancel</Button>
-			</form>
-		{/if}
 		<Table.Root id={tableId} aria-label="{set.name} variables">
 		<Table.Header>
 			<Table.Row>
@@ -192,18 +192,29 @@
 			</Table.Row>
 		</Table.Header>
 		<Table.Body>
-			{#if set.keys.length === 0 && !panel.adding}
+			{#if set.keys.length === 0}
 				<Table.Row>
 					<Table.Cell colspan={4} class="text-muted-foreground whitespace-normal">No keys.</Table.Cell>
 				</Table.Row>
 			{/if}
 			{#each set.keys as item (`${set.name}:${item.key}`)}
-				<Table.Row>
+				{@const editingRow = edit?.key === item.key}
+				<Table.Row onkeydown={editingRow ? onRowKeydown(item.key) : undefined}>
 					<Table.Cell class="max-w-48 whitespace-normal">
 						<span class="break-all font-mono">{item.key}</span>
 					</Table.Cell>
 					<Table.Cell class="max-w-md whitespace-normal">
-						{#if item.is_secret}
+						{#if editingRow}
+							<EnvValueEditor
+								{item}
+								inputId={domId('value', item.key)}
+								errorId={domId('value-error', item.key)}
+								formId={domId('edit-form', item.key)}
+								error={rowEditErrorText(edit)}
+								bind:draft={plainDraft}
+								onInput={clearRowError}
+							/>
+						{:else if item.is_secret}
 							<span class="font-mono text-sm">
 								<span class="sr-only">secret, preview only</span>
 								<span class="select-none" aria-hidden="true">{item.preview ?? ''}</span>
@@ -216,47 +227,61 @@
 						<Badge variant="outline">{item.is_secret ? 'Secret' : 'Plain'}</Badge>
 					</Table.Cell>
 					<Table.Cell class="whitespace-normal">
-						<div class="flex flex-wrap items-center gap-2">
-							{#if editing !== item.key}
+						{#if editingRow}
+							<form
+								id={domId('edit-form', item.key)}
+								method="POST"
+								action={putAction}
+								class="flex flex-wrap items-center gap-2"
+								aria-label="Edit {item.key} in {set.name}"
+								use:enhance={saveEdit(item)}
+							>
+								<Input type="hidden" name="set" value={set.name} />
+								<Input type="hidden" name="key" value={item.key} />
+								<Button type="submit" size="sm" aria-label="Save {item.key}">Save</Button>
+								<Button type="button" variant="outline" size="sm" aria-label="Cancel editing {item.key}" onclick={() => cancelEdit(item.key)}>Cancel</Button>
+							</form>
+						{:else}
+							<div class="flex flex-wrap items-center gap-2">
 								<Button type="button" id={domId('edit', item.key)} variant="outline" size="sm" aria-label="Edit {item.key}" onclick={() => startEdit(item)}>Edit</Button>
 								{#if !item.is_secret}
 									<CopyButton value={item.value ?? ''} label="Copy {item.key}" />
 								{/if}
-							{/if}
-							{#if !item.is_secret}
-								<!-- `label` stays fixed so a key name such as DELETE_ME never makes it destructive. -->
+								{#if !item.is_secret}
+									<!-- `label` stays fixed so a key name such as DELETE_ME never makes it destructive. -->
+									<ConfirmAction
+										id={domId('make-secret', item.key)}
+										action={makeSecretAction}
+										label="Make secret"
+										rowLabel="Make {item.key} secret"
+										icon={Lock}
+										confirmLabel="Make secret"
+										message="Make {item.key} secret? {MAKE_SECRET_MESSAGE}"
+										messageClass="max-w-full min-w-0 break-words"
+										closeOnFailure
+										failureFocusId="settings-error"
+										onSuccess={afterMakeSecret}
+										hidden={[
+											{ name: 'set', value: set.name },
+											{ name: 'keys', value: item.key }
+										]}
+									/>
+								{/if}
 								<ConfirmAction
-									id={domId('make-secret', item.key)}
-									action={makeSecretAction}
-									label="Make secret"
-									rowLabel="Make {item.key} secret"
-									icon={Lock}
-									confirmLabel="Make secret"
-									message="Make {item.key} secret? {MAKE_SECRET_MESSAGE}"
-									messageClass="max-w-full min-w-0 break-words"
+									id={domId('delete', item.key)}
+									action={deleteAction}
+									label="Delete {item.key}"
+									confirmLabel="Delete"
+									message="Delete {item.key} from {set.name}?"
 									closeOnFailure
 									failureFocusId="settings-error"
-									onSuccess={afterMakeSecret}
 									hidden={[
 										{ name: 'set', value: set.name },
-										{ name: 'keys', value: item.key }
+										{ name: 'key', value: item.key }
 									]}
 								/>
-							{/if}
-							<ConfirmAction
-								id={domId('delete', item.key)}
-								action={deleteAction}
-								label="Delete {item.key}"
-								confirmLabel="Delete"
-								message="Delete {item.key} from {set.name}?"
-								closeOnFailure
-								failureFocusId="settings-error"
-								hidden={[
-									{ name: 'set', value: set.name },
-									{ name: 'key', value: item.key }
-								]}
-							/>
-						</div>
+							</div>
+						{/if}
 					</Table.Cell>
 				</Table.Row>
 			{/each}
