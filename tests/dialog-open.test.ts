@@ -106,8 +106,9 @@ test('rename and confirm dialogs settle with the same rule', () => {
 	const confirmForm = readFileSync(new URL('../src/lib/components/ConfirmForm.svelte', import.meta.url), 'utf8');
 	assert.match(rename, /nextFormDialog/);
 	assert.match(rename, /onSettled=\{settle\}/);
-	assert.match(confirm, /confirmAfterAction\(\{ open, sawFailure \}, resultType, closeOnFailure\)/);
-	assert.equal(confirm.includes('import { confirmAfterAction'), true);
+	// ConfirmAction settles through confirmSettle, which applies confirmAfterAction (tests/env-make-secret.test.ts).
+	assert.match(confirm, /confirmSettle\(\{ open, sawFailure \}, resultType, closeOnFailure, failureFocusId\)/);
+	assert.equal(confirm.includes('import { confirmSettle'), true);
 	assert.deepEqual(confirmAfterAction({ open: true, sawFailure: false }, 'failure', true), {
 		open: false,
 		sawFailure: false,
@@ -132,5 +133,5 @@ test('rename and confirm dialogs settle with the same rule', () => {
 	assert.match(confirm, /bind:typed/);
 	assert.match(confirm, /onSettled=\{settle\}/);
 	assert.match(renameForm, /formDialogOutcome\(result\.type\)/);
-	assert.match(confirmForm, /onSettled\?\.\(result\.type\)/);
+	assert.match(confirmForm, /onSettled\?\.\(result\.type, formData\)/);
 });

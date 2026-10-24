@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { tick } from 'svelte';
+	import Lock from '@lucide/svelte/icons/lock';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
@@ -12,14 +13,34 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import * as Table from '$lib/components/ui/table';
-	import { beginAddVariable, cancelAddVariable, envSetKeyCount, initialEnvSetPanel, setAddSecret, toggleEnvSet } from './env-set-panel';
+	import {
+		MAKE_SECRET_MESSAGE,
+		beginAddVariable,
+		cancelAddVariable,
+		envSetKeyCount,
+		initialEnvSetPanel,
+		madeSecretNote,
+		setAddSecret,
+		toggleEnvSet
+	} from './env-set-panel';
 
 	let {
 		set,
 		putAction,
 		deleteAction,
-		deleteSetAction
-	}: { set: EnvSet; putAction: string; deleteAction: string; deleteSetAction: string } = $props();
+		deleteSetAction,
+		makeSecretAction
+	}: { set: EnvSet; putAction: string; deleteAction: string; deleteSetAction: string; makeSecretAction: string } = $props();
+
+	// Local only: the key just submitted, so the line does not depend on reloaded data.
+	let madeNote = $state('');
+
+	// The row's trigger is gone by now (the row reloaded as secret), so the table moves focus.
+	async function afterMakeSecret(form: FormData) {
+		madeNote = madeSecretNote(String(form.get('keys')));
+		await tick();
+		document.getElementById(domId('made-secret'))?.focus();
+	}
 
 	// Collapse hides the table. It does not clear an edit or a new-row draft.
 	let panel = $state(initialEnvSetPanel());
@@ -61,6 +82,7 @@
 
 	function afterKey(secret: boolean, clearAdd = false) {
 		return ({ formElement }: { formElement: HTMLFormElement }) => {
+			madeNote = '';
 			return async ({ update, result }: { update: () => Promise<void>; result: { type: string } }) => {
 				if (secret) {
 					const input = formElement.querySelector('input[name="value"]');
@@ -82,7 +104,10 @@
 			class="h-auto min-w-0 justify-start whitespace-normal text-left"
 			aria-expanded={panel.open}
 			aria-controls={tableId}
-			onclick={() => (panel = toggleEnvSet(panel))}
+			onclick={() => {
+				panel = toggleEnvSet(panel);
+				madeNote = '';
+			}}
 		>
 			{#if panel.open}
 				<ChevronDown aria-hidden="true" />
@@ -103,10 +128,12 @@
 				confirmLabel="Delete"
 				message="Delete env set {set.name}?"
 				closeOnFailure
+				failureFocusId="settings-error"
 				hidden={[{ name: 'set', value: set.name }]}
 			/>
 		</div>
 	</div>
+	<p id={domId('made-secret')} role="status" tabindex="-1" class={madeNote ? 'text-sm break-all rounded-md focus-visible:ring-3 focus-visible:ring-ring' : 'sr-only'}>{madeNote}</p>
 	<div class="grid gap-3" hidden={!panel.open}>
 		{#if panel.adding}
 			<form method="POST" action={putAction} class="grid gap-3 sm:flex sm:flex-wrap sm:items-end" aria-label="New variable in {set.name}" use:enhance={afterKey(panel.addSecret, true)}>
@@ -196,12 +223,34 @@
 									<CopyButton value={item.value ?? ''} label="Copy {item.key}" />
 								{/if}
 							{/if}
+							{#if !item.is_secret}
+								<!-- `label` stays fixed so a key name such as DELETE_ME never makes it destructive. -->
+								<ConfirmAction
+									id={domId('make-secret', item.key)}
+									action={makeSecretAction}
+									label="Make secret"
+									rowLabel="Make {item.key} secret"
+									icon={Lock}
+									confirmLabel="Make secret"
+									message="Make {item.key} secret? {MAKE_SECRET_MESSAGE}"
+									messageClass="max-w-full min-w-0 break-words"
+									closeOnFailure
+									failureFocusId="settings-error"
+									onSuccess={afterMakeSecret}
+									hidden={[
+										{ name: 'set', value: set.name },
+										{ name: 'keys', value: item.key }
+									]}
+								/>
+							{/if}
 							<ConfirmAction
 								id={domId('delete', item.key)}
 								action={deleteAction}
 								label="Delete {item.key}"
 								confirmLabel="Delete"
 								message="Delete {item.key} from {set.name}?"
+								closeOnFailure
+								failureFocusId="settings-error"
 								hidden={[
 									{ name: 'set', value: set.name },
 									{ name: 'key', value: item.key }

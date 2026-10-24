@@ -153,6 +153,7 @@
 					putAction={actionUrlFrom(page.url, 'putEnvKey')}
 					deleteAction={actionUrlFrom(page.url, 'deleteEnvKey')}
 					deleteSetAction={actionUrlFrom(page.url, 'deleteEnvSet')}
+					makeSecretAction={actionUrlFrom(page.url, 'makeEnvKeysSecret')}
 				/>
 			{/each}
 		</Card.Content>

@@ -33,3 +33,10 @@ export function cancelAddVariable(panel: EnvSetPanel): EnvSetPanel {
 export function setAddSecret(panel: EnvSetPanel, secret: boolean): EnvSetPanel {
 	return { ...panel, addSecret: secret };
 }
+
+export const MAKE_SECRET_MESSAGE =
+	"These values will be encrypted and hidden. This can't be undone; to make a key plain again, delete it and add it again.";
+
+export function madeSecretNote(key: string): string {
+	return `Made ${key} secret.`;
+}

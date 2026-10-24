@@ -36,6 +36,41 @@ export function confirmAfterAction(state: DialogState, resultType: string, close
 	return nextConfirmDialog(state, formDialogOutcome(resultType), closeOnFailure);
 }
 
+/**
+ * When a confirm with `closeOnFailure` and a notice id fails, the notice gets focus. If the dialog closes now,
+ * focus moves in `onCloseAutoFocus` (bits-ui restores focus after its close animation and would undo an earlier
+ * focus). If it was already closed, for example by Escape while the request ran, focus moves at once.
+ */
+export function failureFocusTiming(
+	wasOpen: boolean,
+	closeOnFailure: boolean,
+	failureFocusId: string | null,
+	outcome: DialogOutcome
+): 'none' | 'on-close' | 'now' {
+	if (!closeOnFailure || !failureFocusId || outcome !== 'failure') return 'none';
+	return wasOpen ? 'on-close' : 'now';
+}
+
+export type ConfirmSettle = DialogView & {
+	outcome: DialogOutcome;
+	focusNotice: 'none' | 'on-close' | 'now';
+};
+
+/** Everything `ConfirmAction` decides when its form settles. */
+export function confirmSettle(
+	state: DialogState,
+	resultType: string,
+	closeOnFailure: boolean,
+	failureFocusId: string | null
+): ConfirmSettle {
+	const outcome = formDialogOutcome(resultType);
+	return {
+		...confirmAfterAction(state, resultType, closeOnFailure),
+		outcome,
+		focusNotice: failureFocusTiming(state.open, closeOnFailure, failureFocusId, outcome)
+	};
+}
+
 /** A returned success, or a redirect such as `backTo`, is success. Anything else failed stays open. */
 export function formDialogOutcome(resultType: string): DialogOutcome {
 	if (resultType === 'success' || resultType === 'redirect') return 'success';

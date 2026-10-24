@@ -3,10 +3,10 @@
 	import ShieldOff from '@lucide/svelte/icons/shield-off';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import UserMinus from '@lucide/svelte/icons/user-minus';
-	import type { Component } from 'svelte';
+	import { tick, type Component } from 'svelte';
 	import ConfirmForm from '$lib/components/ConfirmForm.svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
-	import { confirmAfterAction } from '$lib/dialog-open';
+	import { confirmSettle } from '$lib/dialog-open';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { buttonVariants } from '$lib/components/ui/button';
 
@@ -27,7 +27,10 @@
 		rowLabel = null,
 		disabled = false,
 		closeOnFailure = false,
-		messageClass = ''
+		messageClass = '',
+		icon = null,
+		failureFocusId = null,
+		onSuccess
 	}: {
 		id: string;
 		action: string;
@@ -44,17 +47,48 @@
 		/** A failure closes the dialog instead of leaving it open over the page. */
 		closeOnFailure?: boolean;
 		messageClass?: string;
+		/** Trigger icon. Defaults to one picked from the label. */
+		icon?: Component | null;
+		/** With `closeOnFailure`: focus and scroll to this notice after a failure. */
+		failureFocusId?: string | null;
+		/**
+		 * Called on success with the submitted form. It runs even when the reload has removed this
+		 * component (a row action), so the caller moves focus itself.
+		 */
+		onSuccess?: (form: FormData) => void | Promise<void>;
 	} = $props();
 
 	let open = $state(false);
 	let sawFailure = $state(false);
 	let typed = $state('');
+	// Set when a failure closes the dialog: its close focus goes to the notice instead of the trigger.
+	let focusNoticeOnClose = false;
 
-	function settle(resultType: string) {
-		const next = confirmAfterAction({ open, sawFailure }, resultType, closeOnFailure);
+	function focusNotice(): boolean {
+		const notice = failureFocusId ? document.getElementById(failureFocusId) : null;
+		if (!notice) return false;
+		notice.focus();
+		notice.scrollIntoView({ block: 'nearest' });
+		return true;
+	}
+
+	async function settle(resultType: string, form: FormData) {
+		const next = confirmSettle({ open, sawFailure }, resultType, closeOnFailure, failureFocusId);
+		focusNoticeOnClose = next.focusNotice === 'on-close';
 		open = next.open;
 		sawFailure = next.sawFailure;
 		if (next.resetDraft) typed = '';
+		if (next.outcome === 'success') await onSuccess?.(form);
+		if (next.focusNotice === 'now') {
+			await tick();
+			focusNotice();
+		}
+	}
+
+	function onCloseAutoFocus(event: Event) {
+		if (!focusNoticeOnClose) return;
+		focusNoticeOnClose = false;
+		if (focusNotice()) event.preventDefault();
 	}
 
 	const destructive = $derived(/delete|remove|revoke/i.test(label));
@@ -66,7 +100,7 @@
 		return Ban;
 	}
 
-	const Icon = $derived(rowIcon(rowLabel ?? label));
+	const Icon = $derived(icon ?? rowIcon(rowLabel ?? label));
 </script>
 
 <AlertDialog.Root bind:open>
@@ -84,7 +118,7 @@
 			{label}
 		</AlertDialog.Trigger>
 	{/if}
-	<AlertDialog.Content>
+	<AlertDialog.Content {onCloseAutoFocus}>
 		<AlertDialog.Header>
 			<AlertDialog.Title>{confirmLabel}</AlertDialog.Title>
 			<AlertDialog.Description class={messageClass}>{message}</AlertDialog.Description>

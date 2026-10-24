@@ -1399,7 +1399,9 @@ describe('catalog images', { concurrency: false }, () => {
 		}).body;
 		assert.equal(html.includes(SECRET), false);
 		assert.equal(html.includes(PLAIN), true);
-		assert.equal(html.includes('Make secret'), false);
+		// v1.17: a one-way Make secret row action on plain rows only; no plain toggle.
+		assert.equal(html.includes('aria-label="Make LOG_LEVEL secret"'), true);
+		assert.equal(html.includes('aria-label="Make API_TOKEN secret"'), false);
 		assert.equal(html.includes('Make plain'), false);
 		assert.equal(html.includes('patchEnvKey'), false);
 		assert.equal(html.includes(REGISTRY_TOKEN), false);
@@ -1452,12 +1454,32 @@ describe('catalog images', { concurrency: false }, () => {
 			}).event as never
 		);
 		assert.equal(isActionFailure(conflict), true);
+		assert.equal(isActionFailure(conflict) && conflict.status, 409);
 		assert.equal(
 			actionData(conflict).message,
 			'Env set services is still used by catalog entries. Remove it from those entries first, or delete its variables one by one.'
 		);
+
+		// Other errors keep the API message unchanged.
+		installFetch(() => envelope(null, 404, 'not_found', 'env set not found: services'));
+		const missing = await projectActions.deleteEnvSet(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=settings&/deleteEnvSet`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id },
+				form: { set: 'services' }
+			}).event as never
+		);
+		assert.equal(isActionFailure(missing) && missing.status, 404);
+		assert.equal(actionData(missing).message, 'env set not found: services');
+
+		// Bounded to the one delete-set element: it closes on failure and focuses the settings notice.
 		const table = readFileSync(new URL('../src/routes/projects/[id]/EnvSetTable.svelte', import.meta.url), 'utf8');
-		assert.match(table, /id="delete-env-\{set\.name\}"[\s\S]*?closeOnFailure[\s\S]*?\/>/);
+		const element = table.match(/<ConfirmAction\s+id="delete-env-\{set\.name\}"[^<]*?\/>/)?.[0] ?? '';
+		assert.match(element, /\scloseOnFailure\s/);
+		assert.match(element, /failureFocusId="settings-error"/);
 	});
 
 	test('container Run and Deploy tooltips explain the action', () => {

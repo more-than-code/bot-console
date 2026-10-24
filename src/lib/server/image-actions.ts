@@ -494,6 +494,23 @@ export async function deleteEnvKey(event: RequestEvent) {
 	}
 }
 
+/** Mark plain keys secret (api-v1 v1.17). The API checks the keys; the reload shows the previews. */
+export async function makeEnvKeysSecret(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const form = await event.request.formData();
+	const name = formText(form, 'set');
+	const keys = form.getAll('keys').filter((item): item is string => typeof item === 'string');
+	if (!isSetName(name) || keys.length === 0) return settingsFailure(event, 400, 'Choose a plain key to make secret.');
+	try {
+		await apiFetch(event, `/v1/projects/${id}/env-sets/${encodeURIComponent(name)}/secret`, { method: 'POST', body: JSON.stringify({ keys }) });
+		redirect(303, backTo(event.url));
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return settingsFailure(event, apiStatus(err), apiMessage(err));
+	}
+}
+
 export async function deleteEnvSet(event: RequestEvent) {
 	requireUser(event);
 	const id = projectIdOf(event.params);

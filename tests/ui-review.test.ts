@@ -158,7 +158,7 @@ test('a secret preview has hidden text and the glyphs are hidden from assistive 
 		updated_by: '00000000-0000-4000-8000-0000000000d1'
 	};
 	const html = render(EnvSetTable, {
-		props: { set, putAction: '?/putEnvKey', deleteAction: '?/deleteEnvKey', deleteSetAction: '?/deleteEnvSet' }
+		props: { set, putAction: '?/putEnvKey', deleteAction: '?/deleteEnvKey', deleteSetAction: '?/deleteEnvSet', makeSecretAction: '?/makeEnvKeysSecret' }
 	}).body;
 	assert.equal(html.split('<span class="sr-only">secret, preview only</span>').length - 1, 2);
 	assert.equal(html.includes('aria-label="secret, preview only"'), false);

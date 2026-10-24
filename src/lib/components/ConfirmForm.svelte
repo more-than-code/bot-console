@@ -29,7 +29,8 @@
 		/** Visible text the user must type. Nothing hidden carries `expected`. */
 		typeToConfirm?: TypeToConfirm | null;
 		typed?: string;
-		onSettled?: (resultType: string) => void | Promise<void>;
+		/** `form` is what was submitted, read before the reload changes the props. */
+		onSettled?: (resultType: string, form: FormData) => void | Promise<void>;
 		cancel?: Snippet;
 	} = $props();
 
@@ -40,10 +41,10 @@
 	method="POST"
 	{action}
 	{id}
-	use:enhance={() => {
+	use:enhance={({ formData }) => {
 		return async ({ result, update }) => {
 			await update();
-			await onSettled?.(result.type);
+			await onSettled?.(result.type, formData);
 		};
 	}}
 >
