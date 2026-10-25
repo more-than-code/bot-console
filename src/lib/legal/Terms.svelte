@@ -6,7 +6,7 @@
 <LegalPage title="Terms of Service">
 	<p>
 		These terms apply when you use Deploybot (<a href="https://deploybot.dev">deploybot.dev</a> and
-		the console at <a href="https://console2.deploybot.dev">console2.deploybot.dev</a>). Deploybot
+		the console at <a href="https://console.deploybot.dev">console.deploybot.dev</a>). Deploybot
 		is run by an individual based in New Zealand. By signing in you agree to these terms. Our
 		<a href="/privacy">Privacy Policy</a> explains how we handle your information.
 	</p>

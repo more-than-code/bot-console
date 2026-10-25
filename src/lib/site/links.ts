@@ -2,6 +2,6 @@
 // server imports so the pages can later move to a separate static site.
 
 /** The production console sign-in page. Absolute so it works from any host. */
-export const SIGN_IN_URL = 'https://console2.deploybot.dev/signin';
+export const SIGN_IN_URL = 'https://console.deploybot.dev/signin';
 
 export const SUPPORT_EMAIL = 'support@deploybot.dev';

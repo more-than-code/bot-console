@@ -323,7 +323,7 @@ describe('public site pages', () => {
 	});
 
 	test('every Sign in link uses the one constant and reloads the page', () => {
-		assert.equal(SIGN_IN_URL, 'https://console2.deploybot.dev/signin');
+		assert.equal(SIGN_IN_URL, 'https://console.deploybot.dev/signin');
 		assert.equal(SUPPORT_EMAIL, 'support@deploybot.dev');
 		const children = createRawSnippet(() => ({ render: () => '<p>child</p>' }));
 		const layout = render(SiteLayout, { props: { children } }).body;
@@ -338,7 +338,23 @@ describe('public site pages', () => {
 			assert.equal(hrefs(html).filter((href) => href === SIGN_IN_URL).length, 1);
 		}
 		for (const file of PUBLIC_SOURCES.filter((f) => f !== 'src/lib/site/links.ts')) {
-			assert.equal(read(file).includes('console2.deploybot.dev/signin'), false, file);
+			assert.equal(read(file).includes('console.deploybot.dev/signin'), false, file);
+		}
+	});
+
+	test('no source file names the temporary hosts api2 or console2', () => {
+		// The production names are api.deploybot.dev and console.deploybot.dev (umbrella
+		// docs/spec-rename-public-origins.md); no web UI may show the old ones (Joe 2026-10-26).
+		const walk = (dir: string): string[] =>
+			readdirSync(dir).flatMap((name) => {
+				const path = join(dir, name);
+				return statSync(path).isDirectory() ? walk(path) : [path];
+			});
+		const files = walk(join(root, 'src'));
+		assert.ok(files.length > 50, 'the src walk found files');
+		for (const file of files) {
+			const text = readFileSync(file, 'utf8');
+			assert.equal(/\b(api2|console2)\.deploybot\.dev/.test(text), false, file);
 		}
 	});
 

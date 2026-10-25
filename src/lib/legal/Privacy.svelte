@@ -6,7 +6,7 @@
 <LegalPage title="Privacy Policy">
 	<p>
 		Deploybot (<a href="https://deploybot.dev">deploybot.dev</a>, with the console at
-		<a href="https://console2.deploybot.dev">console2.deploybot.dev</a>) lets you catalog, deploy
+		<a href="https://console.deploybot.dev">console.deploybot.dev</a>) lets you catalog, deploy
 		and watch services on hosts you run yourself. Deploybot is run by an individual based in New
 		Zealand, who is responsible for your personal information under the New Zealand Privacy Act
 		2020. This policy explains what we collect, why, and who processes it. Questions go to
