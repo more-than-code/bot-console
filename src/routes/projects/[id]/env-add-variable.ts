@@ -14,7 +14,7 @@ export type AddDraft = {
 };
 
 export function initialAddDraft(): AddDraft {
-	return { key: '', value: '', secret: true, error: '', errorField: null, retype: false };
+	return { key: '', value: '', secret: false, error: '', errorField: null, retype: false };
 }
 
 /** Flip Secret. The typed value stays; the paste-again hint no longer applies. */

@@ -133,14 +133,14 @@ describe('env-set inline edit and Add variable dialog', () => {
 		const close = dialog.slice(dialog.indexOf('function onCloseAutoFocus'), dialog.indexOf('async function showError'));
 		assert.match(close, /event\.preventDefault\(\);\s*if \(closingAfterAdd\) \{\s*closingAfterAdd = false;\s*return;\s*\}\s*focusById\(id\('add-variable'\)\)/);
 
-		const failed = addFailed({ ...initialAddDraft(), key: 'TOKEN', value: TYPED }, 'refused [redacted]');
+		const failed = addFailed({ ...initialAddDraft(), key: 'TOKEN', value: TYPED, secret: true }, 'refused [redacted]');
 		assert.equal(addErrorText(failed), `refused [redacted] ${RETYPE_VALUE}`);
 		assert.equal(addErrorText(addValueTyped(failed)), 'refused [redacted]');
 		assert.equal(addErrorText(initialAddDraft()), '');
 	});
 
 	test('a failed add keeps the key, clears a secret value and asks for it again', () => {
-		const secret = addFailed({ ...initialAddDraft(), key: 'TOKEN', value: TYPED }, 'refused [redacted]');
+		const secret = addFailed({ ...initialAddDraft(), key: 'TOKEN', value: TYPED, secret: true }, 'refused [redacted]');
 		assert.deepEqual(secret, { key: 'TOKEN', value: '', secret: true, error: 'refused [redacted]', errorField: 'form', retype: true });
 		const plain = addFailed({ ...initialAddDraft(), key: 'LOG', value: 'debug', secret: false }, 'refused');
 		assert.deepEqual(plain, { key: 'LOG', value: 'debug', secret: false, error: 'refused', errorField: 'form', retype: false });
@@ -149,7 +149,7 @@ describe('env-set inline edit and Add variable dialog', () => {
 		assert.equal(addKeyError('bad key'), ADD_KEY_MESSAGE);
 		assert.equal(addKeyError(''), ADD_KEY_MESSAGE);
 		// A Key refused before sending keeps the typed secret value: nothing was sent.
-		const typed = { ...initialAddDraft(), key: 'bad key', value: TYPED, retype: true };
+		const typed = { ...initialAddDraft(), key: 'bad key', value: TYPED, secret: true, retype: true };
 		assert.deepEqual(addKeyRefused(typed, ADD_KEY_MESSAGE), {
 			key: 'bad key',
 			value: TYPED,

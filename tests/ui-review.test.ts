@@ -267,8 +267,9 @@ test('the elapsed timer is the gap since the flight started', () => {
 });
 
 test('toggling Secret in the Add variable dialog keeps the typed value', () => {
-	const drafted = { ...initialAddDraft(), key: 'TOKEN', value: 'kept-value' };
-	assert.equal(drafted.secret, true);
+	// Secret starts unticked (Joe 2026-10-25); ticking it hides the typed value.
+	assert.equal(initialAddDraft().secret, false);
+	const drafted = { ...initialAddDraft(), key: 'TOKEN', value: 'kept-value', secret: true };
 	const shown = setAddSecret(drafted, false);
 	assert.equal(shown.value, 'kept-value');
 	assert.equal(shown.secret, false);

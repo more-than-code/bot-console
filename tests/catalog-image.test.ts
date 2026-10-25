@@ -1563,7 +1563,9 @@ describe('catalog images', { concurrency: false }, () => {
 		// The enhance callback runs only in the browser, so check its wiring in the source.
 		const settings = readFileSync(new URL('../src/routes/projects/[id]/EnvSetDialog.svelte', import.meta.url), 'utf8');
 		assert.match(settings, /id="env-set-name" name="set" bind:value=\{setName\}/);
-		assert.match(settings, /saved: \(\) => \{\s*onStatus\(savedEnvSetNote\(name\)\);[\s\S]*?setName = '';\s*newKeysSecret = true;/);
+		assert.match(settings, /saved: \(\) => \{\s*onStatus\(savedEnvSetNote\(name\)\);[\s\S]*?setName = '';\s*newKeysSecret = false;/);
+		// New keys are secret starts unticked and resets to unticked (Joe 2026-10-25).
+		assert.match(settings, /let newKeysSecret = \$state\(false\);/);
 		// The note is on the card's status line now, not inside the dialog.
 		assert.equal(settings.includes('kind="success"'), false);
 		assert.equal(settings.includes('savedSet'), false);

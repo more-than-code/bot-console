@@ -29,7 +29,7 @@
 	let sawFailure = $state(untrack(failedNow));
 	let dotenv = $state('');
 	let setName = $state('');
-	let newKeysSecret = $state(true);
+	let newKeysSecret = $state(false);
 	// Set when a success closes the dialog: focus moves to the status line after the reload, not on close.
 	let closingAfterSave = false;
 
@@ -71,7 +71,7 @@
 					onStatus(savedEnvSetNote(name));
 					// The next set starts empty and with the safe default.
 					setName = '';
-					newKeysSecret = true;
+					newKeysSecret = false;
 				},
 				close: () => {
 					if (!open) return;
