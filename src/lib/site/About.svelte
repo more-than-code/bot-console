@@ -26,7 +26,8 @@
 <section class="py-10 sm:py-16" aria-labelledby="hero-title">
 	<h1 id="hero-title" class="text-4xl font-semibold tracking-tight sm:text-5xl">Deploybot</h1>
 	<p class="text-muted-foreground mt-4 max-w-2xl text-lg">
-		Catalog, deploy and watch services on your own hosts through a small agent.
+		Let Claude, Codex or Grok run your own servers, without handing them SSH or a cloud token. They can only
+		deploy what your catalog allows, as you, after a confirm step.
 	</p>
 	<a
 		class="bg-primary text-primary-foreground hover:bg-primary/80 mt-8 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
@@ -49,6 +50,7 @@
 
 <section class="py-8" aria-labelledby="how-title">
 	<h2 id="how-title" class="text-2xl font-semibold tracking-tight">How it works</h2>
+	<p class="text-muted-foreground mt-2">Catalog, deploy and watch services on your own hosts through a small agent.</p>
 	<ol class="mt-4 grid gap-4 sm:grid-cols-3">
 		{#each steps as step, index (step.title)}
 			<li class="rounded-xl border p-5">

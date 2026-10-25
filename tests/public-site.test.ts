@@ -300,6 +300,18 @@ describe('public site pages', () => {
 		assert.equal(title(render(TermsPage).head), 'Terms of Service · Deploybot');
 	});
 
+	test('the About hero carries the pitch; the old summary leads How it works', () => {
+		// Joe 2026-10-26: the pitch is the hero subtitle on deploybot.dev.
+		const PITCH =
+			'Let Claude, Codex or Grok run your own servers, without handing them SSH or a cloud token. They can only deploy what your catalog allows, as you, after a confirm step.';
+		const body = render(AboutPage).body.replace(/<!--[^]*?-->/g, '').replace(/\s+/g, ' ');
+		const hero = body.slice(body.indexOf('id="hero-title"'), body.indexOf('aria-labelledby="features-title"'));
+		assert.ok(hero.includes(PITCH), 'pitch in the hero');
+		const how = body.slice(body.indexOf('id="how-title"'));
+		assert.ok(how.includes('Catalog, deploy and watch services on your own hosts through a small agent.'));
+		assert.equal(hero.includes('through a small agent'), false);
+	});
+
 	test('each page has one h1 and the legal pages carry LAST_UPDATED', () => {
 		for (const page of [AboutPage, PrivacyPage, TermsPage]) {
 			assert.equal(render(page).body.match(/<h1\b/g)?.length, 1);
