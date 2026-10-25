@@ -11,6 +11,12 @@
 		<a href="/privacy">Privacy Policy</a> explains how we handle your information.
 	</p>
 
+	<h2>Who can use Deploybot</h2>
+	<p>
+		Deploybot is a tool for developers and the people who run servers. You must be at least 16
+		years old to use it.
+	</p>
+
 	<h2>Early access</h2>
 	<p>
 		Deploybot is provided as is during an early access period. Features can change, and the service

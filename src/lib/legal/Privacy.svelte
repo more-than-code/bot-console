@@ -40,6 +40,11 @@
 		We do not use advertising or tracking cookies, we do not sell your data, and we do not build
 		profiles of you for anyone else.
 	</p>
+	<p>
+		Deploybot is not meant for anyone under 16, and we do not knowingly collect personal information
+		from them. If you believe someone under 16 has an account, email
+		<a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a> and we will delete it as described below.
+	</p>
 
 	<h2>How we use it</h2>
 	<ul>
