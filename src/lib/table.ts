@@ -20,6 +20,28 @@ export type Column<Row> = {
 	srLabel?: boolean;
 	/** Direction the first time this column is chosen. Default ascending. */
 	firstDir?: SortDir;
+	/** Hidden below the `sm` breakpoint: the header gets `max-sm:hidden`; the row snippet must put it on the cell too. */
+	hideBelowSm?: boolean;
+	/** Header filter menu. Client mode only: it narrows the rows the page already has. */
+	filter?: ColumnFilter<Row>;
+};
+
+export type ColumnFilter<Row> = {
+	/** URL param under the table id: `kind` is `<id>.kind`. */
+	param: string;
+	/** Noun in the button name, "Filter {label}". */
+	label: string;
+	options: { value: string; label: string }[];
+	/** Compared with the chosen option's value. */
+	value: (row: Row) => string;
+};
+
+/** A filter param that matched one of its column's options. */
+export type ActiveFilter = {
+	column: string;
+	param: string;
+	value: string;
+	label: string;
 };
 
 export type TableQuery = {
@@ -185,6 +207,43 @@ export function applyTable<Row>(
 	const searched = searchRows(rows, columns, query.q);
 	const sorted = sortRows(searched, columns, query.sort, query.dir);
 	return pageRows(sorted, query.page, pageSize);
+}
+
+export function filterParam(id: string, param: string): string {
+	return `${id}.${param}`;
+}
+
+/** One entry per filter column whose `<id>.<param>` is one of its options. Other values are ignored. */
+export function readFilters<Row>(search: URLSearchParams, id: string, columns: readonly Column<Row>[]): ActiveFilter[] {
+	const active: ActiveFilter[] = [];
+	for (const column of columns) {
+		if (!column.filter) continue;
+		const raw = search.get(filterParam(id, column.filter.param));
+		const option = column.filter.options.find((item) => item.value === raw);
+		if (option) active.push({ column: column.key, param: column.filter.param, value: option.value, label: option.label });
+	}
+	return active;
+}
+
+/** Rows that match every active filter. */
+export function filterRows<Row>(rows: readonly Row[], columns: readonly Column<Row>[], filters: readonly ActiveFilter[]): Row[] {
+	const checks = filters.flatMap((active) => {
+		const filter = columns.find((column) => column.key === active.column)?.filter;
+		return filter ? [{ read: filter.value, value: active.value }] : [];
+	});
+	if (checks.length === 0) return [...rows];
+	return rows.filter((row) => checks.every((check) => check.read(row) === check.value));
+}
+
+/** Sets or (with null) clears one filter param and resets the page. Other params are kept. */
+export function filterHref(url: URL, id: string, param: string, value: string | null): string {
+	const params = new URLSearchParams(url.searchParams);
+	const name = filterParam(id, param);
+	if (value == null || value === '') params.delete(name);
+	else params.set(name, value);
+	params.delete(tableParam(id, 'page'));
+	const qs = params.toString();
+	return qs ? `${url.pathname}?${qs}` : url.pathname;
 }
 
 /** A search, or more rows than one page, needs the pager. */

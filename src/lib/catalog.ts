@@ -13,6 +13,45 @@ export const IMAGE_RUN_TIP = 'Starts the container already on this host.';
 /** Hover sentence for Deploy. The aria-label stays "Deploy <name>". */
 export const IMAGE_DEPLOY_TIP = 'Pulls the image and creates or replaces the container from this catalog entry.';
 
+/** What a catalog entry is: `program`, or an image's `spec.kind` (`service` or `job`). */
+export type CatalogKind = 'program' | 'service' | 'job';
+
+/** In sort order: Program, Service, Job. */
+export const CATALOG_KINDS: readonly { kind: CatalogKind; label: string; plural: string; tip: string }[] = [
+	{
+		kind: 'program',
+		label: 'Program',
+		plural: 'Programs',
+		tip: 'A program on the host, run as a systemd unit: Run, Stop, Restart, Logs.'
+	},
+	{
+		kind: 'service',
+		label: 'Service',
+		plural: 'Services',
+		tip: 'A long-running container: Deploy creates it from the image; it can have a health check.'
+	},
+	{ kind: 'job', label: 'Job', plural: 'Jobs', tip: 'A container that runs once to completion: Deploy runs the job.' }
+];
+
+/** `program`, `service` or `job`. A value the console does not know is returned as sent. */
+export function catalogKindOf(entry: { kind: string; spec?: unknown }): string {
+	if (entry.kind !== 'image') return entry.kind;
+	const spec = entry.spec as { kind?: unknown } | undefined;
+	return typeof spec?.kind === 'string' ? spec.kind : entry.kind;
+}
+
+/** Label, tooltip and sort rank. An unknown kind shows as returned, has no tip, and sorts last. */
+export function catalogKindInfo(entry: { kind: string; spec?: unknown }): { kind: string; label: string; tip: string; order: number } {
+	const kind = catalogKindOf(entry);
+	const order = CATALOG_KINDS.findIndex((item) => item.kind === kind);
+	if (order < 0) return { kind, label: kind, tip: '', order: CATALOG_KINDS.length };
+	const known = CATALOG_KINDS[order];
+	return { kind, label: known.label, tip: known.tip, order };
+}
+
+/** Header filter options for the catalog Kind column. */
+export const CATALOG_KIND_OPTIONS = CATALOG_KINDS.map((item) => ({ value: item.kind, label: item.plural }));
+
 export const CATALOG_NAME = /^[a-z0-9][a-z0-9-]{0,47}$/;
 
 export const RUN_AS = /^[a-z_][a-z0-9_-]{0,31}$/;

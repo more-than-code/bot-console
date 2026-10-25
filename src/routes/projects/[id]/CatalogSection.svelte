@@ -6,9 +6,11 @@
 	import DataTable from '$lib/components/DataTable.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
+	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 	import type { CatalogEntry, Host, Member } from '$lib/api-types';
-	import { IMAGE_RUN_TIP } from '$lib/catalog';
+	import { CATALOG_KIND_OPTIONS, catalogKindInfo, catalogKindOf, IMAGE_RUN_TIP } from '$lib/catalog';
 	import { DEPLOY_FIRST_TIP } from '$lib/catalog-flight';
 	import { imagePortText } from '$lib/image-spec';
 	import type { CatalogEditorState, CatalogPermissionsState, CatalogRunState, ImageDeployState, ImageEditorState } from '$lib/project-action';
@@ -108,9 +110,25 @@
 
 	const columns: Column<CatalogEntry>[] = [
 		{ key: 'name', label: 'Name', sortable: true, searchable: true, value: (row) => row.name },
+		{
+			key: 'kind',
+			label: 'Kind',
+			sortable: true,
+			searchable: true,
+			// Program, Service, Job, then by name.
+			value: (row) => `${catalogKindInfo(row).order}:${row.name}`,
+			searchValue: (row) => catalogKindInfo(row).label,
+			filter: { param: 'kind', label: 'Kind', options: CATALOG_KIND_OPTIONS, value: (row) => catalogKindOf(row) }
+		},
 		{ key: 'command', label: 'Command', sortable: true, searchable: true, value: (row) => row.command_display },
-		{ key: 'run_as', label: 'Run as', sortable: true, value: (row) => (row.kind === 'image' ? row.spec.user : row.spec.run_as) },
-		{ key: 'port', label: 'Port', sortable: true, value: (row) => portOf(row) },
+		{
+			key: 'run_as',
+			label: 'Run as',
+			sortable: true,
+			hideBelowSm: true,
+			value: (row) => (row.kind === 'image' ? row.spec.user : row.spec.run_as)
+		},
+		{ key: 'port', label: 'Port', sortable: true, hideBelowSm: true, value: (row) => portOf(row) },
 		{ key: 'actions', label: 'Actions', srLabel: true }
 	];
 
@@ -152,16 +170,39 @@
 	labelledBy="catalog-heading"
 	empty="No catalog entries."
 	rowKey={(row) => row.id}
-	searchLabel="Search name or command"
+	searchLabel="Search name, kind or command"
 >
 	{#snippet row(entry)}
+		{@const kind = catalogKindInfo(entry)}
 		<tr>
 			<td class="p-2 align-middle">{entry.name}</td>
+			<td class="p-2 align-middle">
+				{#if kind.tip}
+					<Tooltip.Provider>
+						<Tooltip.Root>
+							<Tooltip.Trigger>
+								{#snippet child({ props })}
+									<span {...props} title={kind.tip} data-kind={kind.kind}>
+										<Badge variant="outline">{kind.label}<span class="sr-only">: {kind.tip}</span></Badge>
+									</span>
+								{/snippet}
+							</Tooltip.Trigger>
+							<Tooltip.Content>{kind.tip}</Tooltip.Content>
+						</Tooltip.Root>
+					</Tooltip.Provider>
+				{:else}
+					<span data-kind={kind.kind}><Badge variant="outline">{kind.label}</Badge></span>
+				{/if}
+			</td>
 			<td class="p-2 align-middle"><CommandText value={entry.command_display} /></td>
-			<td class="p-2 align-middle">{entry.kind === 'image' ? entry.spec.user : entry.spec.run_as}</td>
-			<td class="p-2 align-middle font-mono">{portOf(entry)}</td>
+			<td class="p-2 align-middle max-sm:hidden">{entry.kind === 'image' ? entry.spec.user : entry.spec.run_as}</td>
+			<td class="p-2 align-middle font-mono max-sm:hidden">{portOf(entry)}</td>
 			<td class="p-2 align-middle whitespace-normal">
-				<fieldset disabled={rowBusy === entry.name} class="m-0 flex min-w-0 flex-wrap items-center gap-1 border-0 p-0">
+				<!-- Below sm, a grid of at most four icons per line keeps the row short. -->
+				<fieldset
+					disabled={rowBusy === entry.name}
+					class="m-0 flex min-w-0 flex-wrap items-center gap-1 border-0 p-0 max-sm:grid max-sm:grid-cols-[repeat(4,max-content)]"
+				>
 					{#each ROW_ACTIONS as action (action)}
 						{#if entry.my_actions.includes(action)}
 							<CatalogRunDialog

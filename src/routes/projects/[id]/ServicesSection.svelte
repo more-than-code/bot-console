@@ -20,6 +20,7 @@
 		serviceColumns,
 		serviceDomId,
 		serviceHostReachable,
+		serviceKindLabel,
 		showProjectColumn
 	} from '$lib/host-view';
 	import { canEditHealthChecks, SAVED_HEALTH_CHECKS } from '$lib/health-checks';
@@ -339,7 +340,7 @@
 			{#if showProject}
 				<td class="p-2 align-middle">{service.project_name}</td>
 			{/if}
-			<td class="p-2 align-middle">{service.kind}</td>
+			<td class="p-2 align-middle">{serviceKindLabel(service.kind)}</td>
 			<td class="p-2 align-middle font-mono">{ports(service.ports)}</td>
 			<td class="p-2 align-middle"><StatusBadge status={serviceRowStatus(service)} hint={healthSourceLabel(service)} /></td>
 			<td class="p-2 align-middle whitespace-nowrap"><LocalTime iso={service.last_seen_at} /></td>

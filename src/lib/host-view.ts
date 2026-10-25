@@ -195,6 +195,17 @@ export function smallestPort(ports: readonly number[]): number | null {
 	return min;
 }
 
+/** Words for `Service.kind` (api-v1: container|systemd|process). Other values show as returned. */
+const SERVICE_KIND_LABELS: Record<string, string> = {
+	container: 'Container',
+	systemd: 'systemd unit',
+	process: 'Process'
+};
+
+export function serviceKindLabel(kind: string): string {
+	return Object.hasOwn(SERVICE_KIND_LABELS, kind) ? SERVICE_KIND_LABELS[kind] : kind;
+}
+
 export const SERVICE_DEFAULT_SORT = 'name';
 export const SERVICE_DEFAULT_DIR: SortDir = 'asc';
 

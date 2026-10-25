@@ -737,7 +737,7 @@ describe('catalog images', { concurrency: false }, () => {
 				members: []
 			}
 		}).body;
-		const cells = [...section.matchAll(/<td class="p-2 align-middle font-mono">([^<]*)<\/td>/g)].map((match) => match[1]);
+		const cells = [...section.matchAll(/<td class="p-2 align-middle font-mono[^"]*">([^<]*)<\/td>/g)].map((match) => match[1]);
 		assert.deepEqual(cells, ['8080:80 public, 9090:90', '9090:90', '3031']);
 		assert.equal(section.includes('Publishes on all of the host'), false);
 		const sectionSource = readFileSync(new URL('../src/routes/projects/[id]/CatalogSection.svelte', import.meta.url), 'utf8');

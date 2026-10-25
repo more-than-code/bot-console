@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { untrack } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { SEARCH_DEBOUNCE_MS, SEARCH_MAX } from '$lib/table-query';
@@ -11,7 +11,8 @@
 		action,
 		hidden,
 		hrefFor,
-		name = 'q'
+		name = 'q',
+		extra
 	}: {
 		q: string | null;
 		label: string;
@@ -19,6 +20,8 @@
 		hidden: Array<{ name: string; value: string }>;
 		hrefFor: (q: string | null) => string;
 		name?: string;
+		/** Shown after the Search button, e.g. active filter chips. */
+		extra?: Snippet;
 	} = $props();
 
 	let draft = $state(untrack(() => q ?? ''));
@@ -74,4 +77,5 @@
 		/>
 	</label>
 	<Button type="submit" variant="outline">Search</Button>
+	{#if extra}{@render extra()}{/if}
 </form>
