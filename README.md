@@ -83,3 +83,7 @@ A join token is shown once, on the create result, and is not written to browser 
 The header shows the Deploybot lockup (light or dark to match the theme; it links to `/projects`), a Projects link, the theme switch (System, Light, Dark), and, when signed in, the user's Google avatar left of their name (only an `https` URL is used, loaded with no referrer; without one, or if it fails to load, a circle with the name's first letter), a menu linking to Connected apps, and Sign out.
 
 This console has not been run against bot-api-server or Google from the unit tests. They mock `fetch`.
+
+## License
+
+GNU Affero General Public License v3.0 only (AGPL-3.0-only). See [LICENSE](LICENSE). You may self-host and change bot-console. If you offer a changed version to users over a network, you must offer them its source code.
