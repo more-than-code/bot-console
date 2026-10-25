@@ -56,8 +56,17 @@ export function isStaticAsset(pathname: string): boolean {
 	return /^\/[^/]+\.(svg|png|ico|webp|txt|webmanifest|gif|jpe?g)$/i.test(path);
 }
 
+/** The public site pages. They render without a session and make no API call. */
+const SITE_PATHS = ['/about', '/privacy', '/terms'] as const;
+
+export function isSitePath(pathname: string): boolean {
+	return (SITE_PATHS as readonly string[]).includes(logicalPath(pathname));
+}
+
 export function isPublicPath(pathname: string): boolean {
 	const path = logicalPath(pathname);
+	// Safety net: the hook returns earlier for site paths and never reaches the auth gate.
+	if (isSitePath(path)) return true;
 	if (path === '/signin' || path.startsWith('/signin/')) return true;
 	if (path === '/theme' || path.startsWith('/theme/')) return true;
 	if (path === '/auth/google/callback') return true;

@@ -62,6 +62,10 @@ export async function resolve(specifier, context, nextResolve) {
 
 /** Compile route and component modules so `svelte/server` `render` can load them. */
 export async function load(url, context, nextLoad) {
+	// Stylesheet imports (the root layout's app.css) have no effect on server render.
+	if (url.startsWith('file:') && url.endsWith('.css')) {
+		return { format: 'module', source: '', shortCircuit: true };
+	}
 	if (url.startsWith('file:') && (url.endsWith('.svelte') || url.endsWith('.svelte.js') || url.endsWith('.svelte.ts'))) {
 		const filename = fileURLToPath(url);
 		const source = readFileSync(filename, 'utf8');

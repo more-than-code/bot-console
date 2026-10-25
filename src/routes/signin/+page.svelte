@@ -7,6 +7,9 @@
 
 	let { data, form } = $props();
 	const next = $derived(form?.next ?? data.next);
+	// Same link style as the app-shell footer and the public site footer.
+	const legalLink =
+		'rounded-sm underline underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring';
 </script>
 
 <svelte:head>
@@ -24,3 +27,7 @@
 	<Input type="hidden" name="next" value={next} />
 	<Button type="submit">Sign in with Google</Button>
 </form>
+<p class="text-muted-foreground mt-4 text-sm">
+	By continuing you agree to the <a class={legalLink} href="/terms">Terms of Service</a> and
+	acknowledge the <a class={legalLink} href="/privacy">Privacy Policy</a>.
+</p>

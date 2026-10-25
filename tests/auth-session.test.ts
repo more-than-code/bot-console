@@ -86,6 +86,13 @@ describe('auth session', { concurrency: false }, () => {
 		assert.equal(isPublicPath('/projects'), false);
 		assert.equal(isPublicPath('/api/overview'), false);
 		assert.equal(isPublicPath('/favicon.svg'), true);
+		assert.equal(isPublicPath('/about'), true);
+		assert.equal(isPublicPath('/privacy'), true);
+		assert.equal(isPublicPath('/terms/__data.json'), true);
+		assert.equal(isPublicPath('/account'), false);
+		assert.equal(isPublicPath('/hosts/x'), false);
+		assert.equal(isPublicPath('/aboutx'), false);
+		assert.equal(isPublicPath('/about/x'), false);
 		assert.equal(needsNoStore('/projects'), true);
 		assert.equal(needsNoStore('/'), true);
 		assert.equal(needsNoStore('/favicon.svg'), false);

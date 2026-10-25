@@ -1,9 +1,10 @@
-import { redirect, type Handle } from '@sveltejs/kit';
+import { redirect, type Handle, type RequestEvent } from '@sveltejs/kit';
 import { apiBaseUrl, loadSession, NOT_CONFIGURED_MESSAGE } from '$lib/server/api';
 import {
 	clearSessionCookieHeader,
 	isApiPath,
 	isPublicPath,
+	isSitePath,
 	isStaticAsset,
 	logicalPath,
 	needsNoStore,
@@ -55,12 +56,34 @@ function unavailable(pathname: string): Response {
 	});
 }
 
+/** app.html marks every page noindex. Only the public site pages drop it. */
+const NOINDEX_META = '<meta name="robots" content="noindex" />';
+
+/** Resolves a page with the theme marker and the shared headers. */
+async function renderPage(
+	event: RequestEvent,
+	resolve: Parameters<Handle>[0]['resolve'],
+	path: string,
+	options: { indexable?: boolean } = {}
+): Promise<Response> {
+	const theme = parseTheme(event.cookies.get(THEME_COOKIE));
+	const response = await resolve(event, {
+		transformPageChunk: ({ html }) => {
+			const marked = applyThemeMarker(html, theme);
+			return options.indexable ? marked.replace(NOINDEX_META, '') : marked;
+		}
+	});
+	return applyHeaders(path, response);
+}
+
 export const handle: Handle = async ({ event, resolve }) => {
 	event.locals.user = null;
 	event.locals.projects = [];
 	event.locals.sessionUnavailable = false;
 
 	const path = logicalPath(event.url.pathname);
+	// The public site pages need no session, so they render even when the API is down or unset.
+	if (isSitePath(path)) return renderPage(event, resolve, path, { indexable: true });
 	if (!apiBaseUrl()) {
 		if (isStaticAsset(path)) {
 			const response = await resolve(event);
@@ -97,9 +120,5 @@ export const handle: Handle = async ({ event, resolve }) => {
 		redirect(303, signinLocation(event.url));
 	}
 
-	const theme = parseTheme(event.cookies.get(THEME_COOKIE));
-	const response = await resolve(event, {
-		transformPageChunk: ({ html }) => applyThemeMarker(html, theme)
-	});
-	return applyHeaders(event.url.pathname, response);
+	return renderPage(event, resolve, path);
 };
