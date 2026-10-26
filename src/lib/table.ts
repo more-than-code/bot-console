@@ -62,6 +62,9 @@ export type PageWindow<Row> = {
 
 const PAGE_NUMBER = /^[1-9][0-9]*$/;
 
+/** DataTable id of the project Catalog tab; its search is `catalog.q`. */
+export const CATALOG_TABLE_ID = 'catalog';
+
 export function tableParam(id: string, key: 'q' | 'sort' | 'dir' | 'page' | 'host' | 'cursor' | 'edit'): string {
 	return `${id}.${key}`;
 }

@@ -452,10 +452,18 @@ export type ProjectService = ServiceSummary & {
 	project_name: string;
 };
 
+/** What Docker runs for a catalog container: its catalog healthcheck, the image's own, or null when unknown. */
+export type DockerCheckView =
+	| { test: string[]; intervalSec: number; timeoutSec: number; retries: number }
+	| 'image-default'
+	| null;
+
 /** A project services row plus its health checks (api-v1 v1.18 `include=health_checks`) and why they are missing. */
 export type ProjectServiceRow = ProjectService & {
 	checks: HealthCheck[];
 	checksMessage: string | null;
+	/** Set only for an admin, on a row of this project with Docker health and a catalog entry. */
+	dockerCheck?: DockerCheckView;
 };
 
 export type SnapshotView = {

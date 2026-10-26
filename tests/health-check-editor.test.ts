@@ -26,8 +26,8 @@ import {
 	servicesHealthView,
 	setCheckPort,
 	setCheckProtocol,
-	tcpSuggestionLabel,
-	tcpSuggestions,
+	addCheckLabel,
+	addablePorts,
 	validateHealthChecks,
 	type CheckDraft
 } from '../src/lib/health-checks.ts';
@@ -226,20 +226,20 @@ describe('health check validation', () => {
 
 describe('health check suggestions', () => {
 	test('a port with no check is offered as a TCP check', () => {
-		assert.deepEqual(tcpSuggestions([80, 443], [blankCheck('tcp', 80, 'a')]), [443]);
-		assert.equal(tcpSuggestionLabel(443), 'Add TCP check on 443');
+		assert.deepEqual(addablePorts([80, 443], [blankCheck('tcp', 80, 'a')]), [443]);
+		assert.equal(addCheckLabel(443), 'Add health check on 443');
 	});
 
 	test('a port that already has an HTTP check is not offered', () => {
-		assert.deepEqual(tcpSuggestions([80], [httpCheck(80)]), []);
+		assert.deepEqual(addablePorts([80], [httpCheck(80)]), []);
 	});
 
 	test('a port that already has a TCP check is not offered', () => {
-		assert.deepEqual(tcpSuggestions([80, 80], [blankCheck('tcp', 80, 'a')]), []);
+		assert.deepEqual(addablePorts([80, 80], [blankCheck('tcp', 80, 'a')]), []);
 	});
 
 	test('a service with no ports has no suggestion', () => {
-		assert.deepEqual(tcpSuggestions([], []), []);
+		assert.deepEqual(addablePorts([], []), []);
 	});
 
 	test('the eleventh suggestion does not grow the draft', () => {
@@ -266,11 +266,24 @@ describe('redundant TCP checks', () => {
 		assert.equal(next.notice, 'Replaced the TCP check on 80 (HTTP covers it).');
 	});
 
-	test('switching the TCP row itself to HTTP shows the same notice', () => {
-		const next = setCheckProtocol([blankCheck('tcp', 80, 'tcp-80')], 0, 'http');
-		assert.equal(next.drafts.length, 1);
-		assert.equal(next.drafts[0]?.protocol, 'http');
-		assert.equal(next.drafts[0]?.port, 80);
+	test('switching the only TCP row on a port to HTTP removes nothing and shows no notice', () => {
+		const next = setCheckProtocol([blankCheck('tcp', 80, 'tcp-80'), blankCheck('tcp', 443, 'tcp-443')], 0, 'http');
+		assert.deepEqual(
+			next.drafts.map((row) => [row.key, row.protocol, row.port]),
+			[
+				['tcp-80', 'http', 80],
+				['tcp-443', 'tcp', 443]
+			]
+		);
+		assert.equal(next.notice, null);
+	});
+
+	test('switching a TCP row to HTTP drops another TCP row on that port and names the notice', () => {
+		const next = setCheckProtocol([blankCheck('tcp', 80, 'old'), blankCheck('tcp', 80, 'new')], 1, 'http');
+		assert.deepEqual(
+			next.drafts.map((row) => [row.key, row.protocol, row.port]),
+			[['new', 'http', 80]]
+		);
 		assert.equal(next.notice, 'Replaced the TCP check on 80 (HTTP covers it).');
 	});
 
@@ -725,7 +738,7 @@ test('the services editor calls the health-check functions', () => {
 	const anchors: Array<[string, string]> = [
 		['lib/health-checks.ts', 'return canRenameService('],
 		['routes/projects/[id]/HealthChecks.svelte', 'HEALTH_CHECK_NOTE'],
-		['routes/projects/[id]/HealthChecks.svelte', 'tcpSuggestions('],
+		['routes/projects/[id]/HealthChecks.svelte', 'addablePorts('],
 		['routes/projects/[id]/HealthChecks.svelte', 'setCheckProtocol('],
 		['routes/projects/[id]/HealthChecks.svelte', 'setCheckPort('],
 		['routes/projects/[id]/HealthChecks.svelte', 'addTcpCheck('],

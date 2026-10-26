@@ -4,7 +4,7 @@
 	import Activity from '@lucide/svelte/icons/activity';
 	import HeartPulse from '@lucide/svelte/icons/heart-pulse';
 	import { tick, untrack } from 'svelte';
-	import type { Health, HealthCheck, ProbeView } from '$lib/api-types';
+	import type { DockerCheckView, Health, HealthCheck, ProbeView } from '$lib/api-types';
 	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
@@ -17,13 +17,17 @@
 	import * as Select from '$lib/components/ui/select';
 	import { formDialogOutcome } from '$lib/dialog-open';
 	import { formatLatency } from '$lib/format';
+	import DockerHealthNote from './DockerHealthNote.svelte';
 	import {
 		HEALTH_CHECK_LIMIT,
 		HEALTH_CHECK_NOTE,
 		HEALTH_FORM,
 		UNREAD_HEALTH_CHECKS,
+		addCheckLabel,
+		addablePorts,
 		addTcpCheck,
 		draftFromChecks,
+		emptyChecksText,
 		healthChecksSaveState,
 		healthFailureOutcome,
 		healthFormRows,
@@ -33,8 +37,6 @@
 		scheduleHealthCloseFallback,
 		setCheckPort,
 		setCheckProtocol,
-		tcpSuggestionLabel,
-		tcpSuggestions,
 		validateHealthChecks,
 		type CheckDraft,
 		type CheckField,
@@ -50,6 +52,8 @@
 		checks,
 		checksMessage = null,
 		health,
+		catalogEntry = null,
+		dockerCheck = null,
 		failed = false,
 		serverField = null,
 		serverIndex = null,
@@ -70,6 +74,10 @@
 		/** Set when this row's checks could not be read. The control stays disabled. */
 		checksMessage?: string | null;
 		health: Health | null;
+		/** This project's catalog entry for the row, or null (another project's row gets null). */
+		catalogEntry?: string | null;
+		/** What Docker runs, when the row has Docker health and the catalog was read. */
+		dockerCheck?: DockerCheckView;
 		failed?: boolean;
 		serverField?: string | null;
 		serverIndex?: number | null;
@@ -96,7 +104,8 @@
 	let closeWait: (() => void) | null = null;
 
 	const formRows = $derived(healthFormRows(drafts));
-	const suggestions = $derived(tcpSuggestions(ports, drafts));
+	const suggestions = $derived(addablePorts(ports, drafts));
+	const emptyText = $derived(emptyChecksText(ports, drafts));
 	const checksIssue = $derived(shown(null, 'checks'));
 	const unread = $derived(checksMessage != null);
 
@@ -259,6 +268,7 @@
 		<div class="grid min-h-0 gap-3 overflow-y-auto">
 			{#if health?.source === 'docker'}
 				<p class="text-sm">Docker reports this container's health; the checks below are used only when Docker has none.</p>
+				<DockerHealthNote {dockerCheck} {catalogEntry} onNavigate={() => (open = false)} />
 			{/if}
 			<p class="text-sm">
 				Latest result
@@ -281,8 +291,8 @@
 					{/if}
 				</Notice>
 			{/if}
-			{#if drafts.length === 0}
-				<p class="text-muted-foreground text-sm">No health checks.</p>
+			{#if emptyText}
+				<p class={ports.length === 0 ? 'text-sm' : 'text-muted-foreground text-sm'}>{emptyText}</p>
 			{/if}
 			{#each drafts as row, index (row.key)}
 				<div class="grid gap-2 rounded-lg border border-border p-2">
@@ -466,7 +476,7 @@
 				<div class="flex flex-wrap gap-2">
 					{#each suggestions as port (port)}
 						<Button type="button" variant="outline" disabled={drafts.length >= HEALTH_CHECK_LIMIT} onclick={() => addSuggested(port)}>
-							{tcpSuggestionLabel(port)}
+							{addCheckLabel(port)}
 						</Button>
 					{/each}
 				</div>

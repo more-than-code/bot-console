@@ -310,6 +310,8 @@
 								checks={service.checks}
 								checksMessage={service.checksMessage}
 								health={service.health}
+								catalogEntry={service.project_id === projectId ? service.catalog_entry : null}
+								dockerCheck={service.dockerCheck ?? null}
 								failed={healthServiceId === service.id}
 								serverField={healthServiceId === service.id ? healthField : null}
 								serverIndex={healthServiceId === service.id ? healthIndex : null}

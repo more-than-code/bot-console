@@ -1,5 +1,6 @@
-import type { HealthCheck } from './api-types';
+import type { CatalogEntry, DockerCheckView, HealthCheck } from './api-types';
 import { canRenameService } from './service-label';
+import { CATALOG_TABLE_ID, tableParam } from './table';
 
 /** api-v1 HealthCheck: at most 10, interval 30–300 (default 60), expect 200–399. */
 export const HEALTH_CHECK_LIMIT = 10;
@@ -22,6 +23,9 @@ export const HEALTH_NEEDS_CONFIRMATION =
 export const HEALTH_CLOSE_FALLBACK_MS = 1000;
 export const HEALTH_CHECK_NOTE =
 	'Checks run on the host against 127.0.0.1:<port>. HTTPS and virtual hosts are not supported yet.';
+export const NO_PORTS_FOR_CHECKS =
+	"This service reports no open ports, so a TCP or HTTP check isn't possible. Ports appear when the host reports them.";
+export const DOCKER_IMAGE_DEFAULT = "Docker uses the image's own HEALTHCHECK.";
 
 export const HEALTH_FORM = {
 	protocol: 'hc_protocol',
@@ -110,8 +114,41 @@ export function replacedTcpNotice(port: number): string {
 	return `Replaced the TCP check on ${port} (HTTP covers it).`;
 }
 
-export function tcpSuggestionLabel(port: number): string {
-	return `Add TCP check on ${port}`;
+/** The new row starts as TCP; its Protocol select switches it to HTTP. */
+export function addCheckLabel(port: number): string {
+	return `Add health check on ${port}`;
+}
+
+/** No rows: with ports the add buttons explain themselves; without ports say why there are none. */
+export function emptyChecksText(ports: readonly number[], drafts: readonly CheckDraft[]): string | null {
+	if (drafts.length > 0) return null;
+	return ports.length === 0 ? NO_PORTS_FOR_CHECKS : 'No health checks.';
+}
+
+/** An image entry's Docker healthcheck. A missing or program entry is unknown (null). */
+export function dockerCheckFromEntry(entry: CatalogEntry | undefined): DockerCheckView {
+	if (!entry || entry.kind !== 'image') return null;
+	const check = entry.spec.healthcheck;
+	if (check == null) return 'image-default';
+	return { test: [...check.test], intervalSec: check.interval_sec, timeoutSec: check.timeout_sec, retries: check.retries };
+}
+
+/** Quote an argument that is empty or has whitespace or a quote; an inner `"` becomes `\"`. */
+export function formatArgv(argv: readonly string[]): string {
+	return argv.map((arg) => (arg === '' || /[\s"']/.test(arg) ? `"${arg.replaceAll('"', '\\"')}"` : arg)).join(' ');
+}
+
+/** Text after the command: `every 30 s, timeout 5 s, 3 retries`. */
+export function dockerCheckTimings(check: Exclude<DockerCheckView, 'image-default' | null>): string {
+	const retries = check.retries === 1 ? '1 retry' : `${check.retries} retries`;
+	return `every ${check.intervalSec} s, timeout ${check.timeoutSec} s, ${retries}`;
+}
+
+/** Catalog tab on the current project page, filtered to one entry. */
+export function catalogEntryHref(name: string): string {
+	const params = new URLSearchParams({ tab: 'catalog' });
+	params.set(tableParam(CATALOG_TABLE_ID, 'q'), name);
+	return `?${params.toString()}`;
 }
 
 export function blankCheck(protocol: CheckProtocol, port: number, key: string): CheckDraft {
@@ -152,7 +189,7 @@ export function draftFromChecks(
  * A port with any check is not suggested. An HTTP check is a check, so it
  * does not get a TCP suggestion either. No ports means no suggestions.
  */
-export function tcpSuggestions(ports: readonly number[], drafts: readonly CheckDraft[]): number[] {
+export function addablePorts(ports: readonly number[], drafts: readonly CheckDraft[]): number[] {
 	const taken = new Set<number>();
 	for (const draft of drafts) {
 		if (draft.port != null) taken.add(draft.port);
@@ -176,7 +213,7 @@ export function addTcpCheck(drafts: readonly CheckDraft[], port: number, key: st
 export function addHttpCheck(drafts: readonly CheckDraft[], port: number, key: string): DraftChange {
 	if (drafts.length >= HEALTH_CHECK_LIMIT) return { drafts: [...drafts], notice: null };
 	const next = [...drafts, blankCheck('http', port, key)];
-	return withoutRedundantTcp(next, next.length - 1, false);
+	return withoutRedundantTcp(next, next.length - 1);
 }
 
 export function removeCheck(drafts: readonly CheckDraft[], index: number): CheckDraft[] {
@@ -184,19 +221,18 @@ export function removeCheck(drafts: readonly CheckDraft[], index: number): Check
 }
 
 /**
- * Switching a row to HTTP on a port that has a TCP row removes that TCP row.
- * Switching the TCP row itself to HTTP is the same replacement.
+ * Switching a row to HTTP on a port that has another TCP row removes that TCP row and says so.
+ * Switching the only TCP row on a port to HTTP removes nothing, so there is no notice.
  */
 export function setCheckProtocol(drafts: readonly CheckDraft[], index: number, protocol: CheckProtocol): DraftChange {
 	const current = drafts[index];
 	if (!current || current.protocol === protocol) return { drafts: [...drafts], notice: null };
-	const replacedSelf = current.protocol === 'tcp' && protocol === 'http' && current.port != null;
 	const next = drafts.map((row, i) => {
 		if (i !== index) return row;
 		return { ...row, protocol, path: protocol === 'tcp' ? '' : row.path };
 	});
 	if (protocol !== 'http') return { drafts: next, notice: null };
-	return withoutRedundantTcp(next, index, replacedSelf);
+	return withoutRedundantTcp(next, index);
 }
 
 /** Moving an HTTP row onto a port that has a TCP row removes that TCP row. */
@@ -205,7 +241,7 @@ export function setCheckPort(drafts: readonly CheckDraft[], index: number, port:
 	if (!current) return { drafts: [...drafts], notice: null };
 	const next = drafts.map((row, i) => (i === index ? { ...row, port } : row));
 	if (current.protocol !== 'http') return { drafts: next, notice: null };
-	return withoutRedundantTcp(next, index, false);
+	return withoutRedundantTcp(next, index);
 }
 
 export function validateHealthChecks(drafts: readonly CheckDraft[], ports: readonly number[]): CheckIssue[] {
@@ -458,7 +494,7 @@ export function healthFailureOutcome(data: unknown): 'bad_request' | 'failure' {
  * HTTP already proves the TCP connect, so the draft drops the TCP row on this port.
  * Nothing is saved here. A TCP row on a different port is kept.
  */
-function withoutRedundantTcp(drafts: CheckDraft[], httpIndex: number, replacedSelf: boolean): DraftChange {
+function withoutRedundantTcp(drafts: CheckDraft[], httpIndex: number): DraftChange {
 	const http = drafts[httpIndex];
 	if (!http || http.protocol !== 'http' || http.port == null) return { drafts, notice: null };
 	const port = http.port;
@@ -471,7 +507,7 @@ function withoutRedundantTcp(drafts: CheckDraft[], httpIndex: number, replacedSe
 		}
 		return true;
 	});
-	if (!removed && !replacedSelf) return { drafts: kept, notice: null };
+	if (!removed) return { drafts: kept, notice: null };
 	return { drafts: kept, notice: replacedTcpNotice(port) };
 }
 

@@ -7,6 +7,7 @@ import {
 	HEALTH_NEEDS_CONFIRMATION,
 	UNREAD_HEALTH_CHECKS,
 	CHECKS_NEED_API,
+	dockerCheckFromEntry,
 	draftsFromForm,
 	fieldForHealthMessage,
 	healthCheckPayload,
@@ -121,7 +122,8 @@ const noServices: ServicesLoad = {
 async function loadProjectServices(
 	event: RequestEvent,
 	projectId: string,
-	reachableHostIds: ReadonlySet<string>
+	reachableHostIds: ReadonlySet<string>,
+	canAdmin: boolean
 ): Promise<ServicesLoad> {
 	const query = readServerTableQuery(event.url.searchParams, 'services', serviceColumns(false), {
 		sort: SERVICE_DEFAULT_SORT,
@@ -159,7 +161,7 @@ async function loadProjectServices(
 			services.push({ ...row, checks: checks ?? [], checksMessage: checks ? null : UNREAD_HEALTH_CHECKS });
 		}
 		return {
-			services,
+			services: canAdmin ? await withDockerChecks(event, projectId, services) : services,
 			servicesTotal: page.total,
 			servicesPrev: page.prevCursor,
 			servicesNext: page.nextCursor,
@@ -169,6 +171,30 @@ async function loadProjectServices(
 	} catch (err) {
 		return { ...noServices, servicesMessage: loadFailure(err).message };
 	}
+}
+
+/** A row from another project on a shared host names that project's catalog, not this one. */
+function needsDockerCheck(row: ProjectServiceRow, projectId: string): boolean {
+	return row.health?.source === 'docker' && row.catalog_entry != null && row.project_id === projectId;
+}
+
+/**
+ * Admin only (the dialog's edit gate). One catalog read, only when a row of this project reports Docker
+ * health for a catalog entry. A failed read leaves those rows unknown.
+ */
+async function withDockerChecks(event: RequestEvent, projectId: string, services: ProjectServiceRow[]): Promise<ProjectServiceRow[]> {
+	if (!services.some((row) => needsDockerCheck(row, projectId))) return services;
+	let entries: Map<string, CatalogEntry> | null = null;
+	try {
+		// First page only, on purpose: an entry beyond it leaves dockerCheck null.
+		const list = parseCatalogList(await apiFetch(event, `/v1/projects/${projectId}/catalog`));
+		if (list) entries = new Map(list.items.map((entry) => [entry.name, entry]));
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+	}
+	return services.map((row) =>
+		needsDockerCheck(row, projectId) ? { ...row, dockerCheck: dockerCheckFromEntry(entries?.get(row.catalog_entry ?? '')) } : row
+	);
 }
 
 const empty = {
@@ -236,7 +262,7 @@ export const load: PageServerLoad = async (event) => {
 			: Promise.resolve(emptyList<Host>());
 	const servicesLoad =
 		tab === 'services'
-			? hostsLoad.then((list) => loadProjectServices(event, id, new Set(list.items.filter(serviceHostReachable).map((host) => host.id))))
+			? hostsLoad.then((list) => loadProjectServices(event, id, new Set(list.items.filter(serviceHostReachable).map((host) => host.id)), canAdmin))
 			: Promise.resolve(noServices);
 	const catalogContainersLoad = tab === 'catalog' ? loadCatalogContainers(event, id) : Promise.resolve(noCatalogContainers);
 	const [hostList, memberList, tokenList, inviteList, services, catalogLoad, settings, catalogContainers] = await Promise.all([

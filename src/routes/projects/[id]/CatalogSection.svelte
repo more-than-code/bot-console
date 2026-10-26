@@ -14,7 +14,7 @@
 	import { DEPLOY_FIRST_TIP } from '$lib/catalog-flight';
 	import { imagePortText } from '$lib/image-spec';
 	import type { CatalogEditorState, CatalogPermissionsState, CatalogRunState, ImageDeployState, ImageEditorState } from '$lib/project-action';
-	import type { Column } from '$lib/table';
+	import { CATALOG_TABLE_ID, type Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 	import CatalogDeployDialog from './CatalogDeployDialog.svelte';
 	import CatalogEntryDialog from './CatalogEntryDialog.svelte';
@@ -166,7 +166,7 @@
 <DataTable
 	rows={entries}
 	{columns}
-	id="catalog"
+	id={CATALOG_TABLE_ID}
 	labelledBy="catalog-heading"
 	empty="No catalog entries."
 	rowKey={(row) => row.id}
