@@ -1,0 +1,60 @@
+# Deploybot
+
+> Deploybot lets any AI agent that speaks MCP run your own servers, without handing it SSH keys or a cloud token. It can only deploy what your catalog allows, as you, after a confirm step. People use the same controls through a web console.
+
+Deploybot is a control plane for your own hosts: Raspberry Pis, VPSs and cloud VMs. A small agent, bot-agent, runs on each host and dials out to the Deploybot API, so hosts open no inbound ports and can sit behind NAT. Project owners keep a catalog of approved container images and programs. People and AI agents can deploy, run, stop, restart and roll back only those entries, within their role in the project.
+
+Hosted service: console at https://console.deploybot.dev, MCP server at https://mcp.deploybot.dev/mcp. Sign-in is with Google. The source is public on GitHub, and you can self-host it.
+
+## How the safety model works
+
+- An MCP client acts as the signed-in user, with that user's role in each project, and no more.
+- Only catalog entries can run. There are no free-form commands, no shell tool and no file tools.
+- Every change made over MCP (deploy, rollback, run, stop, restart, health-check and catalog edits) first returns a plan and a `confirmation_id`. Nothing happens until the `confirm` tool is called with the same `idempotency_key`.
+- Each host has its own root-owned allowlist of images and projects that the server cannot change.
+- Secret values (env sets, files and registry logins) are encrypted at rest and write-only for people. MCP tools return env key names, never env values. Logs are redacted.
+- Changes are recorded in an audit log.
+
+## Instructions for AI agents
+
+- Read before you change: call `list_catalog`, `entry_status` or `get_health_checks` first.
+- Show the user the plan that a change returns, and call `confirm` only after the user agrees. Use the same `idempotency_key` as the call that returned the plan.
+- Do not put secret values in `spec.env` on catalog entries. Secrets belong in env sets entered in the web console.
+- A `forbidden` or `not_found` result means the user's role does not allow the call or cannot see the resource. Do not retry it with other ids.
+
+## Connect an MCP client
+
+- [bot-mcp-server README](https://github.com/more-than-code/bot-mcp-server/blob/dev/README.md): the full tool reference, the OAuth sign-in, and `deploybot login` for clients without a browser.
+- Claude Code example: `claude mcp add --transport http deploybot https://mcp.deploybot.dev/mcp`. Any client with Streamable HTTP and OAuth can connect the same way; it discovers sign-in from `https://mcp.deploybot.dev/.well-known/oauth-protected-resource`.
+
+## MCP tools
+
+- Read: `list_projects`, `list_hosts`, `list_services`, `list_processes`, `query_metrics`, `service_health_history`, `get_health_checks`, `list_catalog`.
+- Contact a host live (read only): `host_snapshot`, `probe_service`, `entry_status`, `entry_logs`.
+- Change, with plan and confirm: `deploy_entry`, `rollback_entry`, `run_entry`, `stop_entry`, `restart_entry`, `set_health_checks`, `create_catalog_entry`, `update_catalog_entry`, `delete_catalog_entry`.
+- `confirm`: carries out a plan after the user agrees.
+
+## Add a host
+
+- [Install bot-agent](https://github.com/more-than-code/bot-agent/blob/dev/docs/install.md): `install.sh`, enrolling with a one-time join token, the optional root runner for catalog entries, and the host allowlist (`/etc/bot-agent/runner.toml`).
+- [bot-agent README](https://github.com/more-than-code/bot-agent/blob/dev/README.md): what the agent collects, how it deploys images and programs, and health checks.
+
+## Features
+
+- Resilience: deploys wait for health (Docker health status or HTTP/TCP checks); an unhealthy deploy rolls back to the previous container automatically; one-step rollback to an earlier image digest; a health failure policy per service; programs run as systemd units and survive reboot.
+- Visibility: host metrics with history, running processes and discovered services, health check history per service, container logs with secrets redacted, container logs capped at 10 MB × 3 by default.
+- Teams: owner, admin and viewer roles per project, invite links that expire (single-use by default), per-entry rights to run, stop, restart or deploy for a role or a user, a host shared with other projects at metrics or deploy level, and one-time join tokens for adding hosts.
+
+## Self-hosting from source
+
+- [bot-api-server](https://github.com/more-than-code/bot-api-server/blob/dev/README.md): the API, the only part that writes the Postgres database and decides permissions. AGPL-3.0-only.
+- [bot-mcp-server](https://github.com/more-than-code/bot-mcp-server/blob/dev/README.md): the stateless MCP gateway. AGPL-3.0-only.
+- [bot-console](https://github.com/more-than-code/bot-console/blob/dev/README.md): the SvelteKit web console. AGPL-3.0-only.
+- [bot-agent](https://github.com/more-than-code/bot-agent/blob/dev/README.md): the host agent, in Go. Apache-2.0.
+
+## Optional
+
+- [API contract](https://github.com/more-than-code/bot-api-server/blob/dev/docs/contracts/api-v1.md): every `/v1` endpoint, request and response.
+- [OAuth contract](https://github.com/more-than-code/bot-api-server/blob/dev/docs/contracts/oauth-v1.md): sign-in for the console, the CLI and MCP clients.
+- [Agent protocol](https://github.com/more-than-code/bot-agent/blob/dev/docs/contracts/agent-protocol-v1.md): the messages between bot-agent and the API.
+- [API design](https://github.com/more-than-code/bot-api-server/blob/dev/docs/design.md): how the API server is built.
