@@ -1,8 +1,13 @@
 // Links for the public site pages (/about, /privacy, /terms). Kept free of app and
 // server imports so the pages can later move to a separate static site.
 
-/** The production console sign-in page. Absolute so it works from any host. */
-export const SIGN_IN_URL = 'https://console.deploybot.dev/signin';
+/**
+ * The sign-in page, relative so a local or dev console signs in to itself. On deploybot.dev the
+ * Caddy apex block redirects every path outside its page allowlist, /signin included, to
+ * https://console.deploybot.dev{uri}. Links using it must keep data-sveltekit-reload, so the
+ * browser does a full load (and the redirect) instead of a client-side route on the apex.
+ */
+export const SIGN_IN_URL = '/signin';
 
 export const SUPPORT_EMAIL = 'support@deploybot.dev';
 

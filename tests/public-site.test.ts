@@ -369,7 +369,8 @@ describe('public site pages', () => {
 	});
 
 	test('every Sign in link uses the one constant and reloads the page', () => {
-		assert.equal(SIGN_IN_URL, 'https://console.deploybot.dev/signin');
+		// Joe 2026-10-26: relative, so a local console's Sign in stays local; the apex Caddy redirects it to the console.
+		assert.equal(SIGN_IN_URL, '/signin');
 		assert.equal(SUPPORT_EMAIL, 'support@deploybot.dev');
 		const children = createRawSnippet(() => ({ render: () => '<p>child</p>' }));
 		const layout = render(SiteLayout, { props: { children } }).body;
