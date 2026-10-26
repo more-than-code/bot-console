@@ -297,6 +297,11 @@
 		const ids = [draft.healthOnUnhealthy !== 'none' ? `${fieldId}-unhealthy-hint` : null, describedBy('health_policy.on_unhealthy') ?? null].filter((id) => id != null);
 		return ids.length > 0 ? ids.join(' ') : undefined;
 	}
+
+	/** The health check command is described by its hint and then its error. */
+	function healthTestDescribedBy(): string {
+		return [`${fieldId}-health-test-hint`, describedBy('healthcheck')].filter((id) => id != null).join(' ');
+	}
 </script>
 
 <form
@@ -597,7 +602,7 @@
 		{@render fieldNotice('healthy_after_sec')}
 		<div class="grid gap-3" role="group" aria-label="Health check (Docker)">
 			<p class="text-sm font-medium">Health check (Docker)</p>
-			<p class="text-muted-foreground text-sm">One argument per line. Leave the command empty to use the image default.</p>
+			<p id="{fieldId}-health-test-hint" class="text-muted-foreground text-sm">One argument per line, starting with the command (for example redis-cli, then ping). Deploybot adds CMD. For a shell, use sh, -c, then the command. Leave the command empty to use the image default.</p>
 			<Label class="grid gap-1.5" for="{fieldId}-health-test">
 				Command
 				<Textarea
@@ -608,7 +613,7 @@
 					spellcheck="false"
 					autocomplete="off"
 					aria-invalid={invalid('healthcheck') ? true : undefined}
-					aria-describedby={describedBy('healthcheck')}
+					aria-describedby={healthTestDescribedBy()}
 				/>
 			</Label>
 			{@render fieldNotice('healthcheck')}

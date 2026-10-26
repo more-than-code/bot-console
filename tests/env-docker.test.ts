@@ -181,7 +181,7 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 
 	test('an image healthcheck is allowlisted and omitted when the command is empty', () => {
 		const check = {
-			test: ['CMD', '--ready'],
+			test: ['probe', '--ready'],
 			interval_sec: 10,
 			timeout_sec: 2,
 			retries: 3,
@@ -193,12 +193,12 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 		assert.equal(parseImageSpec({ ...spec('service'), healthcheck: { ...check, extra: true } }), null);
 		assert.equal(parseImageSpec({ ...spec('service'), healthcheck: { ...check, timeout_sec: 10, interval_sec: 10 } }), null);
 		assert.equal(parseImageSpec({ ...spec('job'), healthcheck: check }), null);
-		const defaults = parseImageSpec({ ...spec('service'), healthcheck: { test: ['CMD'] } });
-		assert.deepEqual(defaults?.healthcheck, { test: ['CMD'], interval_sec: 30, timeout_sec: 5, retries: 3, start_period_sec: 0 });
+		const defaults = parseImageSpec({ ...spec('service'), healthcheck: { test: ['probe'] } });
+		assert.deepEqual(defaults?.healthcheck, { test: ['probe'], interval_sec: 30, timeout_sec: 5, retries: 3, start_period_sec: 0 });
 
 		const draft = blankImageDraft();
 		draft.image = 'ghcr.io/acme/web:1';
-		draft.healthTest = 'CMD\n--ready';
+		draft.healthTest = 'probe\n--ready';
 		draft.healthInterval = '10';
 		draft.healthTimeout = '2';
 		draft.healthRetries = '3';
@@ -218,19 +218,19 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 		assert.equal(empty.spec.healthcheck, null);
 		assert.equal(Object.hasOwn(imageRequestBody(empty.spec, null).spec as Record<string, unknown>, 'healthcheck'), false);
 
-		draft.healthTest = 'CMD';
+		draft.healthTest = 'probe';
 		draft.healthTimeout = '30';
 		draft.healthInterval = '30';
 		const slow = imageSpecFromDraft(draft, undefined, false);
 		assert.equal(slow.ok, false);
 		if (slow.ok) return;
 		assert.equal(slow.field, 'healthcheck.timeout_sec');
-		assert.equal(slow.message.includes('CMD'), false);
+		assert.equal(slow.message.includes('probe'), false);
 
 		const job = blankImageDraft();
 		job.workload = 'job';
 		job.image = 'ghcr.io/acme/web:1';
-		job.healthTest = 'CMD';
+		job.healthTest = 'probe';
 		const jobSpec = imageSpecFromDraft(job, undefined, false);
 		assert.equal(jobSpec.ok, true);
 		if (!jobSpec.ok) return;
@@ -239,11 +239,33 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 		const form = new FormData();
 		form.set('workload', 'service');
 		form.set('image', 'ghcr.io/acme/web:1');
-		form.set('health_test', `CMD\n${'x'.repeat(1025)}`);
+		form.set('health_test', `probe\n${'x'.repeat(1025)}`);
 		const read = imageDraftFromForm(form);
 		assert.equal(read.draft.healthTest, '');
 		assert.equal(read.field, 'healthcheck');
 		assert.equal(read.message?.includes('x'.repeat(20)), false);
+	});
+
+	test('a health check command that starts with CMD, CMD-SHELL or NONE is refused', () => {
+		const draft = blankImageDraft();
+		draft.image = 'ghcr.io/acme/web:1';
+		for (const first of ['CMD', 'CMD-SHELL', 'NONE']) {
+			draft.healthTest = `${first}\nredis-cli\nping`;
+			const refused = imageSpecFromDraft(draft, undefined, false);
+			assert.equal(refused.ok, false);
+			if (refused.ok) return;
+			assert.equal(refused.field, 'healthcheck');
+			assert.equal(refused.message, 'Remove the first line (CMD, CMD-SHELL or NONE) and start with the command itself. Deploybot adds CMD.');
+		}
+		draft.healthTest = '\nCMD';
+		assert.equal(imageSpecFromDraft(draft, undefined, false).ok, false);
+		for (const accepted of ['redis-cli\nping', 'sh\n-c\necho CMD', 'cmd', 'probe\nCMD']) {
+			draft.healthTest = accepted;
+			const built = imageSpecFromDraft(draft, undefined, false);
+			assert.equal(built.ok, true, accepted);
+			if (!built.ok) return;
+			assert.deepEqual(built.spec.healthcheck?.test, accepted.split('\n'));
+		}
 	});
 
 	test('logging is omitted unless both bounds are set, and the preview shows the cap', () => {
@@ -956,13 +978,18 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 		const serviceHtml = render(CatalogImageForm, {
 			props: {
 				mode: 'edit',
-				entry: imageEntry({ test: ['CMD', '--ready'], interval_sec: 10, timeout_sec: 2, retries: 4, start_period_sec: 6 }),
+				entry: imageEntry({ test: ['probe', '--ready'], interval_sec: 10, timeout_sec: 2, retries: 4, start_period_sec: 6 }),
 				saveAction: '?/catalogUpdate',
 				sets: []
 			}
 		}).body;
 		assert.equal(serviceHtml.includes('Health check (Docker)'), true);
-		assert.equal(serviceHtml.includes('CMD'), true);
+		assert.equal(serviceHtml.includes('Deploybot adds CMD'), true);
+		const hintId = serviceHtml.match(/<p id="([^"]+-health-test-hint)"/)?.[1];
+		assert.ok(hintId);
+		const textarea = serviceHtml.match(/<textarea\b[^>]*name="health_test"[^>]*>/)?.[0] ?? '';
+		assert.match(textarea, new RegExp(`aria-describedby="${hintId}"`));
+		assert.equal(serviceHtml.includes('probe'), true);
 		assert.equal(serviceHtml.includes('--ready'), true);
 		assert.equal(serviceHtml.includes('min="5"'), true);
 		assert.equal(serviceHtml.includes('max="300"'), true);

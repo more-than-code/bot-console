@@ -5,6 +5,8 @@ import { containersByEntry } from '$lib/catalog-flight';
 import {
 	HEALTH_CHECK_LIMIT,
 	HEALTH_NEEDS_CONFIRMATION,
+	UNREAD_HEALTH_CHECKS,
+	CHECKS_NEED_API,
 	draftsFromForm,
 	fieldForHealthMessage,
 	healthCheckPayload,
@@ -55,10 +57,12 @@ import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
 import { roleAtLeast, uiRole } from '$lib/server/roles';
 import {
+	isRecord,
 	parseCatalogGrants,
 	parseCatalogList,
 	parseCreatedInvite,
 	parseCreatedJoin,
+	parseHealthChecks,
 	parseHost,
 	parseInvite,
 	parseJoinToken,
@@ -69,7 +73,6 @@ import {
 	parseService,
 	parseServicePage
 } from '$lib/server/shape';
-import { withChecks } from '$lib/server/service-checks';
 import { cleanDisplayName, cleanEmail, cleanExpiry, cleanHint, cleanName, cleanRole, isUuid } from '$lib/server/validate';
 import { readServerTableQuery, serverApiParams } from '$lib/table';
 import { backTo } from '$lib/url';
@@ -135,17 +138,26 @@ async function loadProjectServices(
 	try {
 		const params = serverApiParams(apiQuery, SERVICES_LIMIT);
 		params.set('view', serviceShow(event.url.searchParams.get('show')).view);
+		params.set('include', 'health_checks');
 		const payload = await apiFetch(event, `/v1/projects/${projectId}/services?${params.toString()}`);
 		const page = parseServicePage(payload);
 		if (!page) return { ...noServices, servicesMessage: 'The API returned an unexpected response.' };
 		let omitted = 0;
-		const summaries: ProjectService[] = [];
+		const services: ProjectServiceRow[] = [];
 		for (const item of page.raw) {
 			const row = parseProjectService(item);
-			if (row) summaries.push(row);
-			else omitted += 1;
+			if (!row) {
+				omitted += 1;
+				continue;
+			}
+			// api-v1 v1.18: checks come with the list row; an older API omits the key.
+			if (!isRecord(item) || !Object.hasOwn(item, 'health_checks')) {
+				services.push({ ...row, checks: [], checksMessage: CHECKS_NEED_API });
+				continue;
+			}
+			const checks = parseHealthChecks(item.health_checks);
+			services.push({ ...row, checks: checks ?? [], checksMessage: checks ? null : UNREAD_HEALTH_CHECKS });
 		}
-		const services = await withChecks(event, summaries);
 		return {
 			services,
 			servicesTotal: page.total,

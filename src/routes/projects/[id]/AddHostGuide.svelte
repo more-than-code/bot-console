@@ -12,6 +12,7 @@
 <Card.Root class="mb-4">
 	<details class="grid gap-3 px-(--card-spacing)" {open}>
 		<summary class="cursor-pointer text-base leading-snug font-medium">Add a host</summary>
+		<p>Run the commands below on the host you are adding (for example over ssh -t).</p>
 		<ol class="list-decimal pl-5 [&_li+li]:mt-3">
 			<li>
 				Download the

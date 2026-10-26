@@ -28,7 +28,7 @@ const OTHER_HOST_ID = '00000000-0000-4000-8000-0000000000ab';
 const ENTRY_ID = '00000000-0000-4000-8000-0000000000c1';
 const HASH = 'ab'.repeat(32);
 const GATE = "This host's agent does not support health policies";
-const CHECK = { test: ['CMD', 'true'], interval_sec: 30, timeout_sec: 5, retries: 3, start_period_sec: 0 };
+const CHECK = { test: ['true'], interval_sec: 30, timeout_sec: 5, retries: 3, start_period_sec: 0 };
 
 function wireSpec(kind: ImageSpec['kind'] = 'service'): Record<string, unknown> {
 	return {
@@ -55,7 +55,7 @@ function serviceDraft(patch: Partial<ImageDraft> = {}): ImageDraft {
 }
 
 function withCheck(patch: Partial<ImageDraft> = {}): ImageDraft {
-	return serviceDraft({ healthTest: 'CMD\ntrue', ...patch });
+	return serviceDraft({ healthTest: 'true', ...patch });
 }
 
 function sentPolicy(draft: ImageDraft): unknown {
@@ -335,7 +335,7 @@ describe('health failure policy: form and payload', () => {
 		form.set('workload', 'service');
 		form.set('image', 'ghcr.io/acme/web:1');
 		form.set('restart', 'unless-stopped');
-		form.set('health_test', 'CMD\ntrue');
+		form.set('health_test', 'true');
 		form.set('health_on_deploy_failure', 'stop');
 		form.set('health_on_unhealthy', 'restart');
 		form.set('health_unhealthy_after_sec', '60');

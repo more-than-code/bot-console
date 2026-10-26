@@ -5,6 +5,7 @@ import { isActionFailure, isRedirect } from '@sveltejs/kit';
 import { render } from 'svelte/server';
 import type { Host, ProbeView, ProcessSample, ProjectServiceRow } from '../src/lib/api-types.ts';
 import RenameForm from '../src/lib/components/RenameForm.svelte';
+import { CHECKS_NEED_API, UNREAD_HEALTH_CHECKS } from '../src/lib/health-checks.ts';
 import { serviceHostReachable } from '../src/lib/host-view.ts';
 import { nextRenameOpen, servicesRenameView } from '../src/lib/project-action.ts';
 import ProcessesTab from '../src/routes/hosts/[id]/ProcessesTab.svelte';
@@ -80,6 +81,7 @@ function projectItem(overrides: Record<string, unknown> = {}) {
 		host_status: 'online',
 		project_name: 'Lab',
 		last_seen_at: '2026-10-14T00:00:00Z',
+		health_checks: [],
 		...overrides
 	};
 }
@@ -257,6 +259,7 @@ describe('project services', { concurrency: false }, () => {
 		assert.equal(listed.url.searchParams.get('dir'), 'desc');
 		assert.equal(listed.url.searchParams.get('limit'), '25');
 		assert.equal(listed.url.searchParams.get('cursor'), 'abc');
+		assert.equal(listed.url.searchParams.get('include'), 'health_checks');
 		assert.equal(data.tab, 'services');
 		assert.equal(data.services[0]?.name, 'api');
 		assert.equal(data.servicesTotal, 4);
@@ -825,11 +828,11 @@ describe('project services', { concurrency: false }, () => {
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/hosts`) return envelope({ items: [HOST], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/members`) return envelope({ items: [], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/services`) {
-				return envelope({ items: [projectItem()], total: 1, next_cursor: null, prev_cursor: null });
-			}
-			if (call.url.pathname === `/v1/services/${SERVICE_ID}`) {
 				return envelope({
-					health_checks: [{ id: CHECK_ID, protocol: 'http', port: 80, path: '/health', enabled: true }]
+					items: [projectItem({ health_checks: [{ id: CHECK_ID, protocol: 'http', port: 80, path: '/health', enabled: true }] })],
+					total: 1,
+					next_cursor: null,
+					prev_cursor: null
 				});
 			}
 			return envelope(null, 500, 'error', 'unexpected');
@@ -963,6 +966,7 @@ describe('project services', { concurrency: false }, () => {
 			const listed = serviceList(calls);
 			assert.ok(listed, query || '(default)');
 			assert.equal(listed.url.searchParams.get('view'), view, query || '(default)');
+			assert.equal(listed.url.searchParams.get('include'), 'health_checks', query || '(default)');
 		}
 	});
 
@@ -987,6 +991,37 @@ describe('project services', { concurrency: false }, () => {
 		assert.equal(listed.url.searchParams.get('sort'), 'status');
 		assert.equal(listed.url.searchParams.get('dir'), 'desc');
 		assert.equal(listed.url.searchParams.get('cursor'), 'abc');
+		assert.equal(listed.url.searchParams.get('include'), 'health_checks');
+	});
+
+	test('a row without health_checks says the API is too old, and a malformed one says unread', async () => {
+		const legacy: Record<string, unknown> = projectItem();
+		delete legacy.health_checks;
+		installFetch((call) =>
+			shell(call, () =>
+				envelope({
+					items: [legacy, projectItem({ id: CHECK_ID, health_checks: 'bad' })],
+					total: 2,
+					next_cursor: null,
+					prev_cursor: null
+				})
+			)
+		);
+		const data = pageData(
+			await projectLoad(
+				fakeEvent({
+					url: `http://console.example/projects/${PROJECT.id}?tab=services`,
+					session: TOKEN,
+					user: USER,
+					projects: [PROJECT],
+					params: { id: PROJECT.id }
+				}).event as never
+			)
+		);
+		assert.equal(data.services[0]?.checksMessage, CHECKS_NEED_API);
+		assert.deepEqual(data.services[0]?.checks, []);
+		assert.equal(data.services[1]?.checksMessage, UNREAD_HEALTH_CHECKS);
+		assert.deepEqual(data.services[1]?.checks, []);
 	});
 
 	test('gone_at from the list payload reaches the loaded row', async () => {

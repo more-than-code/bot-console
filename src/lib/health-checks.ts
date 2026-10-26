@@ -14,6 +14,8 @@ export const PATH_MAX_BYTES = 512;
 
 export const SAVED_HEALTH_CHECKS = 'Saved health checks.';
 export const UNREAD_HEALTH_CHECKS = 'Health checks could not be read.';
+/** A services row without `health_checks`: the API is older than v1.18. */
+export const CHECKS_NEED_API = 'Health checks need API v1.18 or later.';
 export const HEALTH_NEEDS_CONFIRMATION =
 	'This change needs a confirmation; save it from the console session.';
 /** Same wait the catalog image dialog uses when bits-ui never reports the close. */

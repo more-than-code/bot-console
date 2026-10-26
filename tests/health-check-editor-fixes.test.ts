@@ -432,8 +432,8 @@ describe('health check editor fixes', () => {
 		assert.equal(html.includes('name="hc_protocol"'), false);
 		assert.equal(html.includes('>Save<'), false);
 		assert.equal(html.includes('The API is unavailable.'), true);
-		const viewer = renderServices({ canAdmin: false }, serviceRow({ checks: [], checksMessage: 'checks not loaded' }));
-		assert.equal(viewer.includes(UNREAD_HEALTH_CHECKS), false);
+		const viewer = renderServices({ canAdmin: false }, serviceRow({ checks: [], checksMessage: UNREAD_HEALTH_CHECKS }));
+		assert.equal(viewer.includes(`title="${UNREAD_HEALTH_CHECKS}"`), false);
 	});
 
 	test('a failed save names the field error on that control', () => {

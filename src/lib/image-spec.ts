@@ -344,6 +344,9 @@ function cleanHealthcheck(draft: ImageDraft): { ok: true; healthcheck: ImageHeal
 		test.push(line);
 	}
 	if (test.length === 0) return { ok: true, healthcheck: null };
+	if (test[0] === 'CMD' || test[0] === 'CMD-SHELL' || test[0] === 'NONE') {
+		return fail('healthcheck', 'Remove the first line (CMD, CMD-SHELL or NONE) and start with the command itself. Deploybot adds CMD.');
+	}
 	if (test.length > 32) return fail('healthcheck', 'A health check command accepts at most 32 arguments.');
 	const interval = integerIn(draft.healthInterval, 5, 300);
 	if (interval === undefined) return fail('healthcheck.interval_sec', 'Health check interval must be from 5 to 300 seconds.');

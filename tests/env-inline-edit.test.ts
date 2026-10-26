@@ -397,6 +397,18 @@ describe('env-set inline edit and Add variable dialog', () => {
 		const badKey = await projectActions.putEnvKey(fakeEvent({ ...base, url, form: { set: 'app', key: 'bad key', value: TYPED, op: 'add' } }).event as never);
 		assert.equal(isActionFailure(badKey) && (badKey.data as unknown as { message?: string }).message, 'That env set key is not valid.');
 	});
+
+	test('Add variable shows the API refusal of an empty secret value (api-v1 v1.18 item 2)', async () => {
+		const base = { session: TOKEN, user: USER, projects: [PROJECT], params: { id: PROJECT.id } };
+		const url = `http://console.example/projects/${PROJECT.id}?tab=settings&/putEnvKey`;
+		const calls = installFetch(() => envelope(null, 400, 'bad_request', 'a secret value cannot be empty; delete the key instead'));
+		const failed = await projectActions.putEnvKey(fakeEvent({ ...base, url, form: { set: 'app', key: 'API_TOKEN', value: '', op: 'add', is_secret: '1' } }).event as never);
+		assert.deepEqual(JSON.parse(calls[0]?.body ?? '{}'), { value: '', is_secret: true });
+		assert.equal(isActionFailure(failed), true);
+		if (!isActionFailure(failed)) return;
+		assert.equal(failed.status, 400);
+		assert.equal((failed.data as unknown as { message?: string }).message, 'a secret value cannot be empty; delete the key instead');
+	});
 });
 
 describe('env-set rows: icon-only Copy and Delete (v0.2.14 item 7)', () => {

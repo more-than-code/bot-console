@@ -117,6 +117,7 @@ test('the add-a-host guide shows the slug and both links, and starts open with n
 	const open = renderTokens(null, false);
 	assert.equal(detailsOpen(open), true);
 	assert.equal(open.match(/<li\b/g)?.length, 6);
+	assert.match(open, /<\/summary>\s*<p>Run the commands below on the host you are adding \(for example over ssh -t\)\.<\/p>\s*<ol\b/);
 	assert.equal(open.includes('projects = ["lab"]'), true);
 	assert.equal(open.includes('sudo ./install.sh check --runner'), true);
 	assert.equal(open.includes('sudo ./install.sh install --runner'), true);

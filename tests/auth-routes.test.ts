@@ -10,7 +10,6 @@ import { actions as signOutActions } from '../src/routes/signout/+page.server.ts
 import { actions as deviceActions, load as deviceLoad } from '../src/routes/device/+page.server.ts';
 import { load as projectsLoad } from '../src/routes/projects/+page.server.ts';
 import { actions as projectActions, load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
-import { checkDeadline } from '../src/lib/server/service-checks.ts';
 import { buttonVariants } from '../src/lib/components/ui/button/index.ts';
 import { cn } from '../src/lib/utils.ts';
 import { actions as hostActions } from '../src/routes/hosts/[id]/+page.server.ts';
@@ -268,7 +267,7 @@ describe('auth routes', { concurrency: false }, () => {
 		assert.equal(containsToken(created, JOIN), true);
 	});
 
-	test('a lower payload role hides admin fetches, and a not_found check does not crash the host page', async () => {
+	test('a lower payload role hides admin fetches, and a row without health checks does not crash the services page', async () => {
 		useApi('https://api.test');
 		const calls = installFetch((call) => {
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}`) return envelope({ ...PROJECT, role: 'viewer' });
@@ -321,7 +320,6 @@ describe('auth routes', { concurrency: false }, () => {
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/members`) return envelope({ items: [], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/join-tokens`) return envelope({ items: [], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}`) return envelope(PROJECT);
-			if (call.url.pathname === `/v1/services/${SERVICE_ID}`) return envelope(null, 404, 'not_found', 'Service was not found.');
 			return envelope(null, 500, 'error', 'unexpected');
 		});
 		const services = pageData(await projectLoad(
@@ -335,7 +333,7 @@ describe('auth routes', { concurrency: false }, () => {
 		));
 		assert.equal(services.project?.name, 'Lab');
 		assert.equal(services.services[0]?.name, 'api');
-		assert.equal(services.services[0]?.checksMessage, 'Service was not found.');
+		assert.equal(services.services[0]?.checksMessage, 'Health checks need API v1.18 or later.');
 		assert.equal(containsToken(services), false);
 	});
 
@@ -820,9 +818,9 @@ describe('auth routes', { concurrency: false }, () => {
 		assert.match(page, /data\.device\.status === 'pending'/);
 	});
 
-	test('project health checks cover at most 50 services', async () => {
+	test('the services load reads health checks with the list in one call (api-v1 v1.18)', async () => {
 		useApi('https://api.test');
-		const services = Array.from({ length: 51 }, (_, index) => ({
+		const row = (index: number, healthChecks: unknown) => ({
 			id: `00000000-0000-4000-8000-${(index + 1).toString(16).padStart(12, '0')}`,
 			host_id: HOST_ID,
 			name: `s${index}`,
@@ -835,8 +833,11 @@ describe('auth routes', { concurrency: false }, () => {
 			project_id: PROJECT.id,
 			host_name: 'pi1',
 			host_status: 'online',
-			project_name: 'Lab'
-		}));
+			project_name: 'Lab',
+			...(healthChecks === undefined ? {} : { health_checks: healthChecks })
+		});
+		const check = { id: CHECK_ID, protocol: 'http', port: 80, path: '/health', enabled: true };
+		const services = [row(0, [check]), row(1, []), row(2, [{ ...check, protocol: 'udp' }]), row(3, undefined), ...Array.from({ length: 51 }, (_, index) => row(index + 4, []))];
 		const calls = installFetch((call) => {
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/services`) {
 				return envelope({ items: services, next_cursor: null, prev_cursor: null, total: services.length });
@@ -845,7 +846,6 @@ describe('auth routes', { concurrency: false }, () => {
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/members`) return envelope({ items: [], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/join-tokens`) return envelope({ items: [], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}`) return envelope(PROJECT);
-			if (call.url.pathname.startsWith('/v1/services/')) return envelope({ health_checks: [] });
 			return envelope(null, 500, 'error', 'unexpected');
 		});
 		const page = pageData(await projectLoad(
@@ -857,132 +857,23 @@ describe('auth routes', { concurrency: false }, () => {
 				params: { id: PROJECT.id }
 			}).event as never
 		));
-		const details = calls.filter((call) => call.url.pathname.startsWith('/v1/services/'));
-		assert.equal(details.length, 50);
-		assert.equal(page.services.length, 51);
+		const lists = calls.filter((call) => call.url.pathname === `/v1/projects/${PROJECT.id}/services`);
+		assert.equal(lists.length, 1);
+		assert.equal(lists[0]?.url.searchParams.get('include'), 'health_checks');
+		assert.equal(calls.filter((call) => call.url.pathname.startsWith('/v1/services/')).length, 0);
+		assert.equal(page.services.length, 55);
+		assert.equal(page.servicesOmitted, 0);
+		assert.deepEqual(page.services[0]?.checks, [
+			{ id: CHECK_ID, protocol: 'http', port: 80, path: '/health', enabled: true, interval_sec: 60, expect_status_min: 200, expect_status_max: 399 }
+		]);
 		assert.equal(page.services[0]?.checksMessage, null);
-		assert.equal(page.services[50]?.checksMessage, 'checks not loaded');
-		assert.equal(page.services[50]?.name, 's50');
-	});
-
-	test('a project health check that misses the fan-out deadline shows the row message', { timeout: 2_000 }, async () => {
-		useApi('https://api.test');
-		const previousDeadline = checkDeadline.ms;
-		checkDeadline.ms = 0;
-		installFetch((call) => {
-			if (call.url.pathname === `/v1/projects/${PROJECT.id}/services`) {
-				return envelope({
-					items: [
-						{
-							id: SERVICE_ID,
-							host_id: HOST_ID,
-							name: 'api',
-							source: 'discovered',
-							kind: 'process',
-							ports: [],
-							health: null,
-							display_name: null,
-							owner_user: null,
-							project_id: PROJECT.id,
-							host_name: 'pi1',
-							host_status: 'online',
-							project_name: 'Lab'
-						}
-					],
-					next_cursor: null,
-					prev_cursor: null,
-					total: 1
-				});
-			}
-			if (call.url.pathname === `/v1/projects/${PROJECT.id}/hosts`) return envelope({ items: [], next_cursor: null });
-			if (call.url.pathname === `/v1/projects/${PROJECT.id}/members`) return envelope({ items: [], next_cursor: null });
-			if (call.url.pathname === `/v1/projects/${PROJECT.id}/join-tokens`) return envelope(null, 500, 'error', 'tokens down');
-			if (call.url.pathname === `/v1/projects/${PROJECT.id}`) return envelope(PROJECT);
-			if (call.url.pathname === `/v1/services/${SERVICE_ID}`) {
-				assert.equal(call.redirect, 'error');
-				assert.equal(call.signal?.aborted, true);
-				return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
-			}
-			return envelope(null, 500, 'error', 'unexpected');
-		});
-		try {
-			const page = pageData(await projectLoad(
-				fakeEvent({
-					url: `http://console.example/projects/${PROJECT.id}?tab=services`,
-					session: TOKEN,
-					user: USER,
-					projects: [PROJECT],
-					params: { id: PROJECT.id }
-				}).event as never
-			));
-			assert.equal(page.services[0]?.checksMessage, 'The API did not respond in time.');
-			assert.equal(page.servicesMessage, null);
-		} finally {
-			checkDeadline.ms = previousDeadline;
-		}
-	});
-
-	test('a positive fan-out deadline aborts a hanging detail read', { timeout: 2_000 }, async () => {
-		useApi('https://api.test');
-		const previousDeadline = checkDeadline.ms;
-		checkDeadline.ms = 20;
-		installFetch((call) => {
-			if (call.url.pathname === `/v1/projects/${PROJECT.id}/services`) {
-				return envelope({
-					items: [
-						{
-							id: SERVICE_ID,
-							host_id: HOST_ID,
-							name: 'api',
-							source: 'discovered',
-							kind: 'process',
-							ports: [],
-							health: null,
-							display_name: null,
-							owner_user: null,
-							project_id: PROJECT.id,
-							host_name: 'pi1',
-							host_status: 'online',
-							project_name: 'Lab'
-						}
-					],
-					next_cursor: null,
-					prev_cursor: null,
-					total: 1
-				});
-			}
-			if (call.url.pathname === `/v1/projects/${PROJECT.id}/hosts`) return envelope({ items: [], next_cursor: null });
-			if (call.url.pathname === `/v1/projects/${PROJECT.id}/members`) return envelope({ items: [], next_cursor: null });
-			if (call.url.pathname === `/v1/projects/${PROJECT.id}/join-tokens`) return envelope(null, 500, 'error', 'tokens down');
-			if (call.url.pathname === `/v1/projects/${PROJECT.id}`) return envelope(PROJECT);
-			if (call.url.pathname === `/v1/services/${SERVICE_ID}`) {
-				assert.equal(call.signal?.aborted, false);
-				return new Promise((_resolve, reject) => {
-					const signal = call.signal;
-					if (signal == null) {
-						reject(new Error('missing signal'));
-						return;
-					}
-					const abort = () => reject(new DOMException('The operation was aborted.', 'AbortError'));
-					signal.addEventListener('abort', abort, { once: true });
-				});
-			}
-			return envelope(null, 500, 'error', 'unexpected');
-		});
-		try {
-			const page = pageData(await projectLoad(
-				fakeEvent({
-					url: `http://console.example/projects/${PROJECT.id}?tab=services`,
-					session: TOKEN,
-					user: USER,
-					projects: [PROJECT],
-					params: { id: PROJECT.id }
-				}).event as never
-			));
-			assert.equal(page.services[0]?.checksMessage, 'The API did not respond in time.');
-			assert.equal(page.servicesMessage, null);
-		} finally {
-			checkDeadline.ms = previousDeadline;
-		}
+		assert.deepEqual(page.services[1]?.checks, []);
+		assert.equal(page.services[1]?.checksMessage, null);
+		assert.deepEqual(page.services[2]?.checks, []);
+		assert.equal(page.services[2]?.checksMessage, 'Health checks could not be read.');
+		assert.deepEqual(page.services[3]?.checks, []);
+		assert.equal(page.services[3]?.checksMessage, 'Health checks need API v1.18 or later.');
+		assert.equal(page.services[54]?.checksMessage, null);
+		assert.equal(page.services[54]?.name, 's54');
 	});
 });

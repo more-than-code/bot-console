@@ -161,7 +161,7 @@ test('flight helpers format elapsed time, the health budget, and the in-flight l
 	for (const [seconds, want] of elapsed) assert.equal(formatElapsed(seconds), want);
 
 	const check = (overrides: Partial<ImageHealthcheck>): ImageHealthcheck => ({
-		test: ['CMD', 'true'],
+		test: ['true'],
 		interval_sec: 30,
 		timeout_sec: 5,
 		retries: 3,
@@ -329,7 +329,7 @@ test('an in-flight run or deploy shows a spinner, a label, and a timer', () => {
 	assert.equal(deployingButton.includes('aria-busy="true"'), true);
 	assert.equal(isDisabled(openTag(deploying, '>pi1', 'button')), true);
 
-	const check: ImageHealthcheck = { test: ['CMD', 'true'], interval_sec: 30, timeout_sec: 5, retries: 3, start_period_sec: 0 };
+	const check: ImageHealthcheck = { test: ['true'], interval_sec: 30, timeout_sec: 5, retries: 3, start_period_sec: 0 };
 	const healthy = render(CatalogDeployForm, {
 		props: { ...props, entry: imageEntry(['deploy'], check), result: null, inFlight: 'deploy' as const }
 	}).body;

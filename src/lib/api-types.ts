@@ -164,7 +164,7 @@ export type ImageFileMount = {
 	target: string;
 };
 
-/** Docker CMD healthcheck. Null means the image default. Jobs never have one. */
+/** Docker CMD healthcheck. `test` is the command and its arguments without CMD; Deploybot adds it. Null means the image default. Jobs never have one. */
 export type ImageHealthcheck = {
 	test: string[];
 	interval_sec: number;
@@ -444,7 +444,7 @@ export type ServiceRow = ServiceSummary & {
 	checksMessage: string | null;
 };
 
-/** One row of `GET /v1/projects/{id}/services`, plus the checks the console loaded. */
+/** One row of `GET /v1/projects/{id}/services`. */
 export type ProjectService = ServiceSummary & {
 	host_id: string;
 	host_name: string;
@@ -452,6 +452,7 @@ export type ProjectService = ServiceSummary & {
 	project_name: string;
 };
 
+/** A project services row plus its health checks (api-v1 v1.18 `include=health_checks`) and why they are missing. */
 export type ProjectServiceRow = ProjectService & {
 	checks: HealthCheck[];
 	checksMessage: string | null;
