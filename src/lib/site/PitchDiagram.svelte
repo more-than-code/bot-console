@@ -1,0 +1,338 @@
+<!-- From docs/brand/pitch-diagram.svg and pitch-diagram-portrait.svg (umbrella): landscape from lg up, portrait below. Colours map to the console theme tokens, so dark mode follows the theme switch. -->
+<svg class="hidden h-auto w-full lg:block" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 936" role="img" aria-labelledby="pitch-title" aria-describedby="pitch-desc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <title id="pitch-title">How Deploybot lets AI agents run your servers</title>
+  <desc id="pitch-desc">People use the web console in a browser. Any MCP client, such as a coding agent, a chat app or your own script, connects to Deploybot over MCP, signed in as you. Deploybot acts with your project role, runs only what your catalog allows, and asks for a confirm step. Deploybot itself is hosted or self-hosted. Your servers run bot-agent, which dials out to Deploybot, so no ports are open. The agent never gets SSH keys or cloud tokens for the servers. Security: each host has its own allowlist of images and projects, secrets in env sets, files and registry logins are encrypted at rest, and changes are recorded in an audit log. Resilience: deploys wait for health, an unhealthy deploy rolls back to the previous container, one-step rollback to an earlier image digest, a health failure policy per service, and programs run as systemd units that survive reboot. Visibility: host metrics with history, processes and discovered services, health history per service, container logs with secrets redacted, and container logs capped at 10 MB times 3. Teams: owner, admin and viewer roles per project, invite links that expire and are single-use by default, per-entry rights to run, stop, restart or deploy, a host shared with other projects at metrics or deploy level, and one-time join tokens for adding hosts.</desc>
+  <!-- Icons: Lucide 1.23.0 (https://lucide.dev), ISC licence, Copyright (c) Lucide Contributors. -->
+  <defs>
+    <marker id="pitch-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" class="primary"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="960" height="936" rx="20"/>
+
+  <!-- People -->
+  <text class="muted" x="40" y="52" font-size="13" font-weight="600" letter-spacing="1.2">PEOPLE</text>
+  <rect class="card" x="40" y="64" width="200" height="52" rx="12" stroke-width="1.5"/>
+  <g class="line" transform="translate(58 72) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/></g>
+  <text class="ink" x="86" y="87" font-size="16" font-weight="600">Web console</text>
+  <text class="muted" x="86" y="105" font-size="12">in your browser</text>
+
+  <!-- AI agents -->
+  <text class="muted" x="40" y="148" font-size="13" font-weight="600" letter-spacing="1.2">AI AGENTS</text>
+  <rect class="card" x="40" y="160" width="200" height="148" rx="16" stroke-width="1.5"/>
+  <g class="line" transform="translate(58 176) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></g>
+  <text class="ink" x="86" y="192" font-size="16" font-weight="600">Any MCP client</text>
+  <g font-size="14">
+    <circle class="primary" cx="66" cy="221" r="3.5"/>
+    <text class="muted" x="80" y="226">coding agents</text>
+    <circle class="primary" cx="66" cy="249" r="3.5"/>
+    <text class="muted" x="80" y="254">chat apps</text>
+    <circle class="primary" cx="66" cy="277" r="3.5"/>
+    <text class="muted" x="80" y="282">your own scripts</text>
+  </g>
+
+  <!-- People and agents to Deploybot -->
+  <path class="line" d="M244 90 C300 90 300 136 348 136" stroke-width="2.5" marker-end="url(#pitch-arrow)"/>
+  <text class="muted" x="296" y="80" font-size="12" text-anchor="middle">sign in</text>
+  <path class="line" d="M244 234 C300 234 300 216 348 216" stroke-width="2.5" marker-end="url(#pitch-arrow)"/>
+  <text class="muted" x="296" y="254" font-size="12" text-anchor="middle">MCP, as you</text>
+
+  <!-- Deploybot -->
+  <rect class="card" x="352" y="40" width="256" height="252" rx="16" stroke-width="1.5"/>
+  <path class="primary" d="M352 56 a16 16 0 0 1 16 -16 h224 a16 16 0 0 1 16 16 v44 h-256 z"/>
+  <text class="on-primary" x="480" y="66" font-size="18" font-weight="700" text-anchor="middle">Deploybot</text>
+  <text class="on-primary" x="480" y="87" font-size="13" font-weight="500" text-anchor="middle">Hosted or self-hosted</text>
+  <g>
+    <rect class="soft" x="366" y="116" width="228" height="50" rx="10"/>
+    <g class="line" transform="translate(378 131) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></g>
+    <text class="ink" x="410" y="138" font-size="15" font-weight="600">1 · Acts as you</text>
+    <text class="muted" x="410" y="156" font-size="12">Your project role, no more</text>
+    <rect class="soft" x="366" y="174" width="228" height="50" rx="10"/>
+    <g class="line" transform="translate(378 189) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></g>
+    <text class="ink" x="410" y="196" font-size="15" font-weight="600">2 · Catalog only</text>
+    <text class="muted" x="410" y="214" font-size="12">Approved programs, images</text>
+    <rect class="soft" x="366" y="232" width="228" height="50" rx="10"/>
+    <g class="line" transform="translate(378 247) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></g>
+    <text class="ink" x="410" y="254" font-size="15" font-weight="600">3 · Confirm step</text>
+    <text class="muted" x="410" y="272" font-size="12">Plan first, then you confirm</text>
+  </g>
+
+  <!-- Servers -->
+  <text class="muted" x="720" y="52" font-size="13" font-weight="600" letter-spacing="1.2">YOUR SERVERS</text>
+  <g>
+    <rect class="card" x="720" y="64" width="200" height="44" rx="12" stroke-width="1.5"/>
+    <g class="line" transform="translate(734 76) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20v2"/><path d="M12 2v2"/><path d="M17 20v2"/><path d="M17 2v2"/><path d="M2 12h2"/><path d="M2 17h2"/><path d="M2 7h2"/><path d="M20 12h2"/><path d="M20 17h2"/><path d="M20 7h2"/><path d="M7 20v2"/><path d="M7 2v2"/><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="8" y="8" width="8" height="8" rx="1"/></g>
+    <text class="ink" x="764" y="84" font-size="15" font-weight="600">Raspberry Pi</text>
+    <text class="muted" x="764" y="100" font-size="12">home lab</text>
+    <rect class="card" x="720" y="114" width="200" height="44" rx="12" stroke-width="1.5"/>
+    <g class="line" transform="translate(734 126) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 16h.01"/><path d="M2.212 11.577a2 2 0 0 0-.212.896V18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.527a2 2 0 0 0-.212-.896L18.55 5.11A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><path d="M21.946 12.013H2.054"/><path d="M6 16h.01"/></g>
+    <text class="ink" x="764" y="134" font-size="15" font-weight="600">Mac mini</text>
+    <text class="muted" x="764" y="150" font-size="12">on your desk</text>
+    <rect class="card" x="720" y="164" width="200" height="44" rx="12" stroke-width="1.5"/>
+    <g class="line" transform="translate(734 176) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></g>
+    <text class="ink" x="764" y="184" font-size="15" font-weight="600">VPS</text>
+    <text class="muted" x="764" y="200" font-size="12">any provider</text>
+    <rect class="card" x="720" y="214" width="200" height="44" rx="12" stroke-width="1.5"/>
+    <g class="line" transform="translate(734 226) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></g>
+    <text class="ink" x="764" y="234" font-size="15" font-weight="600">Cloud VM</text>
+    <text class="muted" x="764" y="250" font-size="12">behind NAT is fine</text>
+  </g>
+
+  <text class="muted" x="720" y="276" font-size="12">Each runs bot-agent</text>
+
+  <!-- Servers dial out to Deploybot -->
+  <path class="line" d="M716 86 C668 86 660 160 614 160" stroke-width="2" marker-end="url(#pitch-arrow)"/>
+  <path class="line" d="M716 136 C668 136 660 164 614 164" stroke-width="2" marker-end="url(#pitch-arrow)"/>
+  <path class="line" d="M716 186 C668 186 660 168 614 168" stroke-width="2" marker-end="url(#pitch-arrow)"/>
+  <path class="line" d="M716 236 C668 236 660 172 614 172" stroke-width="2" marker-end="url(#pitch-arrow)"/>
+  <text class="muted" x="664" y="288" font-size="12" text-anchor="middle">Hosts dial out.</text>
+  <text class="muted" x="664" y="304" font-size="12" text-anchor="middle">No open ports.</text>
+
+  <!-- Blocked direct path -->
+  <path class="blocked" d="M140 312 C140 440 880 440 880 262" stroke-width="2" stroke-dasharray="7 6"/>
+  <circle class="bg" cx="510" cy="399" r="17"/>
+  <circle class="blocked" cx="510" cy="399" r="15" stroke-width="2.5"/>
+  <path class="blocked" d="M503 392 L517 406 M517 392 L503 406" stroke-width="2.5" stroke-linecap="round"/>
+  <text class="blocked-text" x="510" y="442" font-size="14" font-weight="600" text-anchor="middle">No SSH keys or cloud tokens for the agent</text>
+  <text class="muted" x="510" y="464" font-size="12" text-anchor="middle">Anything outside the catalog is refused</text>
+
+  <!-- Security -->
+  <rect class="card" x="40" y="496" width="430" height="196" rx="16" stroke-width="1.5"/>
+  <g class="line" transform="translate(64 514) scale(0.7500)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></g>
+  <text class="primary" x="90" y="528" font-size="13" font-weight="700" letter-spacing="1.2">SECURITY</text>
+  <text class="muted" x="64" y="550" font-size="12">Besides the three checks above:</text>
+  <g font-size="14">
+    <circle class="primary" cx="70" cy="578" r="3.5"/>
+    <text class="ink" x="84" y="582">Each host's own allowlist of images and projects</text>
+    <circle class="primary" cx="70" cy="610" r="3.5"/>
+    <text class="ink" x="84" y="614">Secrets encrypted at rest</text>
+    <text class="muted" x="84" y="632" font-size="12">env sets, files and registry logins</text>
+    <circle class="primary" cx="70" cy="660" r="3.5"/>
+    <text class="ink" x="84" y="664">Changes recorded in an audit log</text>
+  </g>
+
+  <!-- Resilience -->
+  <rect class="card" x="490" y="496" width="430" height="196" rx="16" stroke-width="1.5"/>
+  <g class="line" transform="translate(514 514) scale(0.7500)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></g>
+  <text class="primary" x="540" y="528" font-size="13" font-weight="700" letter-spacing="1.2">RESILIENCE</text>
+  <g font-size="14">
+    <circle class="primary" cx="520" cy="554" r="3.5"/>
+    <text class="ink" x="534" y="558">Deploys wait for health: Docker or HTTP/TCP checks</text>
+    <circle class="primary" cx="520" cy="582" r="3.5"/>
+    <text class="ink" x="534" y="586">An unhealthy deploy rolls back automatically</text>
+    <circle class="primary" cx="520" cy="610" r="3.5"/>
+    <text class="ink" x="534" y="614">One-step rollback to an earlier image digest</text>
+    <circle class="primary" cx="520" cy="638" r="3.5"/>
+    <text class="ink" x="534" y="642">A health failure policy per service</text>
+    <circle class="primary" cx="520" cy="666" r="3.5"/>
+    <text class="ink" x="534" y="670">Programs run as systemd units and survive reboot</text>
+  </g>
+
+  <!-- Visibility -->
+  <rect class="card" x="40" y="712" width="430" height="196" rx="16" stroke-width="1.5"/>
+  <g class="line" transform="translate(64 730) scale(0.7500)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></g>
+  <text class="primary" x="90" y="744" font-size="13" font-weight="700" letter-spacing="1.2">VISIBILITY</text>
+  <g font-size="14">
+    <circle class="primary" cx="70" cy="770" r="3.5"/>
+    <text class="ink" x="84" y="774">Host metrics with history</text>
+    <circle class="primary" cx="70" cy="798" r="3.5"/>
+    <text class="ink" x="84" y="802">Running processes and discovered services</text>
+    <circle class="primary" cx="70" cy="826" r="3.5"/>
+    <text class="ink" x="84" y="830">Health check history for each service</text>
+    <circle class="primary" cx="70" cy="854" r="3.5"/>
+    <text class="ink" x="84" y="858">Container logs with secrets redacted</text>
+    <circle class="primary" cx="70" cy="882" r="3.5"/>
+    <text class="ink" x="84" y="886">Container logs capped at 10 MB × 3</text>
+  </g>
+
+  <!-- Teams -->
+  <rect class="card" x="490" y="712" width="430" height="196" rx="16" stroke-width="1.5"/>
+  <g class="line" transform="translate(514 730) scale(0.7500)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></g>
+  <text class="primary" x="540" y="744" font-size="13" font-weight="700" letter-spacing="1.2">TEAMS</text>
+  <g font-size="14">
+    <circle class="primary" cx="520" cy="770" r="3.5"/>
+    <text class="ink" x="534" y="774">Owner, admin and viewer roles per project</text>
+    <circle class="primary" cx="520" cy="798" r="3.5"/>
+    <text class="ink" x="534" y="802">Invite links that expire (single-use by default)</text>
+    <circle class="primary" cx="520" cy="826" r="3.5"/>
+    <text class="ink" x="534" y="830">Per-entry rights to run, stop, restart or deploy</text>
+    <circle class="primary" cx="520" cy="854" r="3.5"/>
+    <text class="ink" x="534" y="858">Share a host with other projects (metrics or deploy)</text>
+    <circle class="primary" cx="520" cy="882" r="3.5"/>
+    <text class="ink" x="534" y="886">One-time join tokens for adding hosts (admins)</text>
+  </g>
+</svg>
+<svg class="mx-auto block h-auto w-full max-w-[480px] lg:hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 1416" role="img" aria-labelledby="pitch-portrait-title" aria-describedby="pitch-portrait-desc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <title id="pitch-portrait-title">How Deploybot lets AI agents run your servers</title>
+  <desc id="pitch-portrait-desc">People use the web console in a browser. Any MCP client, such as a coding agent, a chat app or your own script, connects to Deploybot over MCP, signed in as you. Deploybot acts with your project role, runs only what your catalog allows, and asks for a confirm step. Deploybot itself is hosted or self-hosted. Your servers run bot-agent, which dials out to Deploybot, so no ports are open. The agent never gets SSH keys or cloud tokens for the servers. Security: each host has its own allowlist of images and projects, secrets in env sets, files and registry logins are encrypted at rest, and changes are recorded in an audit log. Resilience: deploys wait for health, an unhealthy deploy rolls back to the previous container, one-step rollback to an earlier image digest, a health failure policy per service, and programs run as systemd units that survive reboot. Visibility: host metrics with history, processes and discovered services, health history per service, container logs with secrets redacted, and container logs capped at 10 MB times 3. Teams: owner, admin and viewer roles per project, invite links that expire and are single-use by default, per-entry rights to run, stop, restart or deploy, a host shared with other projects at metrics or deploy level, and one-time join tokens for adding hosts.</desc>
+  <!-- Icons: Lucide 1.23.0 (https://lucide.dev), ISC licence, Copyright (c) Lucide Contributors. -->
+  <defs>
+    <marker id="pitch-portrait-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" class="primary"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="380" height="1416" rx="20"/>
+
+  <!-- People and AI agents, side by side -->
+  <text class="muted" x="20" y="32" font-size="12" font-weight="600" letter-spacing="1.1">PEOPLE</text>
+  <rect class="card" x="20" y="42" width="156" height="128" rx="12" stroke-width="1.5"/>
+  <g class="line" transform="translate(36 56) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/></g>
+  <text class="ink" x="36" y="96" font-size="15" font-weight="600">Web console</text>
+  <text class="muted" x="36" y="116" font-size="12">in your browser</text>
+
+  <text class="muted" x="196" y="32" font-size="12" font-weight="600" letter-spacing="1.1">AI AGENTS</text>
+  <rect class="card" x="196" y="42" width="156" height="128" rx="12" stroke-width="1.5"/>
+  <g class="line" transform="translate(212 56) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></g>
+  <text class="ink" x="212" y="96" font-size="15" font-weight="600">Any MCP client</text>
+  <g font-size="13">
+    <text class="muted" x="212" y="118">coding agents,</text>
+    <text class="muted" x="212" y="136">chat apps,</text>
+    <text class="muted" x="212" y="154">your own scripts</text>
+  </g>
+
+  <g transform="translate(0 24)">
+  <path class="line" d="M98 150 V196" stroke-width="2.5" marker-end="url(#pitch-portrait-arrow)"/>
+  <text class="muted" x="106" y="178" font-size="12">sign in</text>
+  <path class="line" d="M274 150 V196" stroke-width="2.5" marker-end="url(#pitch-portrait-arrow)"/>
+  <text class="muted" x="266" y="178" font-size="12" text-anchor="end">MCP, as you</text>
+
+  <!-- Deploybot -->
+  <rect class="card" x="20" y="200" width="332" height="240" rx="16" stroke-width="1.5"/>
+  <path class="primary" d="M20 216 a16 16 0 0 1 16 -16 h300 a16 16 0 0 1 16 16 v44 h-332 z"/>
+  <text class="on-primary" x="186" y="226" font-size="18" font-weight="700" text-anchor="middle">Deploybot</text>
+  <text class="on-primary" x="186" y="247" font-size="13" font-weight="500" text-anchor="middle">Hosted or self-hosted</text>
+  <g>
+    <rect class="soft" x="36" y="274" width="300" height="48" rx="10"/>
+    <g class="line" transform="translate(48 288) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></g>
+    <text class="ink" x="78" y="295" font-size="15" font-weight="600">1 · Acts as you</text>
+    <text class="muted" x="78" y="312" font-size="13">Your project role, no more</text>
+    <rect class="soft" x="36" y="330" width="300" height="48" rx="10"/>
+    <g class="line" transform="translate(48 344) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></g>
+    <text class="ink" x="78" y="351" font-size="15" font-weight="600">2 · Catalog only</text>
+    <text class="muted" x="78" y="368" font-size="13">Approved programs and images</text>
+    <rect class="soft" x="36" y="386" width="300" height="48" rx="10"/>
+    <g class="line" transform="translate(48 400) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></g>
+    <text class="ink" x="78" y="407" font-size="15" font-weight="600">3 · Confirm step</text>
+    <text class="muted" x="78" y="424" font-size="13">Plan first, then you confirm</text>
+  </g>
+
+  <g transform="translate(0 16)">
+  <!-- Servers dial out, upward -->
+  <path class="line" d="M186 472 V430" stroke-width="2.5" marker-end="url(#pitch-portrait-arrow)"/>
+  <text class="muted" x="176" y="446" font-size="12" text-anchor="end">Hosts dial out.</text>
+  <text class="muted" x="176" y="462" font-size="12" text-anchor="end">No open ports.</text>
+
+  <text class="muted" x="20" y="496" font-size="12" font-weight="600" letter-spacing="1.1">YOUR SERVERS</text>
+  <text class="muted" x="352" y="496" font-size="12" text-anchor="end">each runs bot-agent</text>
+  <g>
+    <rect class="card" x="20" y="506" width="161" height="44" rx="12" stroke-width="1.5"/>
+    <g class="line" transform="translate(32 518) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20v2"/><path d="M12 2v2"/><path d="M17 20v2"/><path d="M17 2v2"/><path d="M2 12h2"/><path d="M2 17h2"/><path d="M2 7h2"/><path d="M20 12h2"/><path d="M20 17h2"/><path d="M20 7h2"/><path d="M7 20v2"/><path d="M7 2v2"/><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="8" y="8" width="8" height="8" rx="1"/></g>
+    <text class="ink" x="60" y="533" font-size="14" font-weight="600">Raspberry Pi</text>
+    <rect class="card" x="191" y="506" width="161" height="44" rx="12" stroke-width="1.5"/>
+    <g class="line" transform="translate(203 518) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 16h.01"/><path d="M2.212 11.577a2 2 0 0 0-.212.896V18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.527a2 2 0 0 0-.212-.896L18.55 5.11A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><path d="M21.946 12.013H2.054"/><path d="M6 16h.01"/></g>
+    <text class="ink" x="231" y="533" font-size="14" font-weight="600">Mac mini</text>
+    <rect class="card" x="20" y="558" width="161" height="44" rx="12" stroke-width="1.5"/>
+    <g class="line" transform="translate(32 570) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></g>
+    <text class="ink" x="60" y="585" font-size="14" font-weight="600">VPS</text>
+    <rect class="card" x="191" y="558" width="161" height="44" rx="12" stroke-width="1.5"/>
+    <g class="line" transform="translate(203 570) scale(0.8333)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></g>
+    <text class="ink" x="231" y="585" font-size="14" font-weight="600">Cloud VM</text>
+  </g>
+
+  <g transform="translate(0 40)">
+  <!-- Blocked direct path, down the right edge -->
+  <text class="blocked-text" x="186" y="592" font-size="14" font-weight="600" text-anchor="middle">No SSH keys or cloud tokens for the agent</text>
+  <text class="muted" x="186" y="614" font-size="13" text-anchor="middle">Anything outside the catalog is refused</text>
+
+  </g>
+  </g>
+  </g>
+
+  <path class="blocked" d="M352 106 H368 V620 H356 M368 568 H356" stroke-width="2" stroke-dasharray="7 6"/>
+  <circle class="bg" cx="368" cy="363" r="11"/>
+  <circle class="blocked" cx="368" cy="363" r="9" stroke-width="2"/>
+  <path class="blocked" d="M364 359 L372 367 M372 359 L364 367" stroke-width="2" stroke-linecap="round"/>
+
+  <g transform="translate(0 56)">
+  <!-- Security -->
+  <rect class="card" x="20" y="660" width="332" height="140" rx="16" stroke-width="1.5"/>
+  <g class="line" transform="translate(38 676) scale(0.6667)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></g>
+  <text class="primary" x="60" y="688" font-size="12" font-weight="700" letter-spacing="1.1">SECURITY</text>
+  <text class="muted" x="38" y="708" font-size="12">Besides the three checks above:</text>
+  <g font-size="13">
+    <circle class="primary" cx="43" cy="731" r="3"/>
+    <text class="ink" x="55" y="736">Each host's own allowlist</text>
+    <circle class="primary" cx="43" cy="755" r="3"/>
+    <text class="ink" x="55" y="760">Secrets encrypted at rest</text>
+    <circle class="primary" cx="43" cy="779" r="3"/>
+    <text class="ink" x="55" y="784">Changes recorded in an audit log</text>
+  </g>
+
+  <!-- Resilience -->
+  <rect class="card" x="20" y="816" width="332" height="164" rx="16" stroke-width="1.5"/>
+  <g class="line" transform="translate(38 832) scale(0.6667)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></g>
+  <text class="primary" x="60" y="844" font-size="12" font-weight="700" letter-spacing="1.1">RESILIENCE</text>
+  <g font-size="13">
+    <circle class="primary" cx="43" cy="867" r="3"/>
+    <text class="ink" x="55" y="872">Deploys wait for health checks</text>
+    <circle class="primary" cx="43" cy="891" r="3"/>
+    <text class="ink" x="55" y="896">An unhealthy deploy rolls back</text>
+    <circle class="primary" cx="43" cy="915" r="3"/>
+    <text class="ink" x="55" y="920">One-step rollback to an earlier digest</text>
+    <circle class="primary" cx="43" cy="939" r="3"/>
+    <text class="ink" x="55" y="944">A health failure policy per service</text>
+    <circle class="primary" cx="43" cy="963" r="3"/>
+    <text class="ink" x="55" y="968">Programs survive reboot (systemd)</text>
+  </g>
+
+  <!-- Visibility -->
+  <rect class="card" x="20" y="996" width="332" height="164" rx="16" stroke-width="1.5"/>
+  <g class="line" transform="translate(38 1016) scale(0.6667)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></g>
+  <text class="primary" x="60" y="1028" font-size="12" font-weight="700" letter-spacing="1.1">VISIBILITY</text>
+  <g font-size="13">
+    <circle class="primary" cx="43" cy="1052" r="3"/>
+    <text class="ink" x="55" y="1056">Host metrics with history</text>
+    <circle class="primary" cx="43" cy="1076" r="3"/>
+    <text class="ink" x="55" y="1080">Processes and discovered services</text>
+    <circle class="primary" cx="43" cy="1100" r="3"/>
+    <text class="ink" x="55" y="1104">Health history per service</text>
+    <circle class="primary" cx="43" cy="1124" r="3"/>
+    <text class="ink" x="55" y="1128">Logs with secrets redacted</text>
+    <circle class="primary" cx="43" cy="1148" r="3"/>
+    <text class="ink" x="55" y="1152">Logs capped at 10 MB × 3</text>
+  </g>
+
+  <!-- Teams -->
+  <rect class="card" x="20" y="1176" width="332" height="164" rx="16" stroke-width="1.5"/>
+  <g class="line" transform="translate(38 1196) scale(0.6667)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></g>
+  <text class="primary" x="60" y="1208" font-size="12" font-weight="700" letter-spacing="1.1">TEAMS</text>
+  <g font-size="13">
+    <circle class="primary" cx="43" cy="1232" r="3"/>
+    <text class="ink" x="55" y="1236">Owner, admin and viewer roles</text>
+    <circle class="primary" cx="43" cy="1258" r="3"/>
+    <text class="ink" x="55" y="1262">Invite links that expire</text>
+    <circle class="primary" cx="43" cy="1282" r="3"/>
+    <text class="ink" x="55" y="1286">Run, stop, restart, deploy rights</text>
+    <circle class="primary" cx="43" cy="1306" r="3"/>
+    <text class="ink" x="55" y="1310">Share a host with other projects</text>
+    <circle class="primary" cx="43" cy="1330" r="3"/>
+    <text class="ink" x="55" y="1334">One-time join tokens for hosts</text>
+  </g>
+  </g>
+</svg>
+
+<style>
+	svg { font-family: inherit; }
+	.bg { fill: var(--card); }
+	.card { fill: var(--background); stroke: var(--border); }
+	.ink { fill: var(--foreground); }
+	.muted { fill: var(--muted-foreground); }
+	.primary { fill: var(--primary); }
+	.on-primary { fill: var(--primary-foreground); }
+	.soft { fill: var(--muted); }
+	.line { stroke: var(--primary); fill: none; }
+	.blocked { stroke: var(--destructive); fill: none; }
+	.blocked-text { fill: var(--destructive); }
+</style>

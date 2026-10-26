@@ -300,16 +300,50 @@ describe('public site pages', () => {
 		assert.equal(title(render(TermsPage).head), 'Terms of Service · Deploybot');
 	});
 
-	test('the About hero carries the pitch; the old summary leads How it works', () => {
-		// Joe 2026-10-26: the pitch is the hero subtitle on deploybot.dev.
+	test('the About hero carries the pitch; How it works has the short summary and no feature cards', () => {
+		// Joe 2026-10-26: the pitch is the hero subtitle on deploybot.dev, naming agents generically.
 		const PITCH =
-			'Let Claude, Codex or Grok run your own servers, without handing them SSH or a cloud token. They can only deploy what your catalog allows, as you, after a confirm step.';
+			'Let any AI agent that speaks MCP run your own servers, without handing it SSH keys or a cloud token. It can only deploy what your catalog allows, as you, after a confirm step.';
 		const body = render(AboutPage).body.replace(/<!--[^]*?-->/g, '').replace(/\s+/g, ' ');
-		const hero = body.slice(body.indexOf('id="hero-title"'), body.indexOf('aria-labelledby="features-title"'));
+		const hero = body.slice(body.indexOf('id="hero-title"'), body.indexOf('aria-labelledby="how-title"'));
 		assert.ok(hero.includes(PITCH), 'pitch in the hero');
 		const how = body.slice(body.indexOf('id="how-title"'));
-		assert.ok(how.includes('Catalog, deploy and watch services on your own hosts through a small agent.'));
-		assert.equal(hero.includes('through a small agent'), false);
+		assert.ok(how.includes('Three steps from a new host to a running service.'));
+		// Joe 2026-10-26: the feature cards repeated the diagram and were removed.
+		assert.equal(body.includes('features-title'), false);
+	});
+
+	test('the pitch diagrams (landscape and portrait) sit in the About hero with accessible names and generic agents', () => {
+		// Joe 2026-10-26: docs/brand/pitch-diagram.svg under the About hero.
+		const body = render(AboutPage).body.replace(/<!--[^]*?-->/g, '');
+		const hero = body.slice(body.indexOf('id="hero-title"'), body.indexOf('aria-labelledby="how-title"'));
+		assert.match(hero, /<svg[^>]*role="img"[^>]*aria-labelledby="pitch-title" aria-describedby="pitch-desc"/);
+		assert.match(hero, /<svg[^>]*role="img"[^>]*aria-labelledby="pitch-portrait-title" aria-describedby="pitch-portrait-desc"/);
+		for (const id of ['pitch-title', 'pitch-portrait-title']) {
+			assert.ok(hero.includes(`<title id="${id}">How Deploybot lets AI agents run your servers</title>`), id);
+		}
+		assert.ok(hero.includes('id="pitch-desc"') && hero.includes('id="pitch-portrait-desc"'));
+		for (const word of ['Claude', 'Codex', 'Grok']) assert.equal(hero.includes(word), false, `no ${word} in the hero`);
+		// Joe 2026-10-26: an icon per box and panel (13 in each diagram, with the Mac mini), and no duplicated dial-out line in Security.
+		assert.equal(hero.match(/<g class="line[^"]*" transform="translate\(/g)?.length, 26);
+		assert.equal(hero.match(/hosted or self-hosted/gi)?.length, 4, 'subtitle in both diagrams and both descs');
+		assert.equal(hero.includes('Hosts dial out, so no open ports'), false);
+		assert.equal(body.includes('prefers-color-scheme'), false, 'dark mode follows the theme switch, not the OS');
+	});
+
+	test('the About page ends with Open source: four repos on dev, SPDX licences, self-hosting needs', () => {
+		// Joe 2026-10-26: an Open source section below How it works, no versions or production details.
+		const body = render(AboutPage).body.replace(/<!--[^]*?-->/g, '').replace(/\s+/g, ' ');
+		assert.ok(body.indexOf('id="source-title"') > body.indexOf('id="how-title"'), 'after How it works');
+		const source = body.slice(body.indexOf('id="source-title"'));
+		for (const repo of ['bot-agent', 'bot-api-server', 'bot-mcp-server', 'bot-console']) {
+			assert.ok(source.includes(`href="https://github.com/more-than-code/${repo}/tree/dev"`), repo);
+		}
+		assert.equal(source.match(/AGPL-3\.0-only/g)?.length, 3);
+		assert.ok(source.includes('Apache-2.0'));
+		assert.ok(source.includes('PostgreSQL 18 with TimescaleDB, a Google OAuth client, a TLS reverse proxy'));
+		assert.ok(source.includes('secrets key file'));
+		assert.doesNotMatch(source, /\bv\d+\.\d+|us1|caddy/i);
 	});
 
 	test('each page has one h1 and the legal pages carry LAST_UPDATED', () => {
