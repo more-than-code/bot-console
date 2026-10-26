@@ -222,6 +222,8 @@ export const SERVICE_COLUMNS: Column<ProjectServiceRow>[] = [
 	{ key: 'kind', label: 'Kind', sortable: true, value: (row) => row.kind },
 	{ key: 'ports', label: 'Ports', value: (row) => smallestPort(row.ports) },
 	{ key: 'status', label: 'Status', sortable: true, value: (row) => row.health?.status ?? 'unknown' },
+	// Next to the state it acts on, so it stays in view when the table scrolls sideways.
+	{ key: 'actions', label: 'Actions', srLabel: true, hideBelowSm: true },
 	{ key: 'last_seen', label: 'Last seen', sortable: true, firstDir: 'desc', value: (row) => row.last_seen_at },
 	{ key: 'checks', label: 'Checks' }
 ];

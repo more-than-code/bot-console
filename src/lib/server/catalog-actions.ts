@@ -237,12 +237,22 @@ function readGrants(form: FormData, members: Member[]): { grants: CatalogGrant[]
 	return { grants, message };
 }
 
-function runResult(name: string, kind: CatalogRunKind, status: CatalogRunState['status'], logs: CatalogRunState['logs'], message: string | null): CatalogRunState {
-	return { name, kind, resultId: randomUUID(), status, logs, message };
+/** Where a result goes: the entry, its host, and the Services row (null for a not-running item). */
+type RunTarget = { name: string; hostId: string; serviceId: string | null };
+
+function runResult(
+	target: RunTarget,
+	kind: CatalogRunKind,
+	status: CatalogRunState['status'],
+	logs: CatalogRunState['logs'],
+	message: string | null
+): CatalogRunState {
+	return { ...target, kind, resultId: randomUUID(), status, logs, message };
 }
 
-function runFailure(event: RequestEvent, status: number, name: string, kind: CatalogRunKind, message: string) {
-	return fail(status, present(event, { scope: 'catalog' as const, catalogAction: runResult(name, kind, null, null, message) }));
+/** Run, stop, restart and logs are posted from a Services row, so the result goes back there. */
+function runFailure(event: RequestEvent, status: number, target: RunTarget, kind: CatalogRunKind, message: string) {
+	return fail(status, present(event, { scope: 'services' as const, catalogAction: runResult(target, kind, null, null, message) }));
 }
 
 async function saveEntry(event: RequestEvent, mode: 'create' | 'edit') {
@@ -276,14 +286,19 @@ async function catalogAct(event: RequestEvent, kind: CatalogRunKind) {
 	const form = await event.request.formData();
 	const name = formText(form, 'name');
 	const hostId = formText(form, 'host_id');
-	const shown = isCatalogName(name) ? name : '';
-	if (!isCatalogName(name)) return runFailure(event, 400, shown, kind, 'That catalog entry is not valid.');
-	if (!isUuid(hostId)) return runFailure(event, 400, shown, kind, 'Choose a host.');
+	const serviceId = formText(form, 'service_id');
+	const target: RunTarget = {
+		name: isCatalogName(name) ? name : '',
+		hostId: isUuid(hostId) ? hostId : '',
+		serviceId: isUuid(serviceId) ? serviceId : null
+	};
+	if (!isCatalogName(name)) return runFailure(event, 400, target, kind, 'That catalog entry is not valid.');
+	if (!isUuid(hostId)) return runFailure(event, 400, target, kind, 'Choose a host.');
 	const image = formText(form, 'entry_kind') === 'image';
 	const body: { host_id: string; idempotency_key?: string } = { host_id: hostId };
-	if (kind !== 'logs' && kind !== 'status') {
+	if (kind !== 'logs') {
 		const key = formText(form, 'idempotency_key');
-		if (!isIdempotencyKey(key)) return runFailure(event, 400, shown, kind, 'The idempotency key is not valid.');
+		if (!isIdempotencyKey(key)) return runFailure(event, 400, target, kind, 'The idempotency key is not valid.');
 		body.idempotency_key = key;
 	}
 	try {
@@ -293,15 +308,15 @@ async function catalogAct(event: RequestEvent, kind: CatalogRunKind) {
 		});
 		if (kind === 'logs') {
 			const logs = image ? parseImageLogs(payload) : parseProgramLogs(payload);
-			if (!logs) return runFailure(event, 502, shown, kind, UNEXPECTED);
-			return present(event, { scope: 'catalog' as const, catalogAction: runResult(shown, kind, null, logs, null) });
+			if (!logs) return runFailure(event, 502, target, kind, UNEXPECTED);
+			return present(event, { scope: 'services' as const, catalogAction: runResult(target, kind, null, logs, null) });
 		}
 		const status = image ? parseImageStatus(payload) : parseProgramStatus(payload);
-		if (!status) return runFailure(event, 502, shown, kind, UNEXPECTED);
-		return present(event, { scope: 'catalog' as const, catalogAction: runResult(shown, kind, status, null, null) });
+		if (!status) return runFailure(event, 502, target, kind, UNEXPECTED);
+		return present(event, { scope: 'services' as const, catalogAction: runResult(target, kind, status, null, null) });
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
-		return runFailure(event, apiStatus(err), shown, kind, apiMessage(err));
+		return runFailure(event, apiStatus(err), target, kind, apiMessage(err));
 	}
 }
 
@@ -369,10 +384,6 @@ export async function catalogRestart(event: RequestEvent) {
 
 export async function catalogLogs(event: RequestEvent) {
 	return catalogAct(event, 'logs');
-}
-
-export async function catalogStatus(event: RequestEvent) {
-	return catalogAct(event, 'status');
 }
 
 export async function catalogPermissions(event: RequestEvent) {

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { updateInPlace } from '$lib/form-redirect';
 	import { tick } from 'svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
@@ -62,7 +63,7 @@
 			void showError();
 			return;
 		}
-		return async ({ update, result }: { update: () => Promise<void>; result: { type: string; data?: unknown } }) => {
+		return async ({ update, result }: { update: () => Promise<void>; result: { type: string; data?: unknown; location?: string } }) => {
 			await settleAdd(open, result.type, {
 				added: () => {
 					onAdded(key);
@@ -78,7 +79,7 @@
 					draft = addFailed(draft, failureMessage(result));
 					await showError();
 				},
-				update,
+				update: () => updateInPlace(result, update),
 				tick,
 				focusStatus: () => focusById(id('status'))
 			});

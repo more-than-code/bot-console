@@ -3,6 +3,7 @@
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import { tick, untrack } from 'svelte';
+	import { MediaQuery } from 'svelte/reactivity';
 	import Activity from '@lucide/svelte/icons/activity';
 	import Fingerprint from '@lucide/svelte/icons/fingerprint';
 	import RowAction from '$lib/components/RowAction.svelte';
@@ -43,8 +44,22 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import * as Select from '$lib/components/ui/select';
+	import type { CatalogRunState } from '$lib/project-action';
+	import type { ServiceRuntime } from '$lib/api-types';
+	import {
+		CHECKING_NOTE,
+		ownerEntry,
+		runtimeDetail,
+		serviceControls,
+		UNKNOWN_RUNTIME,
+		type NotRunningPair,
+		type ServiceControls,
+		type ServiceEntryRef
+	} from '$lib/service-actions';
 	import HealthChecks from './HealthChecks.svelte';
 	import RenameService from './RenameService.svelte';
+	import RuntimeBadge from './RuntimeBadge.svelte';
+	import ServiceRowActions from './ServiceRowActions.svelte';
 
 	let {
 		projectId,
@@ -70,7 +85,14 @@
 		probeIndex = null,
 		probeMessage = null,
 		onHealthSaved,
-		onHealthOpen
+		onHealthOpen,
+		entries = [],
+		entriesMessage = null,
+		notRunning = [],
+		notRunningKnown = true,
+		serviceStates = null,
+		runResult = null,
+		layout = 'auto'
 	}: {
 		projectId: string;
 		projectName: string;
@@ -96,8 +118,23 @@
 		probeMessage?: string | null;
 		onHealthSaved?: (serviceId: string | null) => void;
 		onHealthOpen?: () => void;
+		/** This project's catalog entries the caller has a grant on. */
+		entries?: ServiceEntryRef[];
+		entriesMessage?: string | null;
+		/** Programs that never ran on a host that can run them. */
+		notRunning?: NotRunningPair[];
+		notRunningKnown?: boolean;
+		/** Streamed container states by service id (see the load). Rows without one show "checking…". */
+		serviceStates?: Promise<Record<string, ServiceRuntime>> | Record<string, ServiceRuntime> | null;
+		/** The last catalog action posted from this tab. */
+		runResult?: CatalogRunState | null;
+		/** Where row actions go. `auto` follows the `sm` breakpoint; tests pin one. */
+		layout?: 'auto' | 'wide' | 'narrow';
 	} = $props();
 
+	// Tailwind `sm`. The server renders the wide layout.
+	const wideQuery = new MediaQuery('min-width: 40rem', true);
+	const wide = $derived({ current: layout === 'auto' ? wideQuery.current : layout === 'wide' });
 	const showProject = $derived(showProjectColumn(projectName, rows));
 	const columns = $derived(serviceColumns(showProject));
 	const serviceHosts = $derived(hosts.filter((host) => serviceHostReachable(host)));
@@ -107,6 +144,30 @@
 	);
 	const selectedHost = $derived(page.url.searchParams.get('services.host'));
 	const hostChosen = $derived(serviceHosts.some((host) => host.id === selectedHost));
+	const searching = $derived(readSearch(page.url.searchParams.get('services.q')) !== '');
+	// A search narrows the table only; the not-running list would not match it, so it is hidden then.
+	const shownNotRunning = $derived(
+		searching ? [] : hostChosen ? notRunning.filter((pair) => pair.host.id === selectedHost) : notRunning
+	);
+
+	/** Last resolved states. A reload keeps them until the new read answers, so open dialogs stay put. */
+	let states = $state<Record<string, ServiceRuntime> | null>(null);
+
+	$effect(() => {
+		const source = serviceStates;
+		let live = true;
+		Promise.resolve(source ?? {}).then(
+			(value) => {
+				if (live) states = value;
+			},
+			() => {
+				if (live) states = {};
+			}
+		);
+		return () => {
+			live = false;
+		};
+	});
 	const showFromUrl = $derived(serviceShow(page.url.searchParams.get('show')));
 	const probed = $derived(rows.find((row) => row.id === probeServiceId) ?? null);
 	let hostValue = $state(untrack(() => (hostChosen && selectedHost ? selectedHost : 'all')));
@@ -138,6 +199,20 @@
 	async function applyFilters() {
 		await tick();
 		filterForm?.requestSubmit();
+	}
+
+	/** The row's state: from the row, or the streamed read once it answers. Null while still reading. */
+	function runtimeOf(row: ProjectServiceRow): ServiceRuntime | null {
+		return row.runtime ?? states?.[row.id] ?? (states == null ? null : UNKNOWN_RUNTIME);
+	}
+
+	/** Null: no actions (not this project's catalog copy). 'checking': its container state is still being read. */
+	function controlsFor(row: ProjectServiceRow): ServiceControls | 'checking' | null {
+		const entry = ownerEntry(row, projectId, entries);
+		if (entry == null) return null;
+		const runtime = runtimeOf(row);
+		if (runtime == null) return 'checking';
+		return serviceControls(entry, row.host_status, runtime);
 	}
 
 	function ports(values: number[]): string {
@@ -278,6 +353,7 @@
 		{@const label = serviceLabel(service)}
 		{@const digest = imageDigestText(service.image_digest)}
 		{@const digestFailure = digestFailures[service.id]}
+		{@const controls = controlsFor(service)}
 		<tr id={serviceDomId(service.id)}>
 			<td class="p-2 align-middle">
 				<div class="flex min-w-0 items-center gap-2">
@@ -326,6 +402,12 @@
 						{/if}
 					</span>
 				</div>
+				{#if controls && !wide.current}
+					<!-- Below sm the Actions column is hidden and the same icons sit under the name (one copy, so one dialog). -->
+					<div class="mt-1 sm:hidden">
+						{@render rowActions(service, controls)}
+					</div>
+				{/if}
 				{#if digestFailure}
 					<div class="mt-1 grid gap-1">
 						<p class="font-mono text-sm break-all select-text">{digestFailure.value}</p>
@@ -344,8 +426,24 @@
 			{/if}
 			<td class="p-2 align-middle">{serviceKindLabel(service.kind)}</td>
 			<td class="p-2 align-middle font-mono">{ports(service.ports)}</td>
-			<td class="p-2 align-middle"><StatusBadge status={serviceRowStatus(service)} hint={healthSourceLabel(service)} /></td>
-			<td class="p-2 align-middle whitespace-nowrap"><LocalTime iso={service.last_seen_at} /></td>
+			<td class="p-2 align-middle">
+				{#if controls && controls !== 'checking'}
+					<RuntimeBadge
+						status={serviceRowStatus(service)}
+						detail={runtimeDetail(runtimeOf(service) ?? UNKNOWN_RUNTIME, service.host_status) ?? ''}
+						hint={healthSourceLabel(service)}
+					/>
+				{:else}
+					<StatusBadge status={serviceRowStatus(service)} hint={healthSourceLabel(service)} />
+				{/if}
+			</td>
+			<td class="w-px p-2 align-middle whitespace-nowrap max-sm:hidden">
+				{#if controls && wide.current}
+					{@render rowActions(service, controls)}
+				{/if}
+			</td>
+			<!-- Last seen may wrap (date, then time), so the table fits at 1280 px. -->
+			<td class="p-2 align-middle"><LocalTime iso={service.last_seen_at} /></td>
 			<td class="p-2 align-middle">
 				{#if showsDockerHealthcheck(service)}
 					<p class="text-muted-foreground text-sm">docker healthcheck</p>
@@ -372,3 +470,37 @@
 		</tr>
 	{/snippet}
 </DataTable>
+{#snippet rowActions(service: ProjectServiceRow, controls: ServiceControls | 'checking')}
+	{#if controls === 'checking'}
+		<span class="text-muted-foreground text-sm whitespace-nowrap" data-row-checking>{CHECKING_NOTE}</span>
+	{:else}
+		<ServiceRowActions {controls} hostId={service.host_id} hostName={service.host_name} serviceId={service.id} {runResult} />
+	{/if}
+{/snippet}
+{#if entriesMessage}
+	<p class="text-muted-foreground mt-2 text-sm">{entriesMessage}</p>
+{/if}
+{#if shownNotRunning.length > 0 || !notRunningKnown}
+	<section class="mt-6 min-w-0" aria-labelledby="not-running-heading">
+		<h3 id="not-running-heading" class="mb-2 font-medium">Catalog programs not running yet</h3>
+		{#if !notRunningKnown}
+			<p class="text-muted-foreground text-sm">Programs that never ran on a host could not be listed.</p>
+		{/if}
+		<ul class="grid gap-3">
+			{#each shownNotRunning as pair (`${pair.entry.name}\n${pair.host.id}`)}
+				<li class="flex min-w-0 flex-wrap items-center gap-2" data-not-running="{pair.entry.name} {pair.host.id}">
+					<span class="min-w-0 break-all">
+						{pair.entry.name} on <a class="text-primary underline-offset-4 hover:underline" href="/hosts/{pair.host.id}">{pair.host.name}</a>
+					</span>
+					<ServiceRowActions
+						controls={serviceControls(pair.entry, pair.host.status, { state: 'stopped', restarts: null })}
+						hostId={pair.host.id}
+						hostName={pair.host.name}
+						{runResult}
+						startOnly
+					/>
+				</li>
+			{/each}
+		</ul>
+	</section>
+{/if}

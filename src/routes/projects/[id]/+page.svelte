@@ -69,14 +69,14 @@
 	const rename = $derived(servicesRenameView(action));
 	const healthEditor = $derived(servicesHealthView(action));
 	const catalogEditor = $derived(action?.scope === 'catalog' ? (action.catalogEditor ?? null) : null);
-	const catalogRun = $derived(action?.scope === 'catalog' ? (action.catalogAction ?? null) : null);
+	const serviceRun = $derived(action?.scope === 'services' ? (action.catalogAction ?? null) : null);
 	const imageEditor = $derived(action?.scope === 'catalog' ? (action.imageEditor ?? null) : null);
 	const imageDeploy = $derived(action?.scope === 'catalog' ? (action.imageDeploy ?? null) : null);
 	const catalogPermissions = $derived(
 		action?.scope === 'catalog' && action.permissions ? action.permissions : (data.permissions ?? null)
 	);
 	const catalogMessage = $derived.by(() => {
-		if (catalogEditor || imageEditor || imageDeploy || catalogRun || (action?.scope === 'catalog' && action.permissions)) return data.catalogMessage ?? null;
+		if (catalogEditor || imageEditor || imageDeploy || (action?.scope === 'catalog' && action.permissions)) return data.catalogMessage ?? null;
 		return sectionMessage ?? data.catalogMessage ?? null;
 	});
 
@@ -96,7 +96,8 @@
 		data.project
 			? [
 					{ key: 'hosts', label: 'Hosts', href: `/projects/${data.project.id}?tab=hosts` },
-					{ key: 'services', label: 'Services', href: `/projects/${data.project.id}?tab=services` },
+					// No hover preload: the Services load reads container status from the hosts.
+					{ key: 'services', label: 'Services', href: `/projects/${data.project.id}?tab=services`, preload: 'off' as const },
 					{ key: 'catalog', label: 'Catalog', href: `/projects/${data.project.id}?tab=catalog` },
 					{ key: 'members', label: 'Members', href: `/projects/${data.project.id}?tab=members` },
 					...(data.canAdmin
@@ -198,6 +199,12 @@
 			probeMessage={action?.scope === 'services' ? (action.probeMessage ?? null) : null}
 			{onHealthSaved}
 			{onHealthOpen}
+			entries={data.serviceEntries ?? []}
+			entriesMessage={data.serviceEntriesMessage ?? null}
+			notRunning={data.notRunning ?? []}
+			notRunningKnown={data.notRunningKnown ?? true}
+			serviceStates={data.serviceStates ?? null}
+			runResult={serviceRun}
 		/>
 	{:else if scope === 'catalog'}
 		<CatalogSection
@@ -210,15 +217,12 @@
 			hosts={data.hosts ?? []}
 			members={data.members ?? []}
 			editor={catalogEditor?.mode === 'edit' ? catalogEditor : null}
-			run={catalogRun}
 			permissions={catalogPermissions}
 			imageEditor={imageEditor?.mode === 'edit' ? imageEditor : null}
 			imageDeploy={imageDeploy}
 			{savedImage}
 			{onImageSaved}
 			onEditOpen={onCatalogEditOpen}
-			containers={data.catalogContainers ?? {}}
-			containersKnown={data.catalogContainersKnown ?? false}
 		/>
 	{:else if scope === 'members'}
 		<MembersSection

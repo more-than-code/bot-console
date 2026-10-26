@@ -131,7 +131,7 @@ test('project service columns are server-sorted and ports is not a sort', () => 
 	assert.equal(smallestPort([]), null);
 	assert.deepEqual(
 		serviceColumns(true).map((column) => column.key),
-		['name', 'host', 'project', 'kind', 'ports', 'status', 'last_seen', 'checks']
+		['name', 'host', 'project', 'kind', 'ports', 'status', 'actions', 'last_seen', 'checks']
 	);
 	assert.equal(showProjectColumn('Lab', [{ project_name: 'Lab' }]), false);
 	assert.equal(showProjectColumn('Lab', [{ project_name: 'Lab' }, { project_name: 'Other' }]), true);

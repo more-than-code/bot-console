@@ -193,9 +193,9 @@ describe('project services', { concurrency: false }, () => {
 		const expected: Record<string, string[]> = {
 			// An admin's Hosts tab also lists join tokens for the Add a host card.
 			hosts: ['hosts', 'join-tokens'],
-			services: ['hosts', 'services'],
-			// Catalog also loads one Deploybot services page so image actions know which hosts have a container.
-			catalog: ['catalog', 'hosts', 'members', 'services'],
+			// Services reads the catalog for the row actions (Start, Stop, Restart, Logs, Status).
+			services: ['catalog', 'hosts', 'services'],
+			catalog: ['catalog', 'hosts', 'members'],
 			members: ['invites', 'members'],
 			tokens: ['join-tokens'],
 			settings: ['env-sets', 'files', 'registries']
@@ -224,10 +224,10 @@ describe('project services', { concurrency: false }, () => {
 			assert.deepEqual(sections, want, tab);
 			overlap[tab] = maxInFlight;
 		}
-		assert.equal(overlap.catalog, 4);
+		assert.equal(overlap.catalog, 3);
 		assert.equal(overlap.members, 2);
 		assert.equal(overlap.hosts, 2);
-		assert.equal(overlap.services, 1);
+		assert.equal(overlap.services, 2);
 	});
 
 	test('the services load maps each query param onto the API url', async () => {

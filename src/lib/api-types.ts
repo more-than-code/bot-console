@@ -458,12 +458,25 @@ export type DockerCheckView =
 	| 'image-default'
 	| null;
 
+/**
+ * One catalog copy's state on its host (console only). Containers come from catalog status; programs from
+ * the report (a stopped unit drops out of it, so the row is gone).
+ */
+export type ServiceRuntime = {
+	state: 'running' | 'restarting' | 'paused' | 'stopped' | 'missing' | 'unknown';
+	restarts: number | null;
+	/** What catalog status said about the container, for the status badge tooltip. Absent for programs. */
+	container?: { state: ImageState; exitCode: number | null; digest: string | null; ports: number[] };
+};
+
 /** A project services row plus its health checks (api-v1 v1.18 `include=health_checks`) and why they are missing. */
 export type ProjectServiceRow = ProjectService & {
 	checks: HealthCheck[];
 	checksMessage: string | null;
 	/** Set only for an admin, on a row of this project with Docker health and a catalog entry. */
 	dockerCheck?: DockerCheckView;
+	/** Set on a row of this project's catalog entry the caller has a grant on. */
+	runtime?: ServiceRuntime;
 };
 
 export type SnapshotView = {

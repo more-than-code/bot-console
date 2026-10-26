@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
 import type { EnvSet, Host, ProjectServiceRow } from '../src/lib/api-types.ts';
 import {
@@ -11,6 +12,7 @@ import {
 } from '../src/lib/catalog-flight.ts';
 import { COPY_FAILED_NOTE, COPY_FAILURE_MS, shownDigestFailure } from '../src/lib/copy-text.ts';
 import CatalogRunForm from '../src/routes/projects/[id]/CatalogRunForm.svelte';
+import CatalogRunResult from '../src/routes/projects/[id]/CatalogRunResult.svelte';
 import EnvSetTable from '../src/routes/projects/[id]/EnvSetTable.svelte';
 import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import { initialAddDraft, setAddSecret } from '../src/routes/projects/[id]/env-add-variable.ts';
@@ -62,33 +64,23 @@ function host(): Host {
 	};
 }
 
-function renderRun(inFlight: boolean, message: string | null = null): string {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
-	return render(CatalogRunForm, {
+function renderResult(message: string): string {
+	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+	return render(CatalogRunResult, {
 		props: {
-			kind: 'run',
-			entryName: 'web',
-			runAs: '',
-			shell: false,
-			hosts: [host()],
-			action: '?/catalogRun',
-			entryKind: 'image',
-			inFlight,
-			result: message == null ? null : { name: 'web', kind: 'run', resultId: '00000000-0000-4000-8000-0000000000e1', status: null, logs: null, message }
+			close: createRawSnippet(() => ({ render: () => '<button type="button">Close</button>' })),
+			result: { name: 'web', hostId: host().id, serviceId: null, kind: 'run', resultId: '00000000-0000-4000-8000-0000000000e1', status: null, logs: null, message }
 		}
 	}).body;
 }
 
 test('an in-flight submit stays focusable and a second submit is blocked', () => {
-	const html = renderRun(true);
-	const submit = openTag(html, 'Starting…', 'button');
+	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+	const html = render(CatalogRunForm, {
+		props: { kind: 'run', entryName: 'web', hostId: host().id, action: '?/catalogRun', entryKind: 'image' }
+	}).body;
+	const submit = openTag(html, 'Start', 'button');
 	assert.equal(isDisabled(submit), false);
-	assert.equal(submit.includes('aria-disabled="true"'), true);
-	assert.equal(submit.includes('aria-busy="true"'), true);
-	assert.equal(isDisabled(openTag(html, '>pi1', 'button')), true);
-	const elapsed = html.match(/<p[^>]*>Elapsed 0:00<\/p>/)?.[0] ?? '';
-	assert.equal(elapsed.includes('role='), false);
-	assert.equal(elapsed.includes('aria-live'), false);
 
 	let submitted = 0;
 	const attempt = (inFlight: boolean) => {
@@ -112,14 +104,12 @@ test('an in-flight submit stays focusable and a second submit is blocked', () =>
 test('focus returns to the result notice, or the submit button when there is none', () => {
 	assert.equal(flightFocusTarget(true), 'notice');
 	assert.equal(flightFocusTarget(false), 'submit');
-	const html = renderRun(false, 'The host rejected the request.');
+	// A run result is its own view: the notice is focusable and Close is the only control.
+	const html = renderResult('The host rejected the request.');
 	assert.match(html, /tabindex="-1"/);
 	assert.match(html, /The host rejected the request\./);
-	const run = readRoute('CatalogRunForm.svelte');
+	assert.equal(html.includes('type="submit"'), false);
 	const deploy = readRoute('CatalogDeployForm.svelte');
-	assert.match(run, /flightFocusTarget\(hasNotice\)/);
-	assert.match(run, /noticeEl\.focus\(\)/);
-	assert.match(run, /submitEl\?\.focus\(\)/);
 	assert.match(deploy, /flightFocusTarget\(hasNotice\)/);
 	assert.match(deploy, /noticeEl\.focus\(\)/);
 	assert.match(deploy, /deploySubmitEl\)\?\.focus\(\)/);

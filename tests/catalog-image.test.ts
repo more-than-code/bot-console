@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
+import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
 import type { CatalogEntry, EnvSet, Host, ImageDeploy, ImageEntry, ImageSpec, ProjectFile, ProjectServiceRow, Registry } from '../src/lib/api-types.ts';
 import { IMAGE_DEPLOY_TIP, IMAGE_RUN_TIP } from '../src/lib/catalog.ts';
@@ -34,7 +35,7 @@ import {
 import { parseCatalogEntry, parseCatalogList, parseDeployPayload, parseHostPrograms, parseImageLogs, parseImageSpec, parseImageStatus, parseProjectFile, parseProjectFileContent, parseProjectFileList, parseService } from '../src/lib/server/shape.ts';
 import CatalogDeployForm from '../src/routes/projects/[id]/CatalogDeployForm.svelte';
 import CatalogImageForm from '../src/routes/projects/[id]/CatalogImageForm.svelte';
-import CatalogRunForm from '../src/routes/projects/[id]/CatalogRunForm.svelte';
+import CatalogRunResult from '../src/routes/projects/[id]/CatalogRunResult.svelte';
 import CatalogPermissionsForm from '../src/routes/projects/[id]/CatalogPermissionsForm.svelte';
 import CatalogSection from '../src/routes/projects/[id]/CatalogSection.svelte';
 import ProjectPage from '../src/routes/projects/[id]/+page.svelte';
@@ -63,6 +64,8 @@ import { parse } from 'svelte/compiler';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 
+
+const closeSnippet = createRawSnippet(() => ({ render: () => '<button type="button">Close</button>' }));
 const HOST_ID = '00000000-0000-4000-8000-0000000000aa';
 const ENTRY_ID = '00000000-0000-4000-8000-0000000000c1';
 const HASH = 'ab'.repeat(32);
@@ -1489,15 +1492,15 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.match(element, /failureFocusId="settings-error"/);
 	});
 
-	test('container Run and Deploy tooltips explain the action', () => {
-		const section = readFileSync(new URL('../src/routes/projects/[id]/CatalogSection.svelte', import.meta.url), 'utf8');
+	test('container Start and Deploy tooltips explain the action', () => {
+		const section = readFileSync(new URL('../src/routes/projects/[id]/ServiceRowActions.svelte', import.meta.url), 'utf8');
 		const run = readFileSync(new URL('../src/routes/projects/[id]/CatalogRunDialog.svelte', import.meta.url), 'utf8');
 		const deploy = readFileSync(new URL('../src/routes/projects/[id]/CatalogDeployDialog.svelte', import.meta.url), 'utf8');
 		const row = readFileSync(new URL('../src/lib/components/RowAction.svelte', import.meta.url), 'utf8');
-		assert.match(section, /entry\.kind === 'image' && action === 'run' \? IMAGE_RUN_TIP : undefined/);
-		assert.match(run, /label="\{label\} \{entryName\}" \{tip\}/);
+		assert.match(section, /controls\.stateAction === 'run' && controls\.entryKind === 'image'\) return IMAGE_RUN_TIP/);
+		assert.match(run, /label="\{label\} \{entryName\} on \{hostName\}" \{tip\}/);
 		assert.match(deploy, /label="Deploy \{entry\.name\}" tip=\{IMAGE_DEPLOY_TIP\}/);
-		assert.match(row, /const hover = \$derived\(tip \? `\$\{label\}\. \$\{tip\}` : label\)/);
+		assert.match(row, /const hover = \$derived\(blockedReason \? `\$\{label\}\. \$\{blockedReason\}` : tip \? `\$\{label\}\. \$\{tip\}` : label\)/);
 		assert.match(row, /<Tooltip\.Content>\{hover\}<\/Tooltip\.Content>/);
 		assert.equal(IMAGE_RUN_TIP, 'Starts the container already on this host.');
 		assert.equal(IMAGE_DEPLOY_TIP, 'Pulls the image and creates or replaces the container from this catalog entry.');
@@ -1513,7 +1516,7 @@ describe('catalog images', { concurrency: false }, () => {
 				members: []
 			}
 		}).body;
-		assert.match(html, /aria-label="Run web"/);
+		assert.equal(html.includes('aria-label="Run web"'), false);
 		assert.match(html, /aria-label="Deploy web"/);
 		assert.equal(html.includes('Starts the container already on this host.'), false);
 		assert.equal(html.includes('Pulls the image'), false);
@@ -2208,15 +2211,8 @@ describe('catalog images', { concurrency: false }, () => {
 			projects: [PROJECT],
 			params: { id: PROJECT.id }
 		};
-		const status = (await projectActions.catalogStatus(
-			fakeEvent({
-				...base,
-				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogStatus`,
-				form: { name: 'web', host_id: HOST_ID, entry_kind: 'image' }
-			}).event as never
-		)) as { catalogAction?: { status?: { state?: string; container?: string | null } | null } };
-		assert.equal(status.catalogAction?.status?.state, 'running');
-		assert.equal(status.catalogAction?.status?.container, 'web');
+		// Status is no longer a form action: a container's live state is the Services badge tooltip.
+		assert.equal('catalogStatus' in projectActions, false);
 		const logs = (await projectActions.catalogLogs(
 			fakeEvent({
 				...base,
@@ -2298,18 +2294,14 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(unknownBadge.includes('text-status-offline'), false);
 		assert.equal(unknownBadge.includes('missing'), false);
 		assert.equal(unknownBadge.includes('stopped'), false);
-		const runHtml = render(CatalogRunForm, {
+		const runHtml = render(CatalogRunResult, {
 			props: {
-				kind: 'status',
-				entryName: 'web',
-				runAs: 'joe',
-				shell: false,
-				hosts: [host()],
-				action: '?/catalogStatus',
-				entryKind: 'image',
+				close: closeSnippet,
 				result: {
 					name: 'web',
-					kind: 'status',
+					hostId: host().id,
+					serviceId: null,
+					kind: 'run',
 					resultId: '00000000-0000-4000-8000-0000000000f4',
 					status: blank.status,
 					logs: null,
@@ -2730,17 +2722,13 @@ describe('catalog images', { concurrency: false }, () => {
 			}
 		}).body;
 		assert.equal(unnamed.includes('Remove'), false);
-		const runHtml = render(CatalogRunForm, {
+		const runHtml = render(CatalogRunResult, {
 			props: {
-				kind: 'run',
-				entryName: 'web',
-				runAs: 'joe',
-				shell: false,
-				hosts: [host()],
-				action: '?/catalogRun',
-				entryKind: 'image',
+				close: closeSnippet,
 				result: {
 					name: 'web',
+					hostId: host().id,
+					serviceId: null,
 					kind: 'run',
 					resultId: '00000000-0000-4000-8000-0000000000f1',
 					status: null,
@@ -2751,7 +2739,6 @@ describe('catalog images', { concurrency: false }, () => {
 		}).body;
 		const runAt = runHtml.indexOf(longRef);
 		assert.equal(runAt > 0 && runHtml.slice(Math.max(0, runAt - 500), runAt).includes('break-words'), true);
-		assert.equal([...runHtml.matchAll(/<button\b[^>]*>/g)].some((match) => match[0].includes('role="radio"') && match[0].includes('break-all')), true);
 	});
 
 	test('an image field error names its control and env set names wrap when ready', () => {

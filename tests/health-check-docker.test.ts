@@ -257,7 +257,7 @@ describe('services load with Docker health', { concurrency: false }, () => {
 		return calls.filter((call) => call.url.pathname === `/v1/projects/${PROJECT.id}/catalog`).length;
 	}
 
-	test('no Docker row with a catalog entry makes no catalog call', async () => {
+	test('rows without Docker health share the one catalog read and get no Docker check', async () => {
 		const calls = installFetch(
 			respond(
 				[
@@ -268,7 +268,7 @@ describe('services load with Docker health', { concurrency: false }, () => {
 			)
 		);
 		const data = await loadServices();
-		assert.equal(catalogCalls(calls), 0);
+		assert.equal(catalogCalls(calls), 1);
 		assert.equal(data.services.length, 2);
 		assert.equal(data.services.every((row) => row.dockerCheck === undefined), true);
 	});
@@ -337,7 +337,7 @@ describe('services load with Docker health', { concurrency: false }, () => {
 			)
 		);
 		const data = await loadServices();
-		assert.equal(catalogCalls(calls), 0);
+		assert.equal(catalogCalls(calls), 1);
 		assert.equal(data.services[0]?.dockerCheck, undefined);
 
 		const mixed = installFetch(
@@ -352,10 +352,10 @@ describe('services load with Docker health', { concurrency: false }, () => {
 		assert.equal(both.services[1]?.dockerCheck, undefined);
 	});
 
-	test('a viewer makes no catalog call and gets no Docker check', async () => {
+	test('a viewer gets no Docker check from the one catalog read', async () => {
 		const calls = installFetch(respond([serviceItem()], () => envelope({ items: [catalogItem('web', null)], next_cursor: null })));
 		const data = await loadServices('viewer');
-		assert.equal(catalogCalls(calls), 0);
+		assert.equal(catalogCalls(calls), 1);
 		assert.equal(data.services[0]?.dockerCheck, undefined);
 	});
 });

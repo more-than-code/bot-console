@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
+import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
 import type { CatalogGrant, Host, Member, ProgramEntry, ProjectServiceRow } from '../src/lib/api-types.ts';
 import {
@@ -22,6 +23,7 @@ import CatalogEntryForm from '../src/routes/projects/[id]/CatalogEntryForm.svelt
 import CatalogPermissionsForm from '../src/routes/projects/[id]/CatalogPermissionsForm.svelte';
 import CatalogRunDialog from '../src/routes/projects/[id]/CatalogRunDialog.svelte';
 import CatalogRunForm from '../src/routes/projects/[id]/CatalogRunForm.svelte';
+import CatalogRunResult from '../src/routes/projects/[id]/CatalogRunResult.svelte';
 import CatalogSection from '../src/routes/projects/[id]/CatalogSection.svelte';
 import ProjectPage from '../src/routes/projects/[id]/+page.svelte';
 import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
@@ -38,8 +40,9 @@ import {
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 
+
+const closeSnippet = createRawSnippet(() => ({ render: () => '<button type="button">Close</button>' }));
 const HOST_ID = '00000000-0000-4000-8000-0000000000aa';
-const BLOCKED_ID = '00000000-0000-4000-8000-0000000000ab';
 const ENTRY_ID = '00000000-0000-4000-8000-0000000000c1';
 const MEMBER_ID = '00000000-0000-4000-8000-0000000000d1';
 const SERVICE_ID = '00000000-0000-4000-8000-0000000000bb';
@@ -149,7 +152,8 @@ describe('catalog', { concurrency: false }, () => {
 			}).body
 		);
 		const viewerLabels = labels(viewer);
-		assert.equal(viewerLabels.includes('Logs web'), true);
+		// Logs and the other run actions are on the Services row now.
+		assert.equal(viewerLabels.includes('Logs web'), false);
 		assert.equal(viewerLabels.includes('Run web'), false);
 		assert.equal(viewerLabels.includes('Stop web'), false);
 		assert.equal(viewerLabels.includes('Restart web'), false);
@@ -171,7 +175,7 @@ describe('catalog', { concurrency: false }, () => {
 			}).body
 		);
 		const ownerLabels = labels(owner);
-		assert.equal(ownerLabels.includes('Run web'), true);
+		assert.equal(ownerLabels.includes('Run web'), false);
 		assert.equal(ownerLabels.includes('Edit web'), true);
 		assert.equal(ownerLabels.includes('Permissions web'), true);
 		assert.equal(ownerLabels.includes('Delete web'), true);
@@ -197,6 +201,11 @@ describe('catalog', { concurrency: false }, () => {
 		);
 		assert.equal(isActionFailure(ran), false);
 		assert.equal(calls[0]?.body, JSON.stringify({ host_id: HOST_ID, idempotency_key: KEY }));
+		// The result goes back to the Services row on that host.
+		const ranData = ran as { scope: string; catalogAction: CatalogRunState };
+		assert.equal(ranData.scope, 'services');
+		assert.equal(ranData.catalogAction.hostId, HOST_ID);
+		assert.equal(ranData.catalogAction.name, 'web');
 
 		const skipped = installFetch(() => envelope(null, 500, 'error', 'should not run'));
 		const missing = await projectActions.catalogRun(
@@ -226,30 +235,18 @@ describe('catalog', { concurrency: false }, () => {
 		assert.equal(logCalls[0]?.body, JSON.stringify({ host_id: HOST_ID }));
 
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
-		const runProps = {
-			kind: 'run' as const,
-			entryName: 'web',
-			runAs: 'joe',
-			shell: false,
-			hosts: [host(), host({ id: BLOCKED_ID, name: 'bare', programs: null })],
-			action: '?/catalogRun',
-			result: runState('run', 'waiting')
-		};
+		const runProps = { kind: 'run' as const, entryName: 'web', hostId: HOST_ID, action: '?/catalogRun' };
 		const runHtml = render(CatalogRunForm, { props: runProps }).body;
-		assert.equal(readFileSync(new URL('../src/routes/projects/[id]/CatalogRunDialog.svelte', import.meta.url), 'utf8').includes('<CatalogRunForm'), true);
-		assert.match(render(CatalogRunDialog, { props: runProps }).body, /aria-expanded="true"/);
+		assert.match(render(CatalogRunDialog, { props: { ...runProps, hostName: 'pi1', result: runState('run', 'waiting') } }).body, /aria-expanded="true"/);
 		assert.equal(runHtml.includes('name="idempotency_key"'), true);
-		assert.equal(runHtml.includes('This host does not allow programs.'), true);
-		const logsHtml = render(CatalogRunForm, {
+		assert.equal(render(CatalogRunForm, { props: { ...runProps, kind: 'logs', action: '?/catalogLogs' } }).body.includes('name="idempotency_key"'), false);
+		const logsHtml = render(CatalogRunResult, {
 			props: {
-				kind: 'logs',
-				entryName: 'web',
-				runAs: 'joe',
-				shell: false,
-				hosts: [host()],
-				action: '?/catalogLogs',
+				close: closeSnippet,
 				result: {
 					name: 'web',
+					hostId: HOST_ID,
+					serviceId: null,
 					kind: 'logs',
 					resultId: '00000000-0000-4000-8000-0000000000e1',
 					status: null,
@@ -258,7 +255,6 @@ describe('catalog', { concurrency: false }, () => {
 				}
 			}
 		}).body;
-		assert.equal(logsHtml.includes('name="idempotency_key"'), false);
 		assert.equal(logsHtml.includes('<img'), false);
 		assert.equal(logsHtml.includes('&lt;img'), true);
 		assert.equal(logsHtml.includes('onerror=alert(1)'), true);
@@ -266,17 +262,7 @@ describe('catalog', { concurrency: false }, () => {
 
 	test('a forbidden approval wait is the info notice', () => {
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
-		const html = render(CatalogRunForm, {
-			props: {
-				kind: 'run',
-				entryName: 'web',
-				runAs: 'joe',
-				shell: false,
-				hosts: [host()],
-				action: '?/catalogRun',
-				result: runState('run', APPROVAL_WAIT)
-			}
-		}).body;
+		const html = render(CatalogRunResult, { props: { close: closeSnippet, result: runState('run', APPROVAL_WAIT) } }).body;
 		assert.equal(html.includes(APPROVAL_WAIT), true);
 		assert.equal(html.includes('role="status"'), true);
 		assert.equal(html.includes('role="alert"'), false);
@@ -752,17 +738,15 @@ describe('catalog', { concurrency: false }, () => {
 		assert.equal(formSource.includes('label={member.name}'), true);
 	});
 
-	test('run reuses one idempotency key, and dialogs scroll', () => {
+	test('deploy reuses one idempotency key until success, and dialogs scroll', () => {
+		// Deploy keeps this rule; the Services run form renews its key after any answer (service-actions tests).
 		assert.equal(reuseIdempotencyKey('failure'), true);
 		assert.equal(reuseIdempotencyKey('error'), true);
 		assert.equal(reuseIdempotencyKey('success'), false);
 		const runSource = readFileSync(new URL('../src/routes/projects/[id]/CatalogRunForm.svelte', import.meta.url), 'utf8');
-		assert.equal(runSource.includes('reuseIdempotencyKey'), true);
+		assert.equal(runSource.includes('keyAfterResult'), true);
 		assert.equal(runSource.includes('cancel()'), true);
 		assert.equal(runSource.includes("formData.set('idempotency_key', crypto.randomUUID())"), false);
-		assert.equal(runSource.includes('— {reason}'), false);
-		assert.equal(runSource.includes('aria-label="Log lines"'), true);
-		assert.equal(runSource.includes('tabindex="0"'), true);
 		const scroll = 'max-h-[calc(100dvh-2rem)] overflow-y-auto';
 		assert.equal(readFileSync(new URL('../src/routes/projects/[id]/CatalogEntryDialog.svelte', import.meta.url), 'utf8').includes(scroll), true);
 		assert.equal(readFileSync(new URL('../src/routes/projects/[id]/CatalogRunDialog.svelte', import.meta.url), 'utf8').includes(scroll), true);
@@ -880,6 +864,8 @@ describe('catalog', { concurrency: false }, () => {
 function runState(kind: CatalogRunState['kind'], message: string): CatalogRunState {
 	return {
 		name: 'web',
+		hostId: HOST_ID,
+		serviceId: null,
 		kind,
 		resultId: '00000000-0000-4000-8000-0000000000e1',
 		status: null,
@@ -1050,16 +1036,15 @@ function selectValueText(html: string): string[] {
 	);
 }
 
-test('the run dialog host control shows the host name, not its id', () => {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
-	const html = render(CatalogRunForm, {
-		props: { kind: 'stop', entryName: 'web', runAs: 'joe', shell: false, hosts: [host()], action: '?/catalogStop', result: null }
-	}).body;
-	const radios = [...html.matchAll(/<button\b[^>]*>/g)].map((match) => match[0]).filter((tag) => tag.includes('role="radio"'));
-	assert.equal(radios.some((tag) => tag.includes('break-all') && tag.includes('whitespace-normal') && tag.includes('aria-checked="true"')), true);
-	assert.match(html, /role="radio"[^>]*>(?:<!---->)?pi1/);
+test('the run dialog names the row host, not its id, and posts that host', () => {
+	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+	const props = { kind: 'stop' as const, entryName: 'web', hostId: HOST_ID, action: '?/catalogStop' };
+	const html = render(CatalogRunForm, { props }).body;
+	assert.equal(html.includes('role="radio"'), false);
 	assert.equal(html.includes(`>${HOST_ID}<`), false);
 	assert.match(html, new RegExp(`<input\\b(?=[^>]*name="host_id")(?=[^>]*value="${HOST_ID}")`));
+	const dialog = render(CatalogRunDialog, { props: { ...props, hostName: 'pi1' } }).body;
+	assert.match(dialog, /aria-label="Stop web on pi1"/);
 });
 
 test('the permissions member select shows the member name, not the user id', () => {

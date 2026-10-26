@@ -14,7 +14,8 @@
 		current,
 		label
 	}: {
-		items: Array<{ key: string; label: string; href: string }>;
+		/** `preload: 'off'` stops SvelteKit from running that tab's load on hover. */
+		items: Array<{ key: string; label: string; href: string; preload?: 'off' }>;
 		current: string;
 		label: string;
 	} = $props();
@@ -35,6 +36,7 @@
 		{@const Icon = icons[item.label]}
 		<a
 			href={item.href}
+			data-sveltekit-preload-data={item.preload}
 			class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm font-medium {item.key === current
 				? 'bg-background text-foreground shadow-sm'
 				: 'text-muted-foreground hover:text-foreground'}"

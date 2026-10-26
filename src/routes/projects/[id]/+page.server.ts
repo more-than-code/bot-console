@@ -1,7 +1,6 @@
 import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
-import type { CatalogEntry, EnvSet, Host, Invite, JoinToken, Member, ProjectFile, ProjectService, ProjectServiceRow, Registry } from '$lib/api-types';
+import type { CatalogEntry, EnvSet, Host, Invite, JoinToken, Member, ProjectFile, ProjectService, ProjectServiceRow, Registry, ServiceRuntime } from '$lib/api-types';
 import { catalogForCaller, isCatalogName } from '$lib/catalog';
-import { containersByEntry } from '$lib/catalog-flight';
 import {
 	HEALTH_CHECK_LIMIT,
 	HEALTH_NEEDS_CONFIRMATION,
@@ -17,13 +16,25 @@ import {
 } from '$lib/health-checks';
 import { SERVICE_DEFAULT_DIR, SERVICE_DEFAULT_SORT, serviceColumns, serviceHostReachable } from '$lib/host-view';
 import { serviceShow } from '$lib/service-view';
+import {
+	entryHostIndex,
+	entryRef,
+	needsContainerStatus,
+	notRunningPairs,
+	ownerEntry,
+	runtimeFromImageStatus,
+	runtimeFromRow,
+	statusReader,
+	UNKNOWN_RUNTIME,
+	type NotRunningPair,
+	type ServiceEntryRef
+} from '$lib/service-actions';
 import type { ActionField, CatalogPermissionsState, ProjectScope } from '$lib/project-action';
 import { ApiError, actionFailure, apiFetch, apiList, loadFailure } from '$lib/server/api';
 import {
 	catalogCreate,
 	catalogDelete,
 	catalogLogs,
-	catalogStatus,
 	catalogParse,
 	catalogPermissions,
 	catalogRestart,
@@ -65,6 +76,7 @@ import {
 	parseCreatedJoin,
 	parseHealthChecks,
 	parseHost,
+	parseImageStatus,
 	parseInvite,
 	parseJoinToken,
 	parseMember,
@@ -108,6 +120,19 @@ type ServicesLoad = {
 	servicesNext: string | null;
 	servicesOmitted: number;
 	servicesMessage: string | null;
+	/** This project's catalog entries the caller has a grant on, for the row actions. */
+	serviceEntries: ServiceEntryRef[];
+	/** Set when the catalog could not be read, so rows have no actions. */
+	serviceEntriesMessage: string | null;
+	/** Programs that never ran on a host that can run them. */
+	notRunning: NotRunningPair[];
+	/** False when the services index needed for `notRunning` could not be read whole. */
+	notRunningKnown: boolean;
+	/**
+	 * Service id to container state, read with catalog status after the page renders (streamed).
+	 * Rows waiting for it show "checking…". Never rejects.
+	 */
+	serviceStates: Promise<Record<string, ServiceRuntime>>;
 };
 
 const noServices: ServicesLoad = {
@@ -116,21 +141,73 @@ const noServices: ServicesLoad = {
 	servicesPrev: null,
 	servicesNext: null,
 	servicesOmitted: 0,
-	servicesMessage: null
+	servicesMessage: null,
+	serviceEntries: [],
+	serviceEntriesMessage: null,
+	notRunning: [],
+	notRunningKnown: true,
+	serviceStates: Promise.resolve({})
 };
 
+const CATALOG_ACTIONS_UNREAD = 'Start, Stop, Restart, Logs and Status are not available: the catalog could not be read.';
+/** A status read that takes longer leaves the row's state unknown. */
+const STATUS_TIMEOUT_MS = 8_000;
+/** At most this many status reads at once per page load. */
+const STATUS_CONCURRENCY = 4;
+
+/** First catalog page, read once for the row actions and the Docker health line. Null when it could not be read. */
+async function loadServiceCatalog(event: RequestEvent, projectId: string): Promise<CatalogEntry[] | null> {
+	try {
+		return parseCatalogList(await apiFetch(event, `/v1/projects/${projectId}/catalog`))?.items ?? null;
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return null;
+	}
+}
+
+/** The services page plus what its row actions need. The page and the not-running list load together. */
 async function loadProjectServices(
 	event: RequestEvent,
 	projectId: string,
-	reachableHostIds: ReadonlySet<string>,
+	hosts: Host[],
+	catalog: CatalogEntry[] | null,
 	canAdmin: boolean
 ): Promise<ServicesLoad> {
+	const entries = (catalog ?? []).map(entryRef).filter((entry) => entry.my_actions.length > 0);
+	const [rows, notRunning] = await Promise.all([
+		loadServiceRows(event, projectId, hosts, catalog, entries, canAdmin),
+		loadNotRunning(event, projectId, entries, hosts)
+	]);
+	return { ...rows, ...notRunning, serviceEntries: entries, serviceEntriesMessage: catalog ? null : CATALOG_ACTIONS_UNREAD };
+}
+
+type ServiceRowsLoad = Omit<ServicesLoad, 'serviceEntries' | 'serviceEntriesMessage' | 'notRunning' | 'notRunningKnown'>;
+
+const noServiceRows: ServiceRowsLoad = {
+	services: [],
+	servicesTotal: 0,
+	servicesPrev: null,
+	servicesNext: null,
+	servicesOmitted: 0,
+	servicesMessage: null,
+	serviceStates: Promise.resolve({})
+};
+
+async function loadServiceRows(
+	event: RequestEvent,
+	projectId: string,
+	hosts: Host[],
+	catalog: CatalogEntry[] | null,
+	entries: ServiceEntryRef[],
+	canAdmin: boolean
+): Promise<ServiceRowsLoad> {
+	const reachableHostIds = new Set(hosts.filter(serviceHostReachable).map((host) => host.id));
 	const query = readServerTableQuery(event.url.searchParams, 'services', serviceColumns(false), {
 		sort: SERVICE_DEFAULT_SORT,
 		dir: SERVICE_DEFAULT_DIR
 	});
 	if (query.qTooLong) {
-		return { ...noServices, servicesMessage: 'Search must be at most 100 characters.' };
+		return { ...noServiceRows, servicesMessage: 'Search must be at most 100 characters.' };
 	}
 	const hostUnreachable = query.hostRejected || (query.host != null && !reachableHostIds.has(query.host));
 	const apiQuery = hostUnreachable ? { ...query, host: null } : query;
@@ -143,7 +220,7 @@ async function loadProjectServices(
 		params.set('include', 'health_checks');
 		const payload = await apiFetch(event, `/v1/projects/${projectId}/services?${params.toString()}`);
 		const page = parseServicePage(payload);
-		if (!page) return { ...noServices, servicesMessage: 'The API returned an unexpected response.' };
+		if (!page) return { ...noServiceRows, servicesMessage: 'The API returned an unexpected response.' };
 		let omitted = 0;
 		const services: ProjectServiceRow[] = [];
 		for (const item of page.raw) {
@@ -160,8 +237,11 @@ async function loadProjectServices(
 			const checks = parseHealthChecks(item.health_checks);
 			services.push({ ...row, checks: checks ?? [], checksMessage: checks ? null : UNREAD_HEALTH_CHECKS });
 		}
+		const checked = canAdmin ? withDockerChecks(projectId, services, catalog) : services;
+		const withState = withRuntime(event, projectId, checked, entries);
 		return {
-			services: canAdmin ? await withDockerChecks(event, projectId, services) : services,
+			services: withState.rows,
+			serviceStates: withState.states,
 			servicesTotal: page.total,
 			servicesPrev: page.prevCursor,
 			servicesNext: page.nextCursor,
@@ -169,7 +249,8 @@ async function loadProjectServices(
 			servicesMessage: notices.length > 0 ? notices.join(' ') : null
 		};
 	} catch (err) {
-		return { ...noServices, servicesMessage: loadFailure(err).message };
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return { ...noServiceRows, servicesMessage: loadFailure(err).message };
 	}
 }
 
@@ -179,22 +260,87 @@ function needsDockerCheck(row: ProjectServiceRow, projectId: string): boolean {
 }
 
 /**
- * Admin only (the dialog's edit gate). One catalog read, only when a row of this project reports Docker
- * health for a catalog entry. A failed read leaves those rows unknown.
+ * Admin only (the dialog's edit gate), for rows of this project that report Docker health for a catalog
+ * entry. The catalog is the services tab's one read (first page only, on purpose: an entry beyond it
+ * leaves dockerCheck null). A failed read leaves those rows unknown.
  */
-async function withDockerChecks(event: RequestEvent, projectId: string, services: ProjectServiceRow[]): Promise<ProjectServiceRow[]> {
+function withDockerChecks(projectId: string, services: ProjectServiceRow[], catalog: CatalogEntry[] | null): ProjectServiceRow[] {
 	if (!services.some((row) => needsDockerCheck(row, projectId))) return services;
-	let entries: Map<string, CatalogEntry> | null = null;
-	try {
-		// First page only, on purpose: an entry beyond it leaves dockerCheck null.
-		const list = parseCatalogList(await apiFetch(event, `/v1/projects/${projectId}/catalog`));
-		if (list) entries = new Map(list.items.map((entry) => [entry.name, entry]));
-	} catch (err) {
-		if (isRedirect(err) || isHttpError(err)) throw err;
-	}
+	const entries = catalog ? new Map(catalog.map((entry) => [entry.name, entry])) : null;
 	return services.map((row) =>
 		needsDockerCheck(row, projectId) ? { ...row, dockerCheck: dockerCheckFromEntry(entries?.get(row.catalog_entry ?? '')) } : row
 	);
+}
+
+/**
+ * Each row of this project's catalog entry gets its state. Programs are known from the row. The services
+ * list does not say whether a container is running, so each owned container on an online host is read
+ * with catalog status (not audited): once per (entry, host), at most four at a time, and streamed so the
+ * page does not wait for slow hosts.
+ */
+function withRuntime(
+	event: RequestEvent,
+	projectId: string,
+	services: ProjectServiceRow[],
+	entries: ServiceEntryRef[]
+): { rows: ProjectServiceRow[]; states: Promise<Record<string, ServiceRuntime>> } {
+	const read = statusReader((entry, hostId) => containerRuntime(event, projectId, entry, hostId), STATUS_CONCURRENCY);
+	const pending: Array<Promise<[string, ServiceRuntime]>> = [];
+	const rows = services.map((row) => {
+		const entry = ownerEntry(row, projectId, entries);
+		if (entry == null) return row;
+		if (!needsContainerStatus(row, entry)) return { ...row, runtime: runtimeFromRow(row) };
+		pending.push(read(entry.name, row.host_id).then((runtime) => [row.id, runtime]));
+		return row;
+	});
+	return { rows, states: Promise.all(pending).then((pairs) => present(event, Object.fromEntries(pairs))) };
+}
+
+/** Never rejects: it runs after the page is sent, where a redirect can no longer happen. */
+async function containerRuntime(event: RequestEvent, projectId: string, entry: string, hostId: string): Promise<ServiceRuntime> {
+	try {
+		const payload = await apiFetch(
+			event,
+			`/v1/projects/${projectId}/catalog/${entry}/status`,
+			{ method: 'POST', body: JSON.stringify({ host_id: hostId }) },
+			STATUS_TIMEOUT_MS
+		);
+		const status = parseImageStatus(payload);
+		return status ? runtimeFromImageStatus(status) : UNKNOWN_RUNTIME;
+	} catch {
+		return UNKNOWN_RUNTIME;
+	}
+}
+
+/**
+ * Only when some program entry can be started: one services page (`view=deploybot`, up to 200 rows)
+ * tells which hosts already have a row for it. A failure, a dropped row, or a further page leaves the
+ * list unknown.
+ */
+async function loadNotRunning(
+	event: RequestEvent,
+	projectId: string,
+	entries: ServiceEntryRef[],
+	hosts: Host[]
+): Promise<{ notRunning: NotRunningPair[]; notRunningKnown: boolean }> {
+	if (!entries.some((entry) => entry.kind === 'program' && entry.my_actions.includes('run'))) {
+		return { notRunning: [], notRunningKnown: true };
+	}
+	const unknown = { notRunning: [], notRunningKnown: false };
+	try {
+		const page = parseServicePage(await apiFetch(event, `/v1/projects/${projectId}/services?view=deploybot&limit=200`));
+		if (!page || page.nextCursor != null) return unknown;
+		const rows: ProjectService[] = [];
+		for (const item of page.raw) {
+			const row = parseProjectService(item);
+			if (!row) return unknown;
+			if (row.project_id === projectId) rows.push(row);
+		}
+		return { notRunning: notRunningPairs(entries, hosts, entryHostIndex(rows)), notRunningKnown: true };
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return unknown;
+	}
 }
 
 const empty = {
@@ -230,8 +376,6 @@ const empty = {
 	filesMessage: null as string | null,
 	registries: [] as Registry[],
 	registriesMessage: null as string | null,
-	catalogContainers: {} as Record<string, string[]>,
-	catalogContainersKnown: false,
 	...noServices
 };
 
@@ -256,18 +400,18 @@ export const load: PageServerLoad = async (event) => {
 	const tab = tabOf(event.url.searchParams.get('tab'), canAdmin);
 
 	// Each tab loads only what it shows, and independent calls run together.
-	// The catalog tab also loads one services page, to see which images already have a container.
-	// The services tab waits, because that table needs the host list.
+	// The services tab waits for the host list and the catalog, because its row actions need both.
 	const hostsLoad =
 		tab === 'hosts' || tab === 'services' || tab === 'catalog'
 			? loadList(event, `/v1/projects/${id}/hosts`, parseHost)
 			: Promise.resolve(emptyList<Host>());
 	const servicesLoad =
 		tab === 'services'
-			? hostsLoad.then((list) => loadProjectServices(event, id, new Set(list.items.filter(serviceHostReachable).map((host) => host.id)), canAdmin))
+			? Promise.all([hostsLoad, loadServiceCatalog(event, id)]).then(([list, catalog]) =>
+					loadProjectServices(event, id, list.items, catalog, canAdmin)
+				)
 			: Promise.resolve(noServices);
-	const catalogContainersLoad = tab === 'catalog' ? loadCatalogContainers(event, id) : Promise.resolve(noCatalogContainers);
-	const [hostList, memberList, tokenList, inviteList, services, catalogLoad, settings, catalogContainers] = await Promise.all([
+	const [hostList, memberList, tokenList, inviteList, services, catalogLoad, settings] = await Promise.all([
 		hostsLoad,
 		tab === 'members' || tab === 'catalog' ? loadList(event, `/v1/projects/${id}/members`, parseMember) : emptyList<Member>(),
 		// The Hosts tab reads them only to see whether a newly created token was used.
@@ -275,8 +419,7 @@ export const load: PageServerLoad = async (event) => {
 		tab === 'members' && canAdmin ? loadList(event, `/v1/projects/${id}/invites`, parseInvite) : emptyList<Invite>(),
 		servicesLoad,
 		tab === 'catalog' ? loadCatalog(event, id, canOwner) : null,
-		tab === 'settings' && canAdmin ? loadProjectSettings(event, id) : null,
-		catalogContainersLoad
+		tab === 'settings' && canAdmin ? loadProjectSettings(event, id) : null
 	]);
 
 	const hosts = hostList.items;
@@ -307,73 +450,48 @@ export const load: PageServerLoad = async (event) => {
 	const registries = settings?.registries ?? [];
 	const registriesMessage = settings?.registriesMessage ?? null;
 
-	return present(event, {
-		project,
-		userId,
-		message: null,
-		tab,
-		canAdmin,
-		canOwner,
-		hosts,
-		hostsOmitted,
-		hostsTruncated,
-		hostsMessage,
-		members,
-		membersOmitted,
-		membersTruncated,
-		membersMessage,
-		tokens,
-		tokensOmitted,
-		tokensTruncated,
-		tokensMessage,
-		invites,
-		invitesOmitted,
-		invitesTruncated,
-		invitesMessage,
-		catalog,
-		catalogOmitted,
-		catalogTruncated,
-		catalogMessage,
-		permissions,
-		envSets,
-		envSetsMessage,
-		files,
-		filesMessage,
-		registries,
-		registriesMessage,
-		...services,
-		...catalogContainers
-	});
+	// The streamed states stay a promise: present() would turn it into a plain object.
+	const { serviceStates, ...serviceData } = services;
+	return {
+		...present(event, {
+			project,
+			userId,
+			message: null,
+			tab,
+			canAdmin,
+			canOwner,
+			hosts,
+			hostsOmitted,
+			hostsTruncated,
+			hostsMessage,
+			members,
+			membersOmitted,
+			membersTruncated,
+			membersMessage,
+			tokens,
+			tokensOmitted,
+			tokensTruncated,
+			tokensMessage,
+			invites,
+			invitesOmitted,
+			invitesTruncated,
+			invitesMessage,
+			catalog,
+			catalogOmitted,
+			catalogTruncated,
+			catalogMessage,
+			permissions,
+			envSets,
+			envSetsMessage,
+			files,
+			filesMessage,
+			registries,
+			registriesMessage,
+			...serviceData
+		}),
+		serviceStates
+	};
 };
-
-type CatalogContainerIndex = {
-	catalogContainers: Record<string, string[]>;
-	catalogContainersKnown: boolean;
-};
-
-const noCatalogContainers: CatalogContainerIndex = {
-	catalogContainers: {},
-	catalogContainersKnown: false
-};
-
-/** One services page. A failure, a dropped row, or a further page leaves the index unknown. */
-async function loadCatalogContainers(event: RequestEvent, id: string): Promise<CatalogContainerIndex> {
-	try {
-		const payload = await apiFetch(event, `/v1/projects/${id}/services?view=deploybot&limit=200`);
-		const page = parseServicePage(payload);
-		if (!page || page.nextCursor != null) return noCatalogContainers;
-		const rows: ProjectService[] = [];
-		for (const item of page.raw) {
-			const row = parseProjectService(item);
-			if (!row) return noCatalogContainers;
-			rows.push(row);
-		}
-		return { catalogContainers: containersByEntry(rows), catalogContainersKnown: true };
-	} catch (err) {
-		if (isRedirect(err) || isHttpError(err)) throw err;
-		return noCatalogContainers;
-	}
-}
 
 type ListLoad<T> = { items: T[]; omitted: number; truncated: boolean; message: string | null };
 
@@ -575,7 +693,6 @@ export const actions: Actions = {
 	catalogStop,
 	catalogRestart,
 	catalogLogs,
-	catalogStatus,
 	catalogPermissions,
 	catalogDeploy,
 	catalogRollback,

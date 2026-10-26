@@ -10,26 +10,15 @@
 	import { Input } from '$lib/components/ui/input';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import type { CatalogEntry, Host, Member } from '$lib/api-types';
-	import { CATALOG_KIND_OPTIONS, catalogKindInfo, catalogKindOf, IMAGE_RUN_TIP } from '$lib/catalog';
-	import { DEPLOY_FIRST_TIP } from '$lib/catalog-flight';
+	import { CATALOG_KIND_OPTIONS, catalogKindInfo, catalogKindOf } from '$lib/catalog';
 	import { imagePortText } from '$lib/image-spec';
-	import type { CatalogEditorState, CatalogPermissionsState, CatalogRunState, ImageDeployState, ImageEditorState } from '$lib/project-action';
+	import type { CatalogEditorState, CatalogPermissionsState, ImageDeployState, ImageEditorState } from '$lib/project-action';
 	import { CATALOG_TABLE_ID, type Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 	import CatalogDeployDialog from './CatalogDeployDialog.svelte';
 	import CatalogEntryDialog from './CatalogEntryDialog.svelte';
 	import CatalogImageDialog from './CatalogImageDialog.svelte';
 	import CatalogPermissions from './CatalogPermissions.svelte';
-	import CatalogRunDialog from './CatalogRunDialog.svelte';
-
-	const ROW_ACTIONS = ['run', 'stop', 'restart', 'logs', 'status'] as const;
-	const RUN_ACTION = {
-		run: 'catalogRun',
-		stop: 'catalogStop',
-		restart: 'catalogRestart',
-		logs: 'catalogLogs',
-		status: 'catalogStatus'
-	} as const;
 
 	const permissionsCloseHref = $derived.by(() => {
 		const params = new URLSearchParams(page.url.searchParams);
@@ -51,15 +40,12 @@
 		hosts,
 		members,
 		editor = null,
-		run = null,
 		permissions = null,
 		imageEditor = null,
 		imageDeploy = null,
 		savedImage = null,
 		onImageSaved,
-		onEditOpen,
-		containers = {},
-		containersKnown = false
+		onEditOpen
 	}: {
 		canOwner: boolean;
 		canAdmin?: boolean;
@@ -70,42 +56,18 @@
 		hosts: Host[];
 		members: Member[];
 		editor?: CatalogEditorState | null;
-		run?: CatalogRunState | null;
 		permissions?: CatalogPermissionsState | null;
 		imageEditor?: ImageEditorState | null;
 		imageDeploy?: ImageDeployState | null;
 		savedImage?: string | null;
 		onImageSaved?: (name: string | null) => void;
 		onEditOpen?: () => void;
-		/** Entry name to host ids that have its container. Used only when `containersKnown` is true. */
-		containers?: Record<string, string[]>;
-		/** False until the catalog tab has a complete services page. Image actions stay enabled. */
-		containersKnown?: boolean;
 	} = $props();
 
 	let rowBusy = $state<string | null>(null);
 
 	function setRowBusy(name: string, busy: boolean) {
 		rowBusy = busy ? name : rowBusy === name ? null : rowBusy;
-	}
-
-	function imageUndeployed(entry: CatalogEntry): boolean {
-		if (entry.kind !== 'image' || !containersKnown) return false;
-		return (containers[entry.name] ?? []).length === 0;
-	}
-
-	function actionNeedsDeploy(entry: CatalogEntry, action: (typeof ROW_ACTIONS)[number]): boolean {
-		return action !== 'status' && imageUndeployed(entry);
-	}
-
-	function actionTip(entry: CatalogEntry, action: (typeof ROW_ACTIONS)[number]): string | undefined {
-		if (actionNeedsDeploy(entry, action)) return DEPLOY_FIRST_TIP;
-		return entry.kind === 'image' && action === 'run' ? IMAGE_RUN_TIP : undefined;
-	}
-
-	function deployedHosts(entry: CatalogEntry, action: (typeof ROW_ACTIONS)[number]): string[] | null {
-		if (entry.kind !== 'image' || action === 'status' || !containersKnown) return null;
-		return containers[entry.name] ?? [];
 	}
 
 	const columns: Column<CatalogEntry>[] = [
@@ -138,11 +100,6 @@
 			return entry.spec.ports.map((port) => imagePortText(port)).join(', ');
 		}
 		return entry.spec.port == null ? 'n/a' : String(entry.spec.port);
-	}
-
-	function runFor(entry: CatalogEntry): CatalogRunState | null {
-		if (run == null || run.name !== entry.name) return null;
-		return run;
 	}
 
 	const permissionEntry = $derived(permissions ? (entries.find((item) => item.name === permissions.name) ?? null) : null);
@@ -203,24 +160,6 @@
 					disabled={rowBusy === entry.name}
 					class="m-0 flex min-w-0 flex-wrap items-center gap-1 border-0 p-0 max-sm:grid max-sm:grid-cols-[repeat(4,max-content)]"
 				>
-					{#each ROW_ACTIONS as action (action)}
-						{#if entry.my_actions.includes(action)}
-							<CatalogRunDialog
-								kind={action}
-								entryName={entry.name}
-								runAs={entry.kind === 'program' ? entry.spec.run_as : ''}
-								shell={entry.kind === 'program' ? entry.spec.shell : false}
-								{hosts}
-								action={actionUrlFrom(page.url, RUN_ACTION[action])}
-								result={runFor(entry)?.kind === action ? runFor(entry) : null}
-								entryKind={entry.kind === 'image' ? 'image' : 'program'}
-								tip={actionTip(entry, action)}
-								disabled={actionNeedsDeploy(entry, action) || rowBusy === entry.name}
-								deployedHostIds={deployedHosts(entry, action)}
-								onRowBusy={(busy) => setRowBusy(entry.name, busy)}
-							/>
-						{/if}
-					{/each}
 					{#if entry.kind === 'image' && entry.my_actions.includes('deploy')}
 						<CatalogDeployDialog
 							{entry}

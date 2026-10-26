@@ -1,11 +1,5 @@
 import type { ImageHealthcheck } from '$lib/api-types';
 
-/** Hover sentence when Run, Stop, Restart, or Logs cannot do anything yet. */
-export const DEPLOY_FIRST_TIP = 'Deploy first: nothing is on a host yet.';
-
-/** Suffix on a host that has no container for this image entry. */
-export const NOT_DEPLOYED_MARK = '(not deployed)';
-
 export const FLIGHT_ACTIONS = ['deploy', 'run', 'stop', 'restart', 'rollback'] as const;
 
 export type FlightAction = (typeof FLIGHT_ACTIONS)[number];
@@ -87,27 +81,4 @@ export function deployProgressNote(healthcheck: ImageHealthcheck | null | undefi
 	const minutes = healthWaitMinutes(healthcheck);
 	if (minutes == null) return 'Pulls the image, starts the container.';
 	return `Pulls the image, starts the container, then waits until it is healthy (up to ${minutes} min).`;
-}
-
-export type CatalogContainerRow = {
-	source: string;
-	kind: string;
-	gone_at: string | null;
-	catalog_entry: string | null;
-	host_id: string | null;
-};
-
-/** Entry name to host ids that still have its container. Gone, declared, and non-container rows are skipped. */
-export function containersByEntry(rows: readonly CatalogContainerRow[]): Record<string, string[]> {
-	const found = new Map<string, Set<string>>();
-	for (const row of rows) {
-		if (row.source !== 'owned' || row.kind !== 'container') continue;
-		if (row.gone_at != null || row.catalog_entry == null || row.host_id == null) continue;
-		const hosts = found.get(row.catalog_entry) ?? new Set<string>();
-		hosts.add(row.host_id);
-		found.set(row.catalog_entry, hosts);
-	}
-	const out: Record<string, string[]> = {};
-	for (const [name, hosts] of found) out[name] = [...hosts].sort();
-	return out;
 }

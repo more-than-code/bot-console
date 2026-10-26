@@ -24,6 +24,7 @@
 		value,
 		trigger,
 		disabled = false,
+		blockedReason = null,
 		id,
 		onclick
 	}: {
@@ -40,6 +41,11 @@
 		trigger?: Snippet<[TriggerProps]>;
 		/** A disabled control does not receive hover, so the tooltip sits on a wrapper. */
 		disabled?: boolean;
+		/**
+		 * Why the action cannot run now. The button stays focusable with `aria-disabled`, ignores clicks,
+		 * and the reason is its description and tooltip (no `title`). Use without `trigger`.
+		 */
+		blockedReason?: string | null;
 		/** For a plain button (no `trigger`), e.g. a focus target. */
 		id?: string;
 		/** For a plain button: runs after the tooltip's own click handler. */
@@ -51,7 +57,8 @@
 		onclick?.(event);
 	}
 
-	const hover = $derived(tip ? `${label}. ${tip}` : label);
+	const reasonId = $props.id();
+	const hover = $derived(blockedReason ? `${label}. ${blockedReason}` : tip ? `${label}. ${tip}` : label);
 	const controlClass = $derived(
 		cn(buttonVariants({ variant: 'ghost', size: 'icon-sm' }), destructive && 'text-destructive')
 	);
@@ -75,6 +82,20 @@
 							<Icon class="size-4" />
 						</Button>
 					</span>
+				{:else if blockedReason}
+					<Button
+						{...props}
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						class={cn('cursor-not-allowed opacity-50', tooltipClass(props.class))}
+						aria-label={label}
+						aria-disabled="true"
+						aria-describedby={reasonId}
+						onclick={(event: MouseEvent) => event.preventDefault()}
+					>
+						<Icon class="size-4" />
+					</Button>
 				{:else if trigger}
 					{@render trigger({
 						...props,
@@ -102,3 +123,6 @@
 		<Tooltip.Content>{hover}</Tooltip.Content>
 	</Tooltip.Root>
 </Tooltip.Provider>
+{#if blockedReason}
+	<span id={reasonId} class="sr-only">{blockedReason}</span>
+{/if}

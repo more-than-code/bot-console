@@ -22,7 +22,8 @@ export type ProjectScope = 'hosts' | 'services' | 'catalog' | 'members' | 'token
 /** The dialog form an action result belongs to. Its message shows in that dialog, not on the page. */
 export type ActionField = 'createToken' | 'addMember';
 
-export type CatalogRunKind = 'run' | 'stop' | 'restart' | 'logs' | 'status';
+/** Catalog actions on a Services row. A container's status is the row's badge tooltip, not an action. */
+export type CatalogRunKind = 'run' | 'stop' | 'restart' | 'logs';
 
 export type CatalogDraft = {
 	name: string;
@@ -45,9 +46,13 @@ export type CatalogEditorState = {
 	message: string | null;
 };
 
-/** Run, stop, restart, or logs dialog. A new `resultId` opens it again. */
+/** Start, stop, restart, logs, or status dialog on a Services row. A new `resultId` opens it again. */
 export type CatalogRunState = {
 	name: string;
+	/** The row's host. Empty when the posted host id was not valid. */
+	hostId: string;
+	/** The Services row that posted it, or null for a not-running item (no row yet). */
+	serviceId: string | null;
 	kind: CatalogRunKind;
 	resultId: string;
 	status: ProgramStatus | ImageStatus | null;

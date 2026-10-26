@@ -96,7 +96,7 @@
 	<Dialog.Content class="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-xl" {onCloseAutoFocus}>
 		<Dialog.Header class="shrink-0 pr-8">
 			<Dialog.Title>Add env set</Dialog.Title>
-			<Dialog.Description>Paste a dotenv file. Existing keys keep the secret flag they already have.</Dialog.Description>
+			<Dialog.Description>Paste the variables, one KEY=value per line, like a .env file. Existing keys keep the secret flag they already have.</Dialog.Description>
 		</Dialog.Header>
 		<form method="POST" {action} class="grid min-h-0 gap-3 overflow-y-auto" use:enhance={submit}>
 			<Label class="grid gap-1.5" for="env-set-name">
@@ -104,7 +104,7 @@
 				<Input id="env-set-name" name="set" bind:value={setName} required maxlength={48} autocomplete="off" spellcheck="false" />
 			</Label>
 			<Label class="grid gap-1.5" for="env-set-dotenv">
-				Dotenv
+				Variables (one KEY=value per line)
 				<Textarea
 					id="env-set-dotenv"
 					name="dotenv"
@@ -112,7 +112,7 @@
 					rows={6}
 					spellcheck="false"
 					autocomplete="off"
-					aria-label="Env set dotenv"
+					aria-label="Env set variables"
 					aria-invalid={settingsField === 'dotenv' && message ? true : undefined}
 					aria-describedby={settingsField === 'dotenv' && message ? 'env-set-error' : undefined}
 				/>

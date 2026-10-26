@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { after, before, describe, test } from 'node:test';
+import { test } from 'node:test';
 import { render } from 'svelte/server';
 import type { CatalogEntry, Host, ImageDeploy, ImageEntry, ImageHealthcheck, ImageSpec } from '../src/lib/api-types.ts';
 import {
-	DEPLOY_FIRST_TIP,
 	FLIGHT_ACTIONS,
-	containersByEntry,
 	deployProgressNote,
 	flightLabel,
 	flightOfRunKind,
@@ -19,8 +17,7 @@ import { healthPolicyRule } from '../src/lib/image-spec.ts';
 import CatalogDeployForm from '../src/routes/projects/[id]/CatalogDeployForm.svelte';
 import CatalogRunForm from '../src/routes/projects/[id]/CatalogRunForm.svelte';
 import CatalogSection from '../src/routes/projects/[id]/CatalogSection.svelte';
-import { load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
-import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
+import { PROJECT, USER } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 
 const HOST_ID = '00000000-0000-4000-8000-0000000000aa';
@@ -132,18 +129,17 @@ function host(id = HOST_ID, name = 'pi1'): Host {
 
 const ACTIONS = ['run', 'stop', 'restart', 'logs', 'status', 'deploy'] as const;
 
-function section(entries: CatalogEntry[], containers: Record<string, string[]> | null, known = true): string {
+function section(entries: CatalogEntry[], canOwner = false): string {
 	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 	return render(CatalogSection, {
 		props: {
-			canOwner: false,
+			canOwner,
 			entries,
 			omitted: 0,
 			truncated: false,
 			message: null,
 			hosts: [host(), host(OTHER_HOST, 'pi2')],
-			members: [],
-			...(containers == null ? {} : { containers, containersKnown: known })
+			members: []
 		}
 	}).body;
 }
@@ -203,109 +199,41 @@ test('flight helpers format elapsed time, the health budget, and the in-flight l
 	assert.equal(flightOfRunKind('run'), 'run');
 });
 
-test('containersByEntry keeps a present owned container and ignores the rest', () => {
-	const row = (overrides: Record<string, unknown>) => ({
-		source: 'owned',
-		kind: 'container',
-		gone_at: null,
-		catalog_entry: 'web',
-		host_id: HOST_ID,
-		...overrides
-	});
-	assert.deepEqual(
-		containersByEntry([
-			row({}),
-			row({ host_id: OTHER_HOST }),
-			row({ host_id: HOST_ID }),
-			row({ catalog_entry: 'api', host_id: OTHER_HOST }),
-			row({ gone_at: '2026-10-15T00:00:00Z' }),
-			row({ kind: 'systemd' }),
-			row({ source: 'declared' }),
-			row({ source: 'discovered', kind: 'process' }),
-			row({ catalog_entry: null }),
-			row({ host_id: null })
-		]),
-		{ web: [HOST_ID, OTHER_HOST].sort(), api: [OTHER_HOST] }
-	);
-	assert.deepEqual(containersByEntry([]), {});
-});
-
-test('an image with no container disables run, stop, restart, and logs', () => {
-	const bare = section([imageEntry([...ACTIONS])], {});
-	for (const action of ['Run', 'Stop', 'Restart', 'Logs'] as const) {
-		const button = openTag(bare, `aria-label="${action} web"`, 'button');
-		assert.equal(isDisabled(button), true, action);
-		assert.match(button, /aria-disabled="true"/);
-		assert.match(button, /aria-label="/);
-		const wrap = openTag(bare, `aria-label="${action} web"`, 'span');
-		assert.match(wrap, new RegExp(`title="${action} web\\. ${DEPLOY_FIRST_TIP.replaceAll('.', '\\.')}"`));
+test('a catalog row keeps Deploy, Edit, Permissions and Delete; running copies act from Services', () => {
+	for (const entry of [imageEntry([...ACTIONS]), programEntry()]) {
+		const html = section([entry], true);
+		for (const action of ['Run', 'Start', 'Stop', 'Restart', 'Logs', 'Status']) {
+			assert.equal(html.includes(`aria-label="${action} web`), false, `${entry.kind} ${action}`);
+		}
+		assert.equal(html.includes('aria-label="Edit web"'), true, entry.kind);
+		assert.equal(html.includes('aria-label="Permissions web"'), true, entry.kind);
+		assert.equal(html.includes('aria-label="Delete web"'), true, entry.kind);
+		assert.equal(html.includes('aria-label="Deploy web"'), entry.kind === 'image', entry.kind);
 	}
-	assert.equal(isDisabled(openTag(bare, 'aria-label="Status web"', 'button')), false);
-	assert.equal(isDisabled(openTag(bare, 'aria-label="Deploy web"', 'button')), false);
-	assert.equal(bare.includes(DEPLOY_FIRST_TIP), true);
-
-	const placed = section([imageEntry([...ACTIONS])], { web: [HOST_ID] });
-	assert.equal(isDisabled(openTag(placed, 'aria-label="Run web"', 'button')), false);
-	assert.equal(isDisabled(openTag(placed, 'aria-label="Stop web"', 'button')), false);
-	assert.equal(isDisabled(openTag(placed, 'aria-label="Restart web"', 'button')), false);
-	assert.equal(isDisabled(openTag(placed, 'aria-label="Logs web"', 'button')), false);
-	assert.equal(placed.includes(DEPLOY_FIRST_TIP), false);
-
-	const program = section([programEntry()], {});
-	assert.equal(isDisabled(openTag(program, 'aria-label="Run web"', 'button')), false);
-	assert.equal(isDisabled(openTag(program, 'aria-label="Logs web"', 'button')), false);
-	assert.equal(program.includes(DEPLOY_FIRST_TIP), false);
-
-	const unknown = section([imageEntry(['run'])], null);
-	assert.equal(isDisabled(openTag(unknown, 'aria-label="Run web"', 'button')), false);
+	const source = readSource('CatalogSection.svelte');
+	assert.equal(source.includes('CatalogRunDialog'), false);
+	assert.equal(source.includes('ROW_ACTIONS'), false);
 });
 
-test('a host without that container is disabled in the run dialog', () => {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+test('the run dialog posts the row host and offers no host choice', () => {
+	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
 	const html = render(CatalogRunForm, {
-		props: {
-			kind: 'run',
-			entryName: 'web',
-			runAs: '',
-			shell: false,
-			hosts: [host(), host(OTHER_HOST, 'pi2')],
-			action: '?/catalogRun',
-			entryKind: 'image',
-			deployedHostIds: [HOST_ID]
-		}
+		props: { kind: 'run', entryName: 'web', hostId: HOST_ID, action: '?/catalogRun', entryKind: 'image' }
 	}).body;
-	const missing = openTag(html, '(not deployed)', 'button');
-	assert.equal(isDisabled(missing), true);
-	assert.match(missing, /aria-label|role="radio"/);
-	assert.equal(html.includes('pi2 (not deployed)'), true);
-	const ready = openTag(html, '>pi1', 'button');
-	assert.equal(isDisabled(ready), false);
-	assert.equal(html.includes('pi1 (not deployed)'), false);
+	assert.match(html, new RegExp(`name="host_id"[^>]*value="${HOST_ID}"|value="${HOST_ID}"[^>]*name="host_id"`));
+	assert.equal(html.includes('role="radiogroup"'), false);
+	assert.equal(html.includes('role="radio"'), false);
+	assert.match(html, />\s*Start\s*</);
 });
 
-test('an in-flight run or deploy shows a spinner, a label, and a timer', () => {
+test('an in-flight deploy shows a spinner, a label, and a timer', () => {
 	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
-	const running = render(CatalogRunForm, {
-		props: {
-			kind: 'run',
-			entryName: 'web',
-			runAs: '',
-			shell: false,
-			hosts: [host()],
-			action: '?/catalogRun',
-			entryKind: 'image',
-			inFlight: true
-		}
+	// The run form goes in flight only on a browser submit; idle it offers its own action.
+	const idle = render(CatalogRunForm, {
+		props: { kind: 'run', entryName: 'web', hostId: HOST_ID, action: '?/catalogRun', entryKind: 'image' }
 	}).body;
-	assert.match(running, /Starting…/);
-	assert.match(running, /motion-safe:animate-spin/);
-	assert.match(running, /Elapsed 0:00/);
-	assert.equal(running.includes('motion-safe:animate-spin'), true);
-	const starting = openTag(running, 'Starting…', 'button');
-	assert.equal(isDisabled(starting), false);
-	assert.equal(starting.includes('aria-disabled="true"'), true);
-	assert.equal(starting.includes('aria-busy="true"'), true);
-	assert.equal(isDisabled(openTag(running, '>pi1', 'button')), true);
+	assert.equal(idle.includes('aria-busy="true"'), false);
+	assert.match(idle, />\s*Start\s*</);
 
 	const props = {
 		entry: imageEntry(['deploy']),
@@ -387,98 +315,7 @@ test('an in-flight run or deploy shows a spinner, a label, and a timer', () => {
 		assert.match(source, /<Dialog\.Close type="button" disabled=\{flight\}>Cancel<\/Dialog\.Close>/);
 	}
 	assert.equal(readSource('CatalogSection.svelte').includes('disabled={rowBusy === entry.name}'), true);
+	assert.equal(readSource('ServiceRowActions.svelte').includes('<fieldset disabled={busy}'), true);
 	assert.equal(runDialog.includes('<CatalogRunForm'), true);
 	assert.equal(deployDialog.includes('<CatalogDeployForm'), true);
-});
-
-describe('catalog container index', { concurrency: false }, () => {
-	const originalFetch = globalThis.fetch;
-
-	before(() => {
-		useApi('https://api.test');
-	});
-
-	after(() => {
-		globalThis.fetch = originalFetch;
-		restoreEnv();
-	});
-
-	function service(overrides: Record<string, unknown> = {}) {
-		return {
-			id: '00000000-0000-4000-8000-0000000000bb',
-			name: 'web',
-			source: 'owned',
-			kind: 'container',
-			ports: [],
-			health: null,
-			host_id: HOST_ID,
-			host_name: 'pi1',
-			host_status: 'online',
-			project_id: PROJECT.id,
-			project_name: 'Lab',
-			catalog_entry: 'web',
-			gone_at: null,
-			...overrides
-		};
-	}
-
-	function page(items: unknown[], next: string | null = null) {
-		return { items, total: items.length, next_cursor: next, prev_cursor: null };
-	}
-
-	async function load(services: unknown, status = 200) {
-		const found: { url: URL | null } = { url: null };
-		const calls = installFetch((call) => {
-			const path = call.url.pathname;
-			if (path === `/v1/projects/${PROJECT.id}`) return envelope(PROJECT);
-			if (path === `/v1/projects/${PROJECT.id}/catalog`) return envelope({ items: [], next_cursor: null });
-			if (path === `/v1/projects/${PROJECT.id}/hosts`) return envelope({ items: [], next_cursor: null });
-			if (path === `/v1/projects/${PROJECT.id}/members`) return envelope({ items: [], next_cursor: null });
-			if (path === `/v1/projects/${PROJECT.id}/services`) {
-				found.url = call.url;
-				return status === 200 ? envelope(services) : envelope(null, status, 'error', 'unavailable');
-			}
-			return envelope(null, 500, 'error', path);
-		});
-		const data = (await projectLoad(
-			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=catalog`,
-				session: TOKEN,
-				user: USER,
-				projects: [PROJECT],
-				params: { id: PROJECT.id }
-			}).event as never
-		)) as { catalogContainers: Record<string, string[]>; catalogContainersKnown: boolean };
-		return { data, servicesUrl: found.url, calls };
-	}
-
-	test('a complete services page records owned containers and nothing else', async () => {
-		const { data, servicesUrl, calls } = await load(
-			page([
-				service(),
-				service({ id: '00000000-0000-4000-8000-0000000000bc', host_id: OTHER_HOST, catalog_entry: 'api' }),
-				service({ id: '00000000-0000-4000-8000-0000000000bd', gone_at: '2026-10-15T00:00:00Z' }),
-				service({ id: '00000000-0000-4000-8000-0000000000be', kind: 'systemd', catalog_entry: 'unit' }),
-				service({ id: '00000000-0000-4000-8000-0000000000bf', source: 'declared', catalog_entry: null })
-			])
-		);
-		assert.equal(servicesUrl?.searchParams.get('view'), 'deploybot');
-		assert.equal(servicesUrl?.searchParams.get('limit'), '200');
-		assert.equal(servicesUrl?.searchParams.has('cursor'), false);
-		assert.equal(calls.some((call) => call.url.pathname.startsWith('/v1/services/')), false);
-		assert.equal(data.catalogContainersKnown, true);
-		assert.deepEqual(data.catalogContainers, { web: [HOST_ID], api: [OTHER_HOST] });
-	});
-
-	test('a failed, partial, or unreadable services page does not grey out', async () => {
-		const failed = await load(null, 500);
-		assert.equal(failed.data.catalogContainersKnown, false);
-		assert.deepEqual(failed.data.catalogContainers, {});
-
-		const partial = await load(page([service()], 'more'));
-		assert.equal(partial.data.catalogContainersKnown, false);
-
-		const broken = await load(page([service(), { id: 'not-a-service' }]));
-		assert.equal(broken.data.catalogContainersKnown, false);
-	});
 });
