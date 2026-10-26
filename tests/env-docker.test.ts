@@ -801,8 +801,8 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 		assert.equal(html.includes('secret, preview only'), true);
 		assert.equal(html.includes('select-none'), true);
 		assert.equal(html.includes('Add variable'), true);
-		assert.equal(html.includes('New env set'), true);
-		assert.equal(html.includes('Add env set'), false);
+		assert.equal(html.includes('Add env set'), true);
+		assert.equal(html.includes('Paste a dotenv file.'), false);
 		// v1.17 adds a one-way Make secret row action on plain rows. There is still no way back to plain.
 		assert.equal(html.includes('aria-label="Make LOG_LEVEL secret"'), true);
 		assert.equal(html.includes('aria-label="Make API_TOKEN secret"'), false);

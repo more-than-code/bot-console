@@ -70,7 +70,7 @@
 		</div>
 	{/if}
 	<div class="flex flex-wrap items-center gap-2">
-		<Button type="submit">Save registry</Button>
+		<Button type="submit">Add registry</Button>
 		{@render cancel?.()}
 	</div>
 </form>

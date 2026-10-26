@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
@@ -7,12 +8,12 @@
 	import FormDialog from '$lib/components/FormDialog.svelte';
 	import EnvSetDialog from './EnvSetDialog.svelte';
 	import EnvSetTable from './EnvSetTable.svelte';
+	import FileViewDialog, { viewButtonId } from './FileViewDialog.svelte';
 	import ProjectFileForm from './ProjectFileForm.svelte';
 	import RegistryForm from './RegistryForm.svelte';
 	import { ENV_SET_STATUS_ID } from './env-set-panel';
 	import type { EnvSet, Project, ProjectFile, Registry } from '$lib/api-types';
 	import { formatBytes } from '$lib/format';
-	import { showViewedFile } from '$lib/secret-field';
 	import { actionUrlFrom } from '$lib/url';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
@@ -53,7 +54,12 @@
 	let savedFile = $state<string | null>(null);
 	// The Registries card's "Saved registry {host}." line, set by the Add registry dialog.
 	let savedRegistry = $state<string | null>(null);
-	// The Env sets card's status line ("Saved env set {name}."), set by the New env set dialog.
+	// The plain file whose View result is shown in the file dialog. A view at page load (no-JS post) shows too.
+	let viewing = $state<string | null>(untrack(() => viewedFile?.name ?? null));
+	let viewOpen = $state(untrack(() => viewedFile != null));
+	// Secret files are never shown: only a plain row in the list can be viewed.
+	const viewedRow = $derived(viewing != null && viewedFile?.name === viewing ? (files.find((file) => file.name === viewing && !file.is_secret) ?? null) : null);
+	// The Env sets card's status line ("Saved env set {name}."), set by the Add env set dialog.
 	let envSetNote = $state('');
 </script>
 
@@ -173,14 +179,16 @@
 									method="POST"
 									action={actionUrlFrom(page.url, 'viewProjectFile')}
 									use:enhance={() => {
-										const viewId = `file-view-${file.name}`;
-										return async ({ update }) => {
-											await showViewedFile(update, () => document.getElementById(viewId)?.focus());
+										return async ({ result, update }) => {
+											await update();
+											// A failure shows on the row, as before; only a success opens the dialog.
+											viewing = result.type === 'success' ? file.name : null;
+											viewOpen = viewing != null;
 										};
 									}}
 								>
 									<Input type="hidden" name="name" value={file.name} />
-									<Button type="submit" variant="outline" size="sm" aria-label="View {file.name}">View</Button>
+									<Button type="submit" id={viewButtonId(file.name)} variant="outline" size="sm" aria-label="View {file.name}">View</Button>
 								</form>
 							{/if}
 							<ConfirmAction
@@ -200,13 +208,18 @@
 							<Notice kind="error">{message}</Notice>
 						</div>
 					{/if}
-					{#if !file.is_secret && viewedFile?.name === file.name}
-						<pre id="file-view-{file.name}" tabindex="-1" class="bg-muted max-h-40 overflow-auto rounded-lg p-2 font-mono text-xs whitespace-pre-wrap focus-visible:ring-3 focus-visible:ring-ring" aria-label="File {file.name}">{viewedFile.content}</pre>
-					{/if}
 				</div>
 			{/each}
 			{#if savedFile}
 				<Notice kind="success">Saved file {savedFile}.</Notice>
+			{/if}
+			{#if viewedRow && viewedFile}
+				<FileViewDialog
+					file={viewedRow}
+					content={viewedFile.content}
+					bind:open={viewOpen}
+					onClosed={() => (viewing = null)}
+				/>
 			{/if}
 		</Card.Content>
 	</Card.Root>

@@ -126,7 +126,7 @@ export type EnvSetSaveEffects = {
 };
 
 /**
- * The New env set form's `use:enhance` result, in order, like `settleAdd`. A success closes the dialog,
+ * The Add env set form's `use:enhance` result, in order, like `settleAdd`. A success closes the dialog,
  * waits for the reload (SvelteKit's navigation resets focus), then focuses the status line, but only
  * when the dialog was still open when the result arrived. A failure reloads the form result, so the
  * dialog stays open with the message (and "Paste the value again." from the server), then focuses it.

@@ -11,7 +11,7 @@ function source(name: string): string {
 	return readFileSync(new URL(`../src/routes/projects/[id]/${name}`, import.meta.url), 'utf8');
 }
 
-describe('New env set dialog', () => {
+describe('Add env set dialog', () => {
 	test('settleEnvSetSave: a success closes, waits for the reload, then focuses the status line', async () => {
 		const run = async (open: boolean, type: string) => {
 			const calls: string[] = [];
@@ -39,7 +39,7 @@ describe('New env set dialog', () => {
 		assert.equal(ENV_SET_STATUS_ID, 'env-set-status');
 	});
 
-	test('the dialog closes on success and returns focus to New env set on Cancel or Escape', () => {
+	test('the dialog closes on success and returns focus to Add env set on Cancel or Escape', () => {
 		const dialog = source('EnvSetDialog.svelte');
 		assert.match(dialog, /await settleEnvSetSave\(open, result\.type,/);
 		assert.match(dialog, /close: \(\) => \{\s*if \(!open\) return;\s*closingAfterSave = true;\s*open = false;\s*\}/);
@@ -60,7 +60,7 @@ describe('New env set dialog', () => {
 			props: { project: PROJECT, canOwner: true, canAdmin: true, message: null, envSets: [], registries: [] }
 		}).body;
 		assert.equal(html.match(/<p id="env-set-status" role="status" tabindex="-1" class="sr-only"><\/p>/g)?.length, 1);
-		// It comes after the New env set trigger, inside the card.
+		// It comes after the Add env set trigger, inside the card.
 		assert.ok(html.indexOf('id="new-env-set"') < html.indexOf('id="env-set-status"'));
 		const section = source('SettingsSection.svelte');
 		assert.match(section, /onStatus=\{\(text\) => \(envSetNote = text\)\}/);

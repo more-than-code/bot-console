@@ -35,12 +35,12 @@ function membersProps(extra: Record<string, unknown> = {}) {
 	return { members: MEMBERS, omitted: 0, truncated: false, canAdmin: true, canOwner: true, currentUserId: USER.id, message: null, ...extra };
 }
 
-test('Settings: New env set, Add file and Add registry are matching dialog triggers', () => {
+test('Settings: Add env set, Add file and Add registry are matching dialog triggers', () => {
 	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
 	const html = render(SettingsSection, { props: { project: PROJECT, canOwner: true, canAdmin: true, message: null } }).body;
 	const classes: string[] = [];
 	for (const [id, label] of [
-		['new-env-set', 'New env set'],
+		['new-env-set', 'Add env set'],
 		['add-file', 'Add file'],
 		['add-registry', 'Add registry']
 	] as const) {
@@ -93,8 +93,8 @@ test('the registry, file and member forms keep their fields and actions and show
 
 	// Cancel sits next to the submit button in every form.
 	for (const [html, submit] of [
-		[registry, 'Save registry'],
-		[file, 'Save file'],
+		[registry, 'Add registry'],
+		[file, 'Add file'],
 		[member, 'Add member']
 	] as const) {
 		const row = strip(html).match(/<div class="flex flex-wrap items-center gap-2">([\s\S]*?)<\/div>\s*<\/form>/)?.[1] ?? '';
@@ -172,4 +172,26 @@ test('restoreFocusTo stops the default focus return and focuses the given id', (
 	} finally {
 		(globalThis as { document?: unknown }).document = saved;
 	}
+});
+
+test('Files: View opens a dialog keyed to the row, and its close returns focus to that View button', async () => {
+	const { viewButtonId } = await import('../src/routes/projects/[id]/FileViewDialog.svelte');
+	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
+	const files = [
+		{ name: 'app.conf', is_secret: false, size: 17, sha256: 'ab'.repeat(32), updated_at: '2026-10-13T12:00:00Z', updated_by: USER.id },
+		{ name: 'key.json', is_secret: true, size: 31, sha256: null, updated_at: '2026-10-13T12:00:00Z', updated_by: USER.id }
+	];
+	const props = { project: PROJECT, canOwner: true, canAdmin: true, files };
+	const viewed = render(SettingsSection, { props: { ...props, message: null, viewedFile: { name: 'app.conf', content: 'plain-config-line' } } }).body;
+	assert.equal(viewButtonId('app.conf'), 'view-file-app.conf');
+	assert.match(viewed, new RegExp(`<button\\b[^>]*id="${viewButtonId('app.conf')}"[^>]*aria-label="View app\\.conf"`));
+	assert.equal(viewed.includes(`id="${viewButtonId('key.json')}"`), false, 'no View for a secret file');
+	// No inline view: the content is only in the dialog.
+	assert.equal(viewed.includes('<pre id="file-view-'), false);
+	assert.equal(viewed.includes('plain-config-line'), false);
+
+	// A failed view stays a row notice and opens nothing.
+	const failed = render(SettingsSection, { props: { ...props, message: 'Not found.', settingsName: 'app.conf' } }).body;
+	assert.match(failed, /Not found\./);
+	assert.equal(failed.includes('file-view-app.conf'), false);
 });

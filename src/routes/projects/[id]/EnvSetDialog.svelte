@@ -91,7 +91,7 @@
 <Dialog.Root bind:open>
 	<Dialog.Trigger id="new-env-set" class={buttonVariants({ variant: 'outline' })}>
 		<Plus class="size-4" />
-		New env set
+		Add env set
 	</Dialog.Trigger>
 	<Dialog.Content class="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-xl" {onCloseAutoFocus}>
 		<Dialog.Header class="shrink-0 pr-8">
@@ -133,7 +133,7 @@
 				</div>
 			{/if}
 			<div class="flex flex-wrap items-center gap-2">
-				<Button type="submit">Save</Button>
+				<Button type="submit">Add env set</Button>
 				<Dialog.Close type="button">Cancel</Dialog.Close>
 			</div>
 		</form>

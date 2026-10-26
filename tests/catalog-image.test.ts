@@ -7,7 +7,7 @@ import type { CatalogEntry, EnvSet, Host, ImageDeploy, ImageEntry, ImageSpec, Pr
 import { IMAGE_DEPLOY_TIP, IMAGE_RUN_TIP } from '../src/lib/catalog.ts';
 import { formatBytes, formatWhen } from '../src/lib/format.ts';
 import { API_TIMEOUT_MS } from '../src/lib/server/api.ts';
-import { clearSecretField, settleFileSave, showViewedFile } from '../src/lib/secret-field.ts';
+import { clearSecretField, settleFileSave } from '../src/lib/secret-field.ts';
 import {
 	acceptHostHistory,
 	applyDockerPaste,
@@ -40,6 +40,7 @@ import CatalogSection from '../src/routes/projects/[id]/CatalogSection.svelte';
 import ProjectPage from '../src/routes/projects/[id]/+page.svelte';
 import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import SettingsSection from '../src/routes/projects/[id]/SettingsSection.svelte';
+import FileViewBody from '../src/routes/projects/[id]/FileViewBody.svelte';
 import ProjectFileForm from '../src/routes/projects/[id]/ProjectFileForm.svelte';
 import RegistryForm from '../src/routes/projects/[id]/RegistryForm.svelte';
 import { actions as projectActions, load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
@@ -3013,7 +3014,6 @@ describe('catalog images', { concurrency: false }, () => {
 		const settings = readFileSync(new URL('../src/routes/projects/[id]/SettingsSection.svelte', import.meta.url), 'utf8');
 		const fileFormSource = readFileSync(new URL('../src/routes/projects/[id]/ProjectFileForm.svelte', import.meta.url), 'utf8');
 		assert.match(fileFormSource, /settleFileSave\(/);
-		assert.match(settings, /showViewedFile\(/);
 		assert.match(settings, /message="Delete file \{file\.name\}\?"/);
 		assert.match(settings, /messageClass="max-w-full min-w-0 break-all"/);
 		assert.match(settings, /closeOnFailure/);
@@ -3165,11 +3165,22 @@ describe('catalog images', { concurrency: false }, () => {
 				viewedFile: viewedAgain.viewedFile ?? null
 			}
 		}).body;
-		const viewTag = [...viewedHtml.matchAll(/<pre\b[^>]*>/g)].map((match) => match[0]).find((tag) => tag.includes('id="file-view-app.conf"'));
-		assert.equal(viewTag?.includes('tabindex="-1"'), true);
-		assert.equal(viewTag?.includes('aria-label="File app.conf"'), true);
-		assert.equal(viewedHtml.includes('plain-config-line'), true);
+		// The content opens in a dialog (portaled on the client), never inline in the card.
+		assert.equal(viewedHtml.includes('id="file-view-app.conf"'), false);
+		assert.equal(viewedHtml.includes('plain-config-line'), false);
+		assert.match(viewedHtml, /<button\b[^>]*id="view-file-app\.conf"[^>]*aria-label="View app\.conf"/);
 		assert.equal(viewedHtml.includes('aria-label="View key.json"'), false);
+		const body = render(FileViewBody, { props: { name: 'app.conf', content: 'plain-config-line', contentId: 'file-view-app.conf' } }).body;
+		const viewTag = body.match(/<pre\b[^>]*>/)?.[0] ?? '';
+		assert.match(viewTag, /id="file-view-app\.conf"/);
+		assert.match(viewTag, /tabindex="-1"/);
+		assert.match(viewTag, /aria-label="File app\.conf"/);
+		assert.match(viewTag, /max-h-\[70dvh\]/);
+		assert.match(viewTag, /overflow-auto/);
+		assert.match(viewTag, /whitespace-pre-wrap/);
+		assert.match(viewTag, /break-all/);
+		assert.equal(body.includes('plain-config-line'), true);
+		assert.match(body, /Copy app\.conf/);
 
 		installFetch(() => envelope(null, 403, 'forbidden', 'secret files cannot be read'));
 		const denied = await projectActions.viewProjectFile(
@@ -3294,17 +3305,6 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(name, '');
 		assert.equal(secret, true);
 		assert.equal(saved, 'key.json');
-		let focused = false;
-		let applied = false;
-		await showViewedFile(
-			async () => {
-				applied = true;
-			},
-			() => {
-				focused = applied;
-			}
-		);
-		assert.equal(focused, true);
 	});
 
 	test('a file save redacts a secret inside a word and past the 500-character cut', async () => {
