@@ -3,6 +3,7 @@
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import { tick, untrack, type Snippet } from 'svelte';
+	import InfoIcon from '@lucide/svelte/icons/info';
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Combobox from '$lib/components/ui/combobox';
@@ -44,6 +45,7 @@
 	} from '$lib/image-tags';
 	import { ImageTagLookup } from '$lib/image-tag-lookup';
 	import { settleImageForm, type DialogOutcome } from '$lib/dialog-open';
+	import { envOverrideNote, envOverrides, secretOverrideNote, setConflictNotes, setOrderLine } from '$lib/env-precedence';
 	import type { ImageEditorState } from '$lib/project-action';
 	import ImageLookupPost from './ImageLookupPost.svelte';
 	import ImageTagNotes from './ImageTagNotes.svelte';
@@ -186,6 +188,30 @@
 			logging: loggingForPreview(draft.logMaxSizeMb, draft.logMaxFiles)
 		});
 	});
+
+	// api-v1 rule 12: env_sets in order < secret_env < env. Informational only; saving is still allowed.
+	const overrides = $derived(
+		envOverrides(
+			draft.env.map((row) => row.key),
+			draft.secrets,
+			draft.envSets.map((name) => ({ name, keys: sets.find((set) => set.name === name)?.keys ?? [] }))
+		)
+	);
+	const setNotes = $derived(setConflictNotes(overrides));
+	const orderLine = $derived(setOrderLine(draft.envSets));
+
+	/** Ids of the order line (for a selected set) and the set notes that name this set, for its checkbox. */
+	function setNoteIds(name: string): string | undefined {
+		const order = orderLine && draft.envSets.includes(name) ? [`${fieldId}-set-order`] : [];
+		const ids = [...order, ...setNotes.flatMap((note, index) => (note.sets.includes(name) ? [`${fieldId}-set-note-${index}`] : []))];
+		return ids.length > 0 ? ids.join(' ') : undefined;
+	}
+
+	/** A row input is described by its override note (when shown) and then its error. */
+	function withNote(noteId: string | null, name: string): string | undefined {
+		const ids = [noteId, describedBy(name) ?? null].filter((id) => id != null);
+		return ids.length > 0 ? ids.join(' ') : undefined;
+	}
 
 	$effect(() => {
 		const next = editor?.message ?? null;
@@ -339,6 +365,12 @@
 			<Input id="{fieldId}-name" name="name" bind:value={draft.name} required maxlength={48} autocomplete="off" aria-invalid={invalid('name')} aria-describedby={describedBy('name')} />
 		</Label>
 	{/if}
+	{#snippet overrideNote(id: string, text: string)}
+		<p {id} class="text-muted-foreground flex min-w-0 items-start gap-1.5 text-sm break-words">
+			<InfoIcon class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+			<span class="min-w-0">{text}</span>
+		</p>
+	{/snippet}
 	{#snippet fieldNotice(name: string)}
 		{#if message && field === name}
 			<div id="{fieldId}-error" tabindex="-1" class="max-w-full min-w-0 break-words focus-visible:ring-3 focus-visible:ring-ring">
@@ -451,19 +483,36 @@
 	<div class="grid gap-1.5">
 		<p class="text-sm font-medium">Environment</p>
 		{#each draft.env as row, index (index)}
+			{@const note = envOverrideNote(overrides, row.key)}
 			<div class="flex flex-wrap items-center gap-2">
 				<Label class="sr-only" for="{fieldId}-env-key-{index}">Environment key {index + 1}</Label>
-				<Input id="{fieldId}-env-key-{index}" name="env_key" bind:value={draft.env[index].key} maxlength={64} placeholder="KEY" spellcheck="false" aria-invalid={invalid('env')} aria-describedby={describedBy('env')} />
+				<Input
+					id="{fieldId}-env-key-{index}"
+					name="env_key"
+					bind:value={draft.env[index].key}
+					maxlength={64}
+					placeholder="KEY"
+					spellcheck="false"
+					aria-invalid={invalid('env')}
+					aria-describedby={withNote(note ? `${fieldId}-env-note-${index}` : null, 'env')}
+				/>
 				<Label class="sr-only" for="{fieldId}-env-value-{index}">Environment value {index + 1}</Label>
 				<Input id="{fieldId}-env-value-{index}" name="env_value" bind:value={draft.env[index].value} maxlength={4096} placeholder="Value" spellcheck="false" aria-invalid={invalid('env')} aria-describedby={describedBy('env')} />
 				<Button type="button" variant="outline" aria-label="Remove env var {index + 1}" onclick={() => (draft.env = draft.env.filter((_, item) => item !== index))}>Remove</Button>
 			</div>
+			{#if note}
+				{@render overrideNote(`${fieldId}-env-note-${index}`, note)}
+			{/if}
 		{/each}
 		<Button type="button" variant="outline" disabled={draft.env.length >= 64} onclick={() => (draft.env = [...draft.env, { key: '', value: '' }])}>Add variable</Button>
 		{@render fieldNotice('env')}
 	</div>
 	<div class="grid gap-1.5">
 		<p class="text-sm font-medium">Env sets</p>
+		<!-- Posted in draft order, not the alphabetical list order: a later set wins (api-v1 rule 12). -->
+		{#each draft.envSets as name (name)}
+			<Input type="hidden" name="env_set" value={name} />
+		{/each}
 		{#if setsStatus === 'loading'}
 			<p class="text-muted-foreground text-sm">Loading env sets…</p>
 		{:else if setsStatus === 'error'}
@@ -476,9 +525,15 @@
 		{:else}
 			{#each setOptions as name (name)}
 				<Label class="flex min-w-0 items-start gap-2">
-					<Checkbox name="env_set" value={name} checked={draft.envSets.includes(name)} onCheckedChange={(value) => toggleSet(name, value === true)} />
+					<Checkbox checked={draft.envSets.includes(name)} aria-describedby={setNoteIds(name)} onCheckedChange={(value) => toggleSet(name, value === true)} />
 					<span class="min-w-0 break-all">{name}</span>
 				</Label>
+			{/each}
+			{#if orderLine}
+				<p id="{fieldId}-set-order" class="text-muted-foreground text-sm break-words">{orderLine}</p>
+			{/if}
+			{#each setNotes as note, index (note.key)}
+				{@render overrideNote(`${fieldId}-set-note-${index}`, note.text)}
 			{/each}
 		{/if}
 		{@render fieldNotice('env_sets')}
@@ -486,12 +541,25 @@
 	<div class="grid gap-1.5">
 		<p class="text-sm font-medium">Secret env</p>
 		{#each draft.secrets as row, index (index)}
+			{@const note = secretOverrideNote(overrides, row.key)}
 			<div class="grid gap-2">
 				<div class="flex flex-wrap items-center gap-2">
 					<Label class="sr-only" for="{fieldId}-secret-key-{index}">Secret key {index + 1}</Label>
-					<Input id="{fieldId}-secret-key-{index}" name="secret_key" bind:value={draft.secrets[index].key} maxlength={64} placeholder="KEY" spellcheck="false" aria-invalid={invalid('secret_env')} aria-describedby={describedBy('secret_env')} />
+					<Input
+						id="{fieldId}-secret-key-{index}"
+						name="secret_key"
+						bind:value={draft.secrets[index].key}
+						maxlength={64}
+						placeholder="KEY"
+						spellcheck="false"
+						aria-invalid={invalid('secret_env')}
+						aria-describedby={withNote(note ? `${fieldId}-secret-note-${index}` : null, 'secret_env')}
+					/>
 					<Button type="button" variant="outline" aria-label="Remove secret {index + 1}" onclick={() => (draft.secrets = draft.secrets.filter((_, item) => item !== index))}>Remove</Button>
 				</div>
+				{#if note}
+					{@render overrideNote(`${fieldId}-secret-note-${index}`, note)}
+				{/if}
 				<Input type="hidden" name="secret_set" value={row.set} />
 				<div role="radiogroup" aria-label="Secret set {index + 1}" class="grid min-w-0 gap-1">
 					{#each setOptions as name (name)}
