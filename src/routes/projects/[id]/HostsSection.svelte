@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
@@ -15,7 +16,8 @@
 		truncated,
 		canAdmin,
 		message,
-		hostsMessage
+		hostsMessage,
+		children
 	}: {
 		hosts: Host[];
 		omitted: number;
@@ -23,6 +25,8 @@
 		canAdmin: boolean;
 		message: string | null;
 		hostsMessage: string | null;
+		/** Admin-only Add a host card, shown above the list. */
+		children?: Snippet;
 	} = $props();
 
 	const columns = $derived<Column<Host>[]>([
@@ -37,6 +41,7 @@
 {#if message}
 	<Notice kind="error">{message}</Notice>
 {/if}
+{@render children?.()}
 {#if omitted > 0}
 	<p class="text-muted-foreground mb-2 text-sm">{omitted} more {omitted === 1 ? 'row' : 'rows'} left out.</p>
 {/if}
@@ -48,7 +53,7 @@
 	{#snippet emptyExtra()}
 		{#if !hostsMessage}
 			{#if canAdmin}
-				{' '}<a class="text-primary underline underline-offset-4" href="?tab=tokens">Add a host</a>
+				{' '}<a class="text-primary underline underline-offset-4" href="#new-host">Add a host</a>
 			{:else}
 				{' '}Ask a project admin to add one.
 			{/if}

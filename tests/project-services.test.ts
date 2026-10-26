@@ -191,12 +191,13 @@ describe('project services', { concurrency: false }, () => {
 			return envelope({ items: [], next_cursor: null });
 		};
 		const expected: Record<string, string[]> = {
-			hosts: ['hosts'],
+			// An admin's Hosts tab also lists join tokens for the Add a host card.
+			hosts: ['hosts', 'join-tokens'],
 			services: ['hosts', 'services'],
 			// Catalog also loads one Deploybot services page so image actions know which hosts have a container.
 			catalog: ['catalog', 'hosts', 'members', 'services'],
 			members: ['invites', 'members'],
-			tokens: ['hosts', 'join-tokens'],
+			tokens: ['join-tokens'],
 			settings: ['env-sets', 'files', 'registries']
 		};
 		const overlap: Record<string, number> = {};
@@ -225,6 +226,7 @@ describe('project services', { concurrency: false }, () => {
 		}
 		assert.equal(overlap.catalog, 4);
 		assert.equal(overlap.members, 2);
+		assert.equal(overlap.hosts, 2);
 		assert.equal(overlap.services, 1);
 	});
 

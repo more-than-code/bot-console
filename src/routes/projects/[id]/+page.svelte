@@ -21,6 +21,7 @@
 	import { actionUrlFrom, namedFormAction } from '$lib/url';
 	import CatalogEntryDialog from './CatalogEntryDialog.svelte';
 	import CatalogImageDialog from './CatalogImageDialog.svelte';
+	import AddHostSection from './AddHostSection.svelte';
 	import CatalogSection from './CatalogSection.svelte';
 	import HostsSection from './HostsSection.svelte';
 	import { page } from '$app/state';
@@ -156,7 +157,17 @@
 			canAdmin={data.canAdmin}
 			message={sectionMessage ?? data.hostsMessage}
 			hostsMessage={data.hostsMessage}
-		/>
+		>
+			{#if data.canAdmin}
+				<AddHostSection
+					tokens={data.tokens}
+					hosts={data.hosts}
+					created={action?.scope === 'hosts' ? (action.created ?? null) : null}
+					slug={data.project.slug}
+					open={data.hosts.length === 0 && !data.hostsMessage}
+				/>
+			{/if}
+		</HostsSection>
 	{:else if scope === 'services'}
 		<ServicesSection
 			projectId={data.project.id}
@@ -228,11 +239,7 @@
 			omitted={data.tokensOmitted}
 			truncated={data.tokensTruncated}
 			canAdmin={data.canAdmin}
-			created={action?.scope === 'tokens' ? (action.created ?? null) : null}
 			message={sectionMessage ?? data.tokensMessage}
-			hostsMessage={data.hostsMessage}
-			slug={data.project.slug}
-			hasHosts={data.hosts.length > 0}
 		/>
 	{:else if scope === 'settings'}
 		<SettingsSection

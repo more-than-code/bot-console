@@ -237,6 +237,8 @@ const empty = {
 
 export const load: PageServerLoad = async (event) => {
 	requireUser(event);
+	// The Hosts tab's created-token card polls this key while it waits for the new host.
+	if (tabOf(event.url.searchParams.get('tab'), true) === 'hosts') event.depends('project:enrol');
 	const id = projectId(event.params);
 	let project;
 	try {
@@ -257,7 +259,7 @@ export const load: PageServerLoad = async (event) => {
 	// The catalog tab also loads one services page, to see which images already have a container.
 	// The services tab waits, because that table needs the host list.
 	const hostsLoad =
-		tab === 'hosts' || tab === 'services' || tab === 'catalog' || tab === 'tokens'
+		tab === 'hosts' || tab === 'services' || tab === 'catalog'
 			? loadList(event, `/v1/projects/${id}/hosts`, parseHost)
 			: Promise.resolve(emptyList<Host>());
 	const servicesLoad =
@@ -268,7 +270,8 @@ export const load: PageServerLoad = async (event) => {
 	const [hostList, memberList, tokenList, inviteList, services, catalogLoad, settings, catalogContainers] = await Promise.all([
 		hostsLoad,
 		tab === 'members' || tab === 'catalog' ? loadList(event, `/v1/projects/${id}/members`, parseMember) : emptyList<Member>(),
-		tab === 'tokens' && canAdmin ? loadList(event, `/v1/projects/${id}/join-tokens`, parseJoinToken) : emptyList<JoinToken>(),
+		// The Hosts tab reads them only to see whether a newly created token was used.
+		(tab === 'tokens' || tab === 'hosts') && canAdmin ? loadList(event, `/v1/projects/${id}/join-tokens`, parseJoinToken) : emptyList<JoinToken>(),
 		tab === 'members' && canAdmin ? loadList(event, `/v1/projects/${id}/invites`, parseInvite) : emptyList<Invite>(),
 		servicesLoad,
 		tab === 'catalog' ? loadCatalog(event, id, canOwner) : null,
@@ -728,9 +731,9 @@ export const actions: Actions = {
 		const form = await event.request.formData();
 		const hintText = formText(form, 'host_name_hint');
 		const hint = hintText.trim() ? cleanHint(hintText) : null;
-		if (hintText.trim() && !hint) return invalid(event, 'tokens', 'Host name hint must be 1–80 characters.');
+		if (hintText.trim() && !hint) return invalid(event, 'hosts', 'Host name hint must be 1–80 characters.');
 		const expiry = cleanExpiry(formText(form, 'expires_in_sec'));
-		if (!expiry.ok) return invalid(event, 'tokens', 'Expiry must be between 300 and 604800 seconds, or blank.');
+		if (!expiry.ok) return invalid(event, 'hosts', 'Expiry must be between 300 and 604800 seconds, or blank.');
 		const body: { host_name_hint?: string; expires_in_sec?: number } = {};
 		if (hint) body.host_name_hint = hint;
 		if (expiry.seconds != null) body.expires_in_sec = expiry.seconds;
@@ -741,15 +744,15 @@ export const actions: Actions = {
 					body: JSON.stringify(body)
 				})
 			);
-			if (!created) return fail(502, present(event, { scope: 'tokens', message: 'The API returned an unexpected response.' }));
+			if (!created) return fail(502, present(event, { scope: 'hosts', message: 'The API returned an unexpected response.' }));
 			// Stay on this response so the plaintext token is shown once. A reload is a GET and drops it.
 			return present(event, {
-				scope: 'tokens' as const,
+				scope: 'hosts' as const,
 				created,
 				message: created.server ? null : 'Server URL not shown: unexpected format'
 			});
 		} catch (err) {
-			return actionFailure(event, err, 'tokens');
+			return actionFailure(event, err, 'hosts');
 		}
 	},
 

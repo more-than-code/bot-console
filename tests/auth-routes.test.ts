@@ -238,6 +238,7 @@ describe('auth routes', { concurrency: false }, () => {
 		installFetch((call: FetchCall) => {
 			if (call.method === 'POST' && call.url.pathname.endsWith('/join-tokens')) {
 				return envelope({
+					id: '00000000-0000-4000-8000-0000000000d2',
 					token: JOIN,
 					install_command: `printf '%s' '${JOIN}' | sudo -u bot-agent bot-agent init --server 'wss://api.example/${TOKEN}' --join-token-stdin`
 				});
@@ -246,7 +247,7 @@ describe('auth routes', { concurrency: false }, () => {
 		});
 		const created = await projectActions.createToken(
 			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=tokens`,
+				url: `http://console.example/projects/${PROJECT.id}?tab=hosts`,
 				session: TOKEN,
 				user: USER,
 				projects: [PROJECT],
@@ -595,7 +596,7 @@ describe('auth routes', { concurrency: false }, () => {
 		});
 	});
 
-	test('admin tokens tab lists tokens, and create shows a token once', async () => {
+	test('admin tokens and hosts tabs list tokens, and create on Hosts shows a token once', async () => {
 		useApi('https://api.test');
 		const admin = { ...PROJECT, role: 'admin' as const };
 		const row = {
@@ -632,6 +633,27 @@ describe('auth routes', { concurrency: false }, () => {
 		assert.equal(calls.some((call) => call.url.pathname.endsWith('/join-tokens')), true);
 		assert.equal(containsToken(loaded, JOIN), false);
 
+		// The Hosts tab also lists join tokens for an admin, to see when the created one is used.
+		const hostsCalls = installFetch((call) => {
+			if (call.url.pathname === `/v1/projects/${PROJECT.id}`) return envelope(admin);
+			if (call.url.pathname.endsWith('/hosts')) return envelope({ items: [], next_cursor: null });
+			if (call.url.pathname.endsWith('/join-tokens')) return envelope({ items: [row], next_cursor: null });
+			return envelope(null, 500, 'error', 'unexpected');
+		});
+		const hostsTab = pageData(await projectLoad(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=hosts`,
+				session: TOKEN,
+				user: USER,
+				projects: [admin],
+				params: { id: PROJECT.id }
+			}).event as never
+		));
+		assert.equal(hostsTab.tab, 'hosts');
+		assert.equal(hostsTab.tokens.length, 1);
+		assert.equal(hostsCalls.some((call) => call.url.pathname.endsWith('/join-tokens')), true);
+		assert.equal(containsToken(hostsTab, JOIN), false);
+
 		const command = `printf '%s' '${JOIN}' | sudo -u bot-agent bot-agent init --server 'wss://api.example/agent' --join-token-stdin`;
 		const hostile = `${command}; rm -rf / ${TOKEN}`;
 		const other = 'bbbbbbbbbbbbbbbb';
@@ -639,12 +661,12 @@ describe('auth routes', { concurrency: false }, () => {
 		const substitution = `printf '%s' '${JOIN}' | sudo -u bot-agent bot-agent init --server 'wss://api.example/$(id)' --join-token-stdin`;
 		const oldStyle = `sudo -u bot-agent bot-agent init --server 'wss://api.example/agent' --join-token '${JOIN}'`;
 		const issued = [
-			{ token: JOIN, install_command: command },
-			{ token: JOIN, install_command: hostile },
-			{ token: JOIN, install_command: mismatched },
-			{ token: JOIN, install_command: substitution },
-			{ token: JOIN, install_command: oldStyle },
-			{ token: 'aaaaaaaaaaaaaaa', install_command: command }
+			{ id: row.id, token: JOIN, install_command: command },
+			{ id: row.id, token: JOIN, install_command: hostile },
+			{ id: row.id, token: JOIN, install_command: mismatched },
+			{ id: row.id, token: JOIN, install_command: substitution },
+			{ id: row.id, token: JOIN, install_command: oldStyle },
+			{ id: row.id, token: 'aaaaaaaaaaaaaaa', install_command: command }
 		];
 		let step = 0;
 		installFetch((call) => {
@@ -656,7 +678,7 @@ describe('auth routes', { concurrency: false }, () => {
 		async function create() {
 			return projectActions.createToken(
 				fakeEvent({
-					url: `http://console.example/projects/${PROJECT.id}?tab=tokens`,
+					url: `http://console.example/projects/${PROJECT.id}?tab=hosts`,
 					session: TOKEN,
 					user: USER,
 					projects: [admin],
@@ -669,7 +691,9 @@ describe('auth routes', { concurrency: false }, () => {
 		assert.equal(isRedirect(shown), false);
 		assert.equal(isActionFailure(shown), false);
 		if (!shown || isRedirect(shown) || isActionFailure(shown)) assert.fail('expected the join token');
+		assert.equal(shown.scope, 'hosts');
 		assert.equal(shown.created?.token, JOIN);
+		assert.equal(shown.created?.id, row.id);
 		assert.equal(shown.created?.server, 'wss://api.example/agent');
 		assert.equal(shown.message, null);
 		assert.equal(JSON.stringify(shown).includes('install_command'), false);
@@ -722,11 +746,14 @@ describe('auth routes', { concurrency: false }, () => {
 			}).event as never
 		));
 		assert.equal(containsToken(again, JOIN), false);
+		const addHost = readFileSync(new URL('../src/routes/projects/[id]/AddHostSection.svelte', import.meta.url), 'utf8');
+		assert.equal(addHost.includes('install_command'), false);
+		assert.equal(addHost.includes('Copy install command'), false);
+		assert.match(addHost, /Copy token/);
+		assert.match(addHost, /Copy enrol command/);
 		const tokensPage = readFileSync(new URL('../src/routes/projects/[id]/TokensSection.svelte', import.meta.url), 'utf8');
-		assert.equal(tokensPage.includes('install_command'), false);
-		assert.equal(tokensPage.includes('Copy install command'), false);
-		assert.match(tokensPage, /Copy token/);
-		assert.match(tokensPage, /Copy enrol command/);
+		assert.equal(tokensPage.includes('created.token'), false);
+		assert.equal(tokensPage.includes('createToken'), false);
 	});
 
 	test('device load, approve, deny, a mismatched code, and an expired status', async () => {

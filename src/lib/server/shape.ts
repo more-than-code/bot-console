@@ -604,10 +604,11 @@ export function parseDevice(value: unknown): DeviceView | null {
 
 export function parseCreatedJoin(value: unknown): CreatedJoin | null {
 	if (!isRecord(value)) return null;
+	const id = text(value.id, 36);
 	const token = text(value.token, 128);
-	if (!token || !isJoinToken(token)) return null;
+	if (!id || !isUuid(id) || !token || !isJoinToken(token)) return null;
 	const command = text(value.install_command, 4096);
-	return { token, server: command ? acceptedInstallServer(command, token) : null };
+	return { id, token, server: command ? acceptedInstallServer(command, token) : null };
 }
 
 export type ListPage = { raw: unknown[]; next: string | null };

@@ -507,8 +507,9 @@ export type DeviceView = {
 	status: 'pending' | 'approved' | 'denied' | 'expired';
 };
 
-/** Token from create, plus the server URL taken from the API install command. The command itself is not kept. */
+/** Token id and plaintext from create, plus the server URL taken from the API install command. The command itself is not kept. */
 export type CreatedJoin = {
+	id: string;
 	token: string;
 	server: string | null;
 };

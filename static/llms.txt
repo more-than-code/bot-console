@@ -36,6 +36,7 @@ Hosted service: console at https://console.deploybot.dev, MCP server at https://
 
 ## Add a host
 
+- AI agents: follow "Enrol with an AI agent" in the install guide below. The user gives you access to the host (their SSH, a shell on the host, their cloud console, or commands they paste); you run the download, checks and install with the policy flags they agree to, then hand them the enrol command from the install output. The user creates the join token, fills in the server URL from the console and types the token at the enrol prompt themselves. Never ask for, read or handle the join token.
 - [Install bot-agent](https://github.com/more-than-code/bot-agent/blob/dev/docs/install.md): `install.sh`, enrolling with a one-time join token, the optional root runner for catalog entries, and the host allowlist (`/etc/bot-agent/runner.toml`).
 - [bot-agent README](https://github.com/more-than-code/bot-agent/blob/dev/README.md): what the agent collects, how it deploys images and programs, and health checks.
 
