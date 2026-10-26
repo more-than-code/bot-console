@@ -24,7 +24,7 @@ Hosted service: console at https://console.deploybot.dev, MCP server at https://
 
 ## Connect an MCP client
 
-- [bot-mcp-server README](https://github.com/more-than-code/bot-mcp-server/blob/dev/README.md): the full tool reference, the OAuth sign-in, and `deploybot login` for clients without a browser.
+- [bot-mcp-server README](https://github.com/more-than-code/bot-mcp-server/blob/main/README.md): the full tool reference, the OAuth sign-in, and `deploybot login` for clients without a browser.
 - Claude Code example: `claude mcp add --transport http deploybot https://mcp.deploybot.dev/mcp`. Any client with Streamable HTTP and OAuth can connect the same way; it discovers sign-in from `https://mcp.deploybot.dev/.well-known/oauth-protected-resource`.
 
 ## MCP tools
@@ -37,8 +37,8 @@ Hosted service: console at https://console.deploybot.dev, MCP server at https://
 ## Add a host
 
 - AI agents: follow "Enrol with an AI agent" in the install guide below. The user gives you access to the host (their SSH, a shell on the host, their cloud console, or commands they paste); you run the download, checks and install with the policy flags they agree to, then hand them the enrol command from the install output. The user creates the join token, fills in the server URL from the console and types the token at the enrol prompt themselves. Never ask for, read or handle the join token.
-- [Install bot-agent](https://github.com/more-than-code/bot-agent/blob/dev/docs/install.md): `install.sh`, enrolling with a one-time join token, the optional root runner for catalog entries, and the host allowlist (`/etc/bot-agent/runner.toml`).
-- [bot-agent README](https://github.com/more-than-code/bot-agent/blob/dev/README.md): what the agent collects, how it deploys images and programs, and health checks.
+- [Install bot-agent](https://github.com/more-than-code/bot-agent/blob/main/docs/install.md): `install.sh`, enrolling with a one-time join token, the optional root runner for catalog entries, and the host allowlist (`/etc/bot-agent/runner.toml`).
+- [bot-agent README](https://github.com/more-than-code/bot-agent/blob/main/README.md): what the agent collects, how it deploys images and programs, and health checks.
 
 ## Features
 
@@ -48,14 +48,14 @@ Hosted service: console at https://console.deploybot.dev, MCP server at https://
 
 ## Self-hosting from source
 
-- [bot-api-server](https://github.com/more-than-code/bot-api-server/blob/dev/README.md): the API, the only part that writes the Postgres database and decides permissions. AGPL-3.0-only.
-- [bot-mcp-server](https://github.com/more-than-code/bot-mcp-server/blob/dev/README.md): the stateless MCP gateway. AGPL-3.0-only.
-- [bot-console](https://github.com/more-than-code/bot-console/blob/dev/README.md): the SvelteKit web console. AGPL-3.0-only.
-- [bot-agent](https://github.com/more-than-code/bot-agent/blob/dev/README.md): the host agent, in Go. Apache-2.0.
+- [bot-api-server](https://github.com/more-than-code/bot-api-server/blob/main/README.md): the API, the only part that writes the Postgres database and decides permissions. AGPL-3.0-only.
+- [bot-mcp-server](https://github.com/more-than-code/bot-mcp-server/blob/main/README.md): the stateless MCP gateway. AGPL-3.0-only.
+- [bot-console](https://github.com/more-than-code/bot-console/blob/main/README.md): the SvelteKit web console. AGPL-3.0-only.
+- [bot-agent](https://github.com/more-than-code/bot-agent/blob/main/README.md): the host agent, in Go. Apache-2.0.
 
 ## Optional
 
-- [API contract](https://github.com/more-than-code/bot-api-server/blob/dev/docs/contracts/api-v1.md): every `/v1` endpoint, request and response.
-- [OAuth contract](https://github.com/more-than-code/bot-api-server/blob/dev/docs/contracts/oauth-v1.md): sign-in for the console, the CLI and MCP clients.
-- [Agent protocol](https://github.com/more-than-code/bot-agent/blob/dev/docs/contracts/agent-protocol-v1.md): the messages between bot-agent and the API.
-- [API design](https://github.com/more-than-code/bot-api-server/blob/dev/docs/design.md): how the API server is built.
+- [API contract](https://github.com/more-than-code/bot-api-server/blob/main/docs/contracts/api-v1.md): every `/v1` endpoint, request and response.
+- [OAuth contract](https://github.com/more-than-code/bot-api-server/blob/main/docs/contracts/oauth-v1.md): sign-in for the console, the CLI and MCP clients.
+- [Agent protocol](https://github.com/more-than-code/bot-agent/blob/main/docs/contracts/agent-protocol-v1.md): the messages between bot-agent and the API.
+- [API design](https://github.com/more-than-code/bot-api-server/blob/main/docs/design.md): how the API server is built.

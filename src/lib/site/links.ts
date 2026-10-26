@@ -11,5 +11,5 @@ export const SIGN_IN_URL = '/signin';
 
 export const SUPPORT_EMAIL = 'support@deploybot.dev';
 
-/** Public source repos. Links use dev: the default branch of bot-agent and bot-console lacks the licence and install guide. */
-export const REPO_URL = (repo: string) => `https://github.com/more-than-code/${repo}/tree/dev`;
+/** Public source repos. Links use main, the latest release (each repo's default branch); dev is work in progress. */
+export const REPO_URL = (repo: string) => `https://github.com/more-than-code/${repo}/tree/main`;

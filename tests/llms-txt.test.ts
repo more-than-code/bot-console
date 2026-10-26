@@ -13,3 +13,12 @@ test('llms.txt starts with the Deploybot heading and the pitch', () => {
 test('llms.txt names no retired hosts and claims no macOS support', () => {
 	assert.doesNotMatch(LLMS, /api2\.|console2\.|macos|mac mini/i);
 });
+
+test('llms.txt links point at main, the latest release', () => {
+	assert.doesNotMatch(LLMS, /\/blob\/dev\//);
+	assert.match(LLMS, /bot-agent\/blob\/main\/docs\/install\.md/);
+});
+
+test('robots.txt allows all crawlers', () => {
+	assert.equal(readFileSync('static/robots.txt', 'utf8'), 'User-agent: *\nAllow: /\n');
+});

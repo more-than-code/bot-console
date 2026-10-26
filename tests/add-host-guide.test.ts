@@ -14,7 +14,7 @@ import { setPageUrl } from './stubs/app-state.ts';
 const SERVER = 'wss://api.example/agent';
 const TOKEN_ID = '00000000-0000-4000-8000-000000000070';
 const RELEASES = 'https://github.com/more-than-code/bot-agent/releases/latest';
-const GUIDE = 'https://github.com/more-than-code/bot-agent/blob/dev/docs/install.md';
+const GUIDE = 'https://github.com/more-than-code/bot-agent/blob/main/docs/install.md';
 const ENROL = `sudo ./install.sh enroll --server '${SERVER}' --runner`;
 const PLACEHOLDER = "sudo ./install.sh enroll --server '<your server URL>' --runner";
 
@@ -152,9 +152,9 @@ test('the add-a-host guide shows the slug and both links, and starts open with n
 	const guide = open.match(/<details\b[\s\S]*?<\/details>/)?.[0] ?? '';
 	assert.equal(guide.match(/<li\b/g)?.length, 6);
 	assert.match(open, /<\/summary>\s*<p>An AI agent can run these steps for you\.[^<]*<\/p>\s*<div>[\s\S]*?Copy instructions for your AI agent[\s\S]*?<\/div>\s*<p>Run the commands below on the host you are adding \(for example over ssh -t\)\.<\/p>\s*<ol\b/);
-	assert.equal(open.includes('projects = ["lab"]'), true);
-	assert.equal(open.includes('sudo ./install.sh check --runner'), true);
-	assert.equal(open.includes('sudo ./install.sh install --runner'), true);
+	assert.match(open, /sudo \.\/install\.sh check --runner --project lab --image (?:'|&#39;)&lt;pattern(?:>|&gt;)(?:'|&#39;) --enable/);
+	assert.match(open, /sudo \.\/install\.sh install --runner --project lab --image (?:'|&#39;)&lt;pattern(?:>|&gt;)(?:'|&#39;) --enable/);
+	assert.match(open, /<code>next:<\/code> line, with the server URL shown on the token card/);
 	assert.equal(open.includes('sha256sum -c'), true);
 	assert.match(open, /The host appears in the list below as online\./);
 	for (const href of [RELEASES, GUIDE]) {
@@ -168,7 +168,7 @@ test('the add-a-host guide shows the slug and both links, and starts open with n
 
 	const closed = renderHosts(null, true);
 	assert.equal(detailsOpen(closed), false);
-	assert.equal(closed.includes('projects = ["lab"]'), true);
+	assert.equal(closed.includes('--project lab'), true);
 });
 
 test('an empty host list links an admin to the Add a host card and tells a viewer to ask', () => {

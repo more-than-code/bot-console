@@ -6,12 +6,13 @@
 	import * as Card from '$lib/components/ui/card';
 
 	const RELEASES = 'https://github.com/more-than-code/bot-agent/releases/latest';
-	const GUIDE = 'https://github.com/more-than-code/bot-agent/blob/dev/docs/install.md';
+	const GUIDE = 'https://github.com/more-than-code/bot-agent/blob/main/docs/install.md';
 
 	let { slug, open }: { slug: string; open: boolean } = $props();
 	// Initial state only: a later host count change (the token card polls) must not collapse or expand it.
 	const startOpen = untrack(() => open);
-	const projectsLine = $derived(`projects = ["${slug}"]`);
+	// Policy flags need bundle v0.2.7+; <pattern> stays for the admin to fill in.
+	const policyFlags = $derived(`--runner --project ${slug} --image '<pattern>' --enable`);
 	const prompt = $derived(agentPrompt(slug));
 </script>
 
@@ -30,16 +31,14 @@
 				and verify it (sha256sum -c …).
 			</li>
 			<li>
-				<CommandBlock command="sudo ./install.sh check --runner" label="Copy check command" ariaLabel="Check command" />
+				<p>Replace &lt;pattern&gt; with the image registries this host may run, for example docker.io/library/*. Repeat --image for more. Needs bot-agent v0.2.7 or later.</p>
+				<CommandBlock command={`sudo ./install.sh check ${policyFlags}`} label="Copy check command" ariaLabel="Check command" />
 			</li>
 			<li>
-				<CommandBlock command="sudo ./install.sh install --runner" label="Copy runner install command" ariaLabel="Runner install command" />
+				<CommandBlock command={`sudo ./install.sh install ${policyFlags}`} label="Copy runner install command" ariaLabel="Runner install command" />
 			</li>
-			<li>
-				<p>Review /etc/bot-agent/runner.toml: images, projects, and enabled = true.</p>
-				<CommandBlock command={projectsLine} label="Copy projects line" ariaLabel="runner.toml projects" />
-			</li>
-			<li>Create a join token below, then run the enrol command shown after creation. The token is typed at the prompt.</li>
+			<li>For programs, or a policy the flags can't express, install with --runner only and edit /etc/bot-agent/runner.toml by hand (see the full guide).</li>
+			<li>Create a join token below. Run the enrol command from the install output's <code>next:</code> line, with the server URL shown on the token card. The token is typed at the prompt.</li>
 			<li>The host appears in the list below as online.</li>
 		</ol>
 		<p>

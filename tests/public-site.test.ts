@@ -337,7 +337,7 @@ describe('public site pages', () => {
 		assert.ok(body.indexOf('id="source-title"') > body.indexOf('id="how-title"'), 'after How it works');
 		const source = body.slice(body.indexOf('id="source-title"'));
 		for (const repo of ['bot-agent', 'bot-api-server', 'bot-mcp-server', 'bot-console']) {
-			assert.ok(source.includes(`href="https://github.com/more-than-code/${repo}/tree/dev"`), repo);
+			assert.ok(source.includes(`href="https://github.com/more-than-code/${repo}/tree/main"`), repo);
 		}
 		assert.equal(source.match(/AGPL-3\.0-only/g)?.length, 3);
 		assert.ok(source.includes('Apache-2.0'));
