@@ -20,7 +20,7 @@
 	}: {
 		action: string;
 		message: string | null;
-		settingsField?: 'dotenv' | 'token' | 'file' | null;
+		settingsField?: 'dotenv' | 'token' | 'file' | 'merge' | null;
 		/** Sets the Env sets card's status line: empty when a save starts, "Saved env set {name}." on success. */
 		onStatus?: (text: string) => void;
 	} = $props();

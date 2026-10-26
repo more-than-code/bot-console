@@ -148,7 +148,7 @@ test('a secret preview has hidden text and the glyphs are hidden from assistive 
 		updated_by: '00000000-0000-4000-8000-0000000000d1'
 	};
 	const html = render(EnvSetTable, {
-		props: { set, putAction: '?/putEnvKey', deleteAction: '?/deleteEnvKey', deleteSetAction: '?/deleteEnvSet', makeSecretAction: '?/makeEnvKeysSecret' }
+		props: { set, putAction: '?/putEnvKey', deleteAction: '?/deleteEnvKey', deleteSetAction: '?/deleteEnvSet', makeSecretAction: '?/makeEnvKeysSecret', mergeAction: '?/mergeEnvSet' }
 	}).body;
 	assert.equal(html.split('<span class="sr-only">secret, preview only</span>').length - 1, 2);
 	assert.equal(html.includes('aria-label="secret, preview only"'), false);
@@ -234,12 +234,13 @@ test('the edit form sits in its row and the add form in a dialog', () => {
 	const eachAt = source.indexOf('{#each set.keys');
 	const editAt = source.indexOf("id={domId('edit-form', item.key)}");
 	assert.ok(eachAt > 0 && editAt > eachAt);
-	// The add form is no longer in the panel: it is the Add variable dialog's form.
+	// The add form is no longer in the panel: it is the Add variables dialog's One variable tab.
 	assert.equal(source.includes('name="op"'), false);
-	assert.match(source, /<EnvAddVariableDialog\b/);
-	const dialog = readRoute('EnvAddVariableDialog.svelte');
+	assert.match(source, /<EnvAddVariablesDialog\b/);
+	assert.doesNotMatch(source, /<EnvAddVariableDialog\b/);
+	const dialog = readRoute('EnvAddVariablesDialog.svelte');
 	assert.match(dialog, /<Input type="hidden" name="op" value="add" \/>/);
-	assert.match(dialog, /<Dialog\.Trigger id=\{id\('add-variable'\)\}/);
+	assert.match(dialog, /<Dialog\.Trigger id=\{triggerId\}/);
 	// At 375 px the dialog fields stack: one grid column, no side-by-side row.
 	assert.match(dialog, /class="grid min-h-0 gap-3 overflow-y-auto"/);
 	assert.equal(dialog.includes('sm:flex-row'), false);
@@ -269,9 +270,9 @@ test('toggling Secret in the Add variable dialog keeps the typed value', () => {
 	const hidden = setAddSecret(shown, true);
 	assert.equal(hidden.value, 'kept-value');
 	assert.equal(hidden.secret, true);
-	const source = readRoute('EnvAddVariableDialog.svelte');
+	const source = readRoute('EnvAddVariablesDialog.svelte');
 	assert.equal(source.match(/id=\{id\('add-value'\)\}/g)?.length, 1);
-	assert.match(source, /type=\{draft\.secret \? 'password' : 'text'\}/);
-	assert.match(source, /bind:value=\{draft\.value\}/);
-	assert.match(source, /draft = setAddSecret\(draft, value === true\)/);
+	assert.match(source, /type=\{view\.draft\.secret \? 'password' : 'text'\}/);
+	assert.match(source, /bind:value=\{view\.draft\.value\}/);
+	assert.match(source, /draft: setAddSecret\(view\.draft, value === true\)/);
 });

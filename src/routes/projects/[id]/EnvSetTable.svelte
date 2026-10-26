@@ -14,7 +14,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Table from '$lib/components/ui/table';
-	import EnvAddVariableDialog from './EnvAddVariableDialog.svelte';
+	import EnvAddVariablesDialog from './EnvAddVariablesDialog.svelte';
 	import EnvValueEditor from './EnvValueEditor.svelte';
 	import {
 		MAKE_SECRET_MESSAGE,
@@ -29,6 +29,7 @@
 		keyWrapParts,
 		madeSecretNote,
 		rowEditErrorText,
+		savedVariablesNote,
 		rowEditFailed,
 		secretEditRefusal,
 		toggleEnvSet,
@@ -41,6 +42,8 @@
 		deleteAction,
 		deleteSetAction,
 		makeSecretAction,
+		mergeAction,
+		mergeError = null,
 		onAction = () => {}
 	}: {
 		set: EnvSet;
@@ -48,6 +51,9 @@
 		deleteAction: string;
 		deleteSetAction: string;
 		makeSecretAction: string;
+		mergeAction: string;
+		/** An Add variables (paste) failure for this set, shown on that dialog's Paste several tab. */
+		mergeError?: string | null;
 		/** Another env action ran here (save, add, make secret, delete): the card clears "Saved env set …". */
 		onAction?: () => void;
 	} = $props();
@@ -181,12 +187,20 @@
 			<span class="text-muted-foreground">{envSetKeyCount(set.keys.length)}</span>
 		</Button>
 		<div class="flex flex-wrap items-center gap-2">
-			<EnvAddVariableDialog
+			<EnvAddVariablesDialog
 				setName={set.name}
-				action={putAction}
+				existingKeys={set.keys.map((row) => row.key)}
+				addAction={putAction}
+				{mergeAction}
+				{mergeError}
 				onAdded={(key) => {
 					onAction();
 					statusNote = `Added ${key}.`;
+					panel = { ...panel, open: true };
+				}}
+				onMerged={() => {
+					onAction();
+					statusNote = savedVariablesNote(set.name);
 					panel = { ...panel, open: true };
 				}}
 			/>

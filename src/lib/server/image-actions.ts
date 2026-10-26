@@ -385,13 +385,23 @@ export async function catalogImageDigest(event: RequestEvent) {
 
 const PASTE_AGAIN = 'Paste the value again.';
 
+/** The value of one pasted line as the API reads it: a leading `export ` dropped, quotes or an unquoted ` #` comment removed. */
+function dotenvLineValue(line: string): string | null {
+	const body = line.trim().replace(/^export\s+/, '');
+	const eq = body.indexOf('=');
+	if (eq === -1) return null;
+	const raw = body.slice(eq + 1).trim();
+	const quoted = /^(['"])(.*?)\1/.exec(raw);
+	if (quoted) return quoted[2] ?? '';
+	return raw.replace(/\s+#.*$/, '');
+}
+
+/** Every value in a paste, to redact from an API message. CRLF and lone CR line ends count as line breaks. */
 function dotenvSecrets(dotenv: string): string[] {
 	const secrets = dotenv === '' ? [] : [dotenv];
-	for (const line of dotenv.split('\n')) {
-		const eq = line.indexOf('=');
-		if (eq === -1) continue;
-		const value = line.slice(eq + 1).trim().replace(/^['"]|['"]$/g, '');
-		if (value !== '') secrets.push(value);
+	for (const line of dotenv.split(/\r\n|\r|\n/)) {
+		const value = dotenvLineValue(line);
+		if (value) secrets.push(value);
 	}
 	return secrets;
 }
@@ -399,6 +409,11 @@ function dotenvSecrets(dotenv: string): string[] {
 function settingsFailure(event: RequestEvent, status: number, message: string, settingsField: 'dotenv' | 'token' | 'file' | null = null) {
 	const text = settingsField ? `${message} ${PASTE_AGAIN}` : message;
 	return fail(status, present(event, { scope: 'settings' as const, message: text, settingsField }));
+}
+
+/** An Add variables failure. `settingsName` is the set, so only that set's dialog shows it. */
+function mergeFailure(event: RequestEvent, status: number, name: string, message: string) {
+	return fail(status, present(event, { scope: 'settings' as const, message: `${message} ${PASTE_AGAIN}`, settingsField: 'merge' as const, settingsName: name }));
 }
 
 function fileSecrets(content: string): string[] {
@@ -423,6 +438,9 @@ function filePath(id: string, name: string): string | null {
 	return `/v1/projects/${id}/files/${encodeURIComponent(name)}`;
 }
 
+/** `PUT …/env-sets/{set}` (api-v1 v1.19). The console never sends the default `replace`. */
+type EnvSetPutBody = { dotenv: string; new_keys_secret: boolean; mode: 'create' | 'merge' };
+
 export async function saveEnvSet(event: RequestEvent) {
 	requireUser(event);
 	const id = projectIdOf(event.params);
@@ -433,13 +451,39 @@ export async function saveEnvSet(event: RequestEvent) {
 	if (dotenv.length === 0 || new TextEncoder().encode(dotenv).byteLength > DOTENV_MAX) {
 		return settingsFailure(event, 400, 'Paste a dotenv file of at most 256 KiB.', 'dotenv');
 	}
-	const body = { dotenv, new_keys_secret: formText(form, 'new_keys_secret') !== '0' };
+	// `create` (api-v1 v1.19): an existing set is refused, never replaced.
+	const body: EnvSetPutBody = { dotenv, new_keys_secret: formText(form, 'new_keys_secret') !== '0', mode: 'create' };
 	try {
 		await apiFetch(event, `/v1/projects/${id}/env-sets/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify(body) });
 		redirect(303, backTo(event.url));
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
+		if (err instanceof ApiError && err.code === 'conflict') {
+			const message = `An env set named ${name} already exists. Use Add variables on that set.`;
+			return fail(409, present(event, { scope: 'settings' as const, message, settingsField: 'dotenv' as const }));
+		}
 		return settingsFailure(event, apiStatus(err), redactSubmitted(apiMessage(err), dotenvSecrets(dotenv)), 'dotenv');
+	}
+}
+
+/** Add variables (api-v1 v1.19 `merge`): pasted keys are added or updated, the other keys in the set stay. */
+export async function mergeEnvSet(event: RequestEvent) {
+	requireUser(event);
+	const id = projectIdOf(event.params);
+	const form = await event.request.formData();
+	const name = formText(form, 'set');
+	const dotenv = formText(form, 'dotenv');
+	if (!isSetName(name)) return settingsFailure(event, 400, 'That env set is not valid.');
+	if (dotenv.length === 0 || new TextEncoder().encode(dotenv).byteLength > DOTENV_MAX) {
+		return mergeFailure(event, 400, name, 'Paste the variables, at most 256 KiB.');
+	}
+	const body: EnvSetPutBody = { dotenv, new_keys_secret: formText(form, 'new_keys_secret') !== '0', mode: 'merge' };
+	try {
+		await apiFetch(event, `/v1/projects/${id}/env-sets/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify(body) });
+		redirect(303, backTo(event.url));
+	} catch (err) {
+		if (isRedirect(err) || isHttpError(err)) throw err;
+		return mergeFailure(event, apiStatus(err), name, redactSubmitted(apiMessage(err), dotenvSecrets(dotenv)));
 	}
 }
 

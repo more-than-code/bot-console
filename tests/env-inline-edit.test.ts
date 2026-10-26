@@ -52,7 +52,8 @@ const TABLE_PROPS = {
 	putAction: '?/putEnvKey',
 	deleteAction: '?/deleteEnvKey',
 	deleteSetAction: '?/deleteEnvSet',
-	makeSecretAction: '?/makeEnvKeysSecret'
+	makeSecretAction: '?/makeEnvKeysSecret',
+	mergeAction: '?/mergeEnvSet'
 };
 
 function source(name: string): string {
@@ -107,31 +108,35 @@ describe('env-set inline edit and Add variable dialog', () => {
 		assert.equal(html.includes(PLAIN), true);
 	});
 
-	test('Add variable is a dialog trigger titled for the set', () => {
+	test('Add variables is the one dialog trigger, titled for the set; One variable is its first tab', () => {
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=settings`);
 		const html = render(EnvSetTable, { props: { set: SET, ...TABLE_PROPS } }).body;
-		const tag = html.match(/<button\b[^>]*id="env-add-variable-app"[^>]*>/)?.[0] ?? '';
+		const tag = html.match(/<button\b[^>]*id="env-add-variables-app"[^>]*>/)?.[0] ?? '';
 		assert.match(tag, /aria-haspopup="dialog"/);
 		assert.match(tag, /aria-expanded="false"/);
-		assert.match(tag, /aria-label="Add variable to app"/);
-		const dialog = source('EnvAddVariableDialog.svelte');
-		assert.match(dialog, /<Dialog\.Title[^>]*>Add variable to \{setName\}<\/Dialog\.Title>/);
+		assert.match(tag, /aria-label="Add variables to app"/);
+		// The separate Add variable trigger is gone.
+		assert.equal(html.includes('id="env-add-variable-app"'), false);
+		assert.equal(html.includes('aria-label="Add variable to app"'), false);
+		const dialog = source('EnvAddVariablesDialog.svelte');
+		assert.match(dialog, /<Dialog\.Title[^>]*>Add variables to \{setName\}<\/Dialog\.Title>/);
 		assert.match(dialog, /name="key"[\s\S]*?required[\s\S]*?maxlength=\{64\}[\s\S]*?autocomplete="off"[\s\S]*?spellcheck="false"/);
-		assert.match(dialog, /<Button type="submit">Add<\/Button>/);
+		assert.match(dialog, /<Button type="submit" form=\{id\('add-form'\)\}>Add variable<\/Button>/);
 		assert.match(dialog, /<Dialog\.Close [^>]*>Cancel<\/Dialog\.Close>/);
 	});
 
 	test('the dialog resets its draft on close, shows the paste-again hint, and links its fields', () => {
-		const dialog = source('EnvAddVariableDialog.svelte');
-		assert.match(dialog, /function onOpenChange\(next: boolean\) \{\s*if \(!next\) draft = initialAddDraft\(\);\s*\}/);
-		assert.match(dialog, /<Notice kind="error">\{addErrorText\(draft\)\}<\/Notice>/);
+		const dialog = source('EnvAddVariablesDialog.svelte');
+		assert.match(dialog, /function onOpenChange\(\) \{\s*view = closeAddVariables\(view\);\s*\}/);
+		assert.match(dialog, /<Notice kind="error">\{addErrorText\(view\.draft\)\}<\/Notice>/);
 		// Key is marked invalid only for a key error; Value always points at the error.
 		assert.match(dialog, /aria-invalid=\{keyError \? true : undefined\}\s*aria-describedby=\{keyError \? id\('add-error'\) : undefined\}/);
-		assert.match(dialog, /aria-describedby=\{draft\.error \? id\('add-error'\) : undefined\}/);
-		assert.match(dialog, /oninput=\{\(\) => \(draft = addValueTyped\(draft\)\)\}/);
-		// Close focus: preventDefault always; the trigger is focused explicitly unless a success is closing it.
-		const close = dialog.slice(dialog.indexOf('function onCloseAutoFocus'), dialog.indexOf('async function showError'));
-		assert.match(close, /event\.preventDefault\(\);\s*if \(closingAfterAdd\) \{\s*closingAfterAdd = false;\s*return;\s*\}\s*focusById\(id\('add-variable'\)\)/);
+		assert.match(dialog, /aria-describedby=\{view\.draft\.error \? id\('add-error'\) : undefined\}/);
+		assert.match(dialog, /oninput=\{\(\) => \(view = \{ \.\.\.view, draft: addValueTyped\(view\.draft\) \}\)\}/);
+		// Close focus: the trigger is focused explicitly (restoreFocusTo) unless a success is closing it.
+		const close = dialog.slice(dialog.indexOf('function onCloseAutoFocus'), dialog.indexOf('function closeAfterSave'));
+		assert.match(close, /if \(closingAfterSave\) \{\s*event\.preventDefault\(\);\s*closingAfterSave = false;\s*return;\s*\}\s*restoreFocusTo\(triggerId\)\(event\)/);
+		assert.match(dialog, /const triggerId = \$derived\(id\('add-variables'\)\)/);
 
 		const failed = addFailed({ ...initialAddDraft(), key: 'TOKEN', value: TYPED, secret: true }, 'refused [redacted]');
 		assert.equal(addErrorText(failed), `refused [redacted] ${RETYPE_VALUE}`);
@@ -148,6 +153,9 @@ describe('env-set inline edit and Add variable dialog', () => {
 		assert.equal(addKeyError('API_TOKEN'), null);
 		assert.equal(addKeyError('bad key'), ADD_KEY_MESSAGE);
 		assert.equal(addKeyError(''), ADD_KEY_MESSAGE);
+		assert.equal(addKeyError('API_TOKEN', ['API_TOKEN']), 'API_TOKEN is already in this set. Use Edit on its row to change the value.');
+		assert.equal(addKeyError('bad key', ['bad key']), ADD_KEY_MESSAGE);
+		assert.equal(addKeyError('NEW_KEY', ['API_TOKEN']), null);
 		// A Key refused before sending keeps the typed secret value: nothing was sent.
 		const typed = { ...initialAddDraft(), key: 'bad key', value: TYPED, secret: true, retype: true };
 		assert.deepEqual(addKeyRefused(typed, ADD_KEY_MESSAGE), {
@@ -158,9 +166,9 @@ describe('env-set inline edit and Add variable dialog', () => {
 			errorField: 'key',
 			retype: false
 		});
-		const dialog = source('EnvAddVariableDialog.svelte');
-		assert.match(dialog, /draft = addKeyRefused\(draft, invalid\)/);
-		assert.equal(dialog.includes("addFailed(draft, invalid"), false);
+		const dialog = source('EnvAddVariablesDialog.svelte');
+		assert.match(dialog, /draft: addKeyRefused\(view\.draft, invalid\)/);
+		assert.equal(dialog.includes('addTabFailed(view, invalid'), false);
 		assert.equal(failureMessage({ type: 'failure', data: { message: 'bad key' } }), 'bad key');
 		assert.equal(failureMessage({ type: 'failure', data: {} }), 'The value could not be saved.');
 		assert.equal(failureMessage({ type: 'failure' }), 'The value could not be saved.');
@@ -185,8 +193,9 @@ describe('env-set inline edit and Add variable dialog', () => {
 		assert.deepEqual(await run(true, 'failure'), { outcome: 'failed', calls: ['failed'] });
 		assert.deepEqual(await run(false, 'failure'), { outcome: 'ignored', calls: [] });
 		assert.deepEqual(await run(true, 'error'), { outcome: 'other', calls: ['update'] });
-		const dialog = source('EnvAddVariableDialog.svelte');
+		const dialog = source('EnvAddVariablesDialog.svelte');
 		assert.match(dialog, /await settleAdd\(open, result\.type,/);
+		assert.match(dialog, /update: \(\) => updateInPlace\(result, update\)/);
 	});
 
 	test('a plain row in edit state renders a pre-filled, wide text input', () => {

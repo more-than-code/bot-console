@@ -29,7 +29,8 @@ const TABLE_PROPS = {
 	putAction: '?/putEnvKey',
 	deleteAction: '?/deleteEnvKey',
 	deleteSetAction: '?/deleteEnvSet',
-	makeSecretAction: '?/makeEnvKeysSecret'
+	makeSecretAction: '?/makeEnvKeysSecret',
+	mergeAction: '?/mergeEnvSet'
 };
 
 function decode(value: string): string {

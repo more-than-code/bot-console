@@ -153,3 +153,8 @@ export async function settleEnvSetSave(
 	}
 	return 'other';
 }
+
+/** The set's status line after Add variables (api-v1 v1.19 merge). */
+export function savedVariablesNote(name: string): string {
+	return `Saved variables in ${name}.`;
+}

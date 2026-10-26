@@ -39,7 +39,7 @@
 		canOwner: boolean;
 		canAdmin?: boolean;
 		message: string | null;
-		settingsField?: 'dotenv' | 'token' | 'file' | null;
+		settingsField?: 'dotenv' | 'token' | 'file' | 'merge' | null;
 		envSets?: EnvSet[];
 		envSetsMessage?: string | null;
 		files?: ProjectFile[];
@@ -137,6 +137,8 @@
 					deleteAction={actionUrlFrom(page.url, 'deleteEnvKey')}
 					deleteSetAction={actionUrlFrom(page.url, 'deleteEnvSet')}
 					makeSecretAction={actionUrlFrom(page.url, 'makeEnvKeysSecret')}
+					mergeAction={actionUrlFrom(page.url, 'mergeEnvSet')}
+					mergeError={settingsField === 'merge' && settingsName === set.name ? message : null}
 					onAction={() => (envSetNote = '')}
 				/>
 			{/each}
@@ -203,7 +205,7 @@
 							/>
 						</div>
 					</div>
-					{#if message && settingsName === file.name}
+					{#if message && !settingsField && settingsName === file.name}
 						<div class="max-w-full min-w-0 break-all">
 							<Notice kind="error">{message}</Notice>
 						</div>

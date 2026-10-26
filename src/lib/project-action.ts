@@ -138,9 +138,9 @@ export type ProjectActionData = {
 	catalogImageDigest?: ImageDigestResult;
 	/** Plain file content from View. Secret files never set this. */
 	viewedFile?: { name: string; content: string } | null;
-	/** Which settings form failed. The secret field is cleared either way. */
-	settingsField?: 'dotenv' | 'token' | 'file' | null;
-	/** File a delete failure belongs to. The notice sits on that row, not under the dialog. */
+	/** Which settings form failed. The secret field is cleared either way. `merge` is Add variables; `settingsName` is its set. */
+	settingsField?: 'dotenv' | 'token' | 'file' | 'merge' | null;
+	/** File a delete failure belongs to (the notice sits on that row), or the set of an Add variables failure. */
 	settingsName?: string | null;
 };
 

@@ -714,7 +714,8 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 		);
 		assert.deepEqual(JSON.parse(saved[0]?.body ?? '{}'), {
 			dotenv: `LOG_LEVEL=${PLAIN}\nAPI_TOKEN=${SECRET}`,
-			new_keys_secret: false
+			new_keys_secret: false,
+			mode: 'create'
 		});
 		const implicit = installFetch(() => envelope({}));
 		await expectRedirect(() =>
