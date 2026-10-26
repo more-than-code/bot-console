@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
+    "build:diagram": "node scripts/build-pitch-diagram.mjs",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "prepare": "svelte-kit sync || echo ''",
