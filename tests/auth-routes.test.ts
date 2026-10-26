@@ -746,7 +746,9 @@ describe('auth routes', { concurrency: false }, () => {
 			}).event as never
 		));
 		assert.equal(containsToken(again, JOIN), false);
-		const addHost = readFileSync(new URL('../src/routes/projects/[id]/AddHostSection.svelte', import.meta.url), 'utf8');
+		const addHost = ['AddHostSection.svelte', 'JoinTokenResult.svelte']
+			.map((name) => readFileSync(new URL(`../src/routes/projects/[id]/${name}`, import.meta.url), 'utf8'))
+			.join('\n');
 		assert.equal(addHost.includes('install_command'), false);
 		assert.equal(addHost.includes('Copy install command'), false);
 		assert.match(addHost, /Copy token/);

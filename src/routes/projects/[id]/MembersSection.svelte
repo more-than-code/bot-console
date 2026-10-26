@@ -5,9 +5,11 @@
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import DataTable from '$lib/components/DataTable.svelte';
+	import FormDialog from '$lib/components/FormDialog.svelte';
 	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import type { Invite, InviteRole, Member } from '$lib/api-types';
+	import AddMemberForm from './AddMemberForm.svelte';
 	import { formDialogOutcome, nextFormDialog, nextInviteSecret, type DialogOutcome } from '$lib/dialog-open';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
@@ -35,7 +37,8 @@
 		invitesMessage = null,
 		inviteUrl = null,
 		inviteRole = null,
-		inviteMessage = null
+		inviteMessage = null,
+		addMemberMessage = null
 	}: {
 		members: Member[];
 		omitted: number;
@@ -51,7 +54,12 @@
 		inviteUrl?: string | null;
 		inviteRole?: InviteRole | null;
 		inviteMessage?: string | null;
+		/** The addMember failure message, shown in the Add member dialog. */
+		addMemberMessage?: string | null;
 	} = $props();
+
+	// "Added {email}." after the Add member dialog succeeds.
+	let addedEmail = $state<string | null>(null);
 
 	let open = $state(untrack(() => inviteMessage != null || inviteUrl != null));
 	let sawFailure = $state(untrack(() => inviteMessage != null));
@@ -316,34 +324,24 @@
 		{/snippet}
 	</DataTable>
 
-	<Card.Root class="mt-4">
-		<Card.Header>
-			<Card.Title>Add a member</Card.Title>
-		</Card.Header>
-		<Card.Content>
-			<form method="POST" action={actionUrlFrom(page.url, 'addMember')} class="grid gap-3" use:enhance>
-				<Label class="grid gap-1.5" for="member-email">
-					Email
-					<Input id="member-email" name="email" type="email" required maxlength={254} autocomplete="off" />
-				</Label>
-				<div class="grid gap-1.5">
-					<Label for="member-role">Role</Label>
-					<Select.Root type="single" name="role" value="viewer">
-						<Select.Trigger id="member-role" class="w-full sm:w-40">
-							<Select.Value />
-						</Select.Trigger>
-						<Select.Content>
-							<Select.Item value="viewer">viewer</Select.Item>
-							<Select.Item value="admin">admin</Select.Item>
-						</Select.Content>
-					</Select.Root>
-				</div>
-				<div>
-					<Button type="submit">Add member</Button>
-				</div>
-			</form>
-		</Card.Content>
-	</Card.Root>
+	<div class="mt-4">
+		<FormDialog id="add-member" label="Add member" title="Add member" description="Add a person to this project by email." failed={addMemberMessage != null}>
+			{#snippet children(settle, cancel)}
+				<AddMemberForm
+					action={actionUrlFrom(page.url, 'addMember')}
+					error={addMemberMessage}
+					onAdded={(email) => (addedEmail = email)}
+					onSettled={settle}
+					{cancel}
+				/>
+			{/snippet}
+		</FormDialog>
+		{#if addedEmail}
+			<div class="mt-2 max-w-full min-w-0 break-all">
+				<Notice kind="success">Added {addedEmail}.</Notice>
+			</div>
+		{/if}
+	</div>
 {/if}
 
 {#if canOwner}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Plus from '@lucide/svelte/icons/plus';
 	import { browser } from '$app/environment';
 	import { enhance } from '$app/forms';
 	import { tick, untrack } from 'svelte';
@@ -88,7 +89,10 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Trigger id="new-env-set" class={buttonVariants({ variant: 'outline' })}>New env set</Dialog.Trigger>
+	<Dialog.Trigger id="new-env-set" class={buttonVariants({ variant: 'outline' })}>
+		<Plus class="size-4" />
+		New env set
+	</Dialog.Trigger>
 	<Dialog.Content class="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-xl" {onCloseAutoFocus}>
 		<Dialog.Header class="shrink-0 pr-8">
 			<Dialog.Title>Add env set</Dialog.Title>

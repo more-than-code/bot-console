@@ -13,7 +13,9 @@
 		iconOnly = false,
 		tip,
 		icon: Icon = Copy,
-		onResult
+		onResult,
+		id,
+		class: className
 	}: {
 		value: string;
 		label: string;
@@ -24,6 +26,10 @@
 		icon?: Component;
 		/** Called with the copy note. Icon-only failure is rendered by the caller. */
 		onResult?: (note: string) => void;
+		/** Text button only. */
+		id?: string;
+		/** Extra classes for the text button, such as letting a long label wrap. */
+		class?: string;
 	} = $props();
 	let note = $state('');
 	const copied = $derived(note === COPIED_NOTE);
@@ -69,7 +75,7 @@
 		</Tooltip.Provider>
 	</span>
 {:else}
-	<Button type="button" variant="outline" size="sm" onclick={copy} aria-live="polite">
+	<Button type="button" variant="outline" size="sm" {id} class={className} onclick={copy} aria-live="polite">
 		{#if copied}
 			<Check class="size-4" />Copied
 		{:else}

@@ -4,17 +4,18 @@
 	import ConfirmAction from '$lib/components/ConfirmAction.svelte';
 	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
-	import Textarea from '$lib/components/Textarea.svelte';
+	import FormDialog from '$lib/components/FormDialog.svelte';
 	import EnvSetDialog from './EnvSetDialog.svelte';
 	import EnvSetTable from './EnvSetTable.svelte';
+	import ProjectFileForm from './ProjectFileForm.svelte';
+	import RegistryForm from './RegistryForm.svelte';
 	import { ENV_SET_STATUS_ID } from './env-set-panel';
 	import type { EnvSet, Project, ProjectFile, Registry } from '$lib/api-types';
 	import { formatBytes } from '$lib/format';
-	import { clearSecretField, settleFileSave, showViewedFile } from '$lib/secret-field';
+	import { showViewedFile } from '$lib/secret-field';
 	import { actionUrlFrom } from '$lib/url';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
-	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 
@@ -48,41 +49,12 @@
 		registriesMessage?: string | null;
 	} = $props();
 
-	let token = $state('');
-	let fileContent = $state('');
-	let fileName = $state('');
-	let fileSecret = $state(true);
+	// The Files card's "Saved file {name}." line, set by the Add file dialog.
 	let savedFile = $state<string | null>(null);
+	// The Registries card's "Saved registry {host}." line, set by the Add registry dialog.
+	let savedRegistry = $state<string | null>(null);
 	// The Env sets card's status line ("Saved env set {name}."), set by the New env set dialog.
 	let envSetNote = $state('');
-
-	function clearToken() {
-		return async ({ update }: { update: () => Promise<void> }) => {
-			await clearSecretField((value) => {
-				token = value;
-			}, update);
-			document.getElementById('registry-token-error')?.focus();
-		};
-	}
-
-	function clearFile({ formData }: { formData: FormData }) {
-		const submittedName = String(formData.get('name') ?? '');
-		return async ({ update, result }: { update: () => Promise<void>; result: { type: string } }) => {
-			await settleFileSave(
-				(next) => {
-					fileContent = next.content;
-					fileName = next.name;
-					fileSecret = next.secret;
-					savedFile = next.saved;
-				},
-				{ name: fileName, secret: fileSecret },
-				submittedName,
-				update,
-				result.type
-			);
-			document.getElementById('file-error')?.focus();
-		};
-	}
 </script>
 
 {#if message && !settingsField && !settingsName}
@@ -168,6 +140,19 @@
 		<Card.Header>
 			<Card.Title>Files</Card.Title>
 			<Card.Description>Secret files stay on the API. The paste box is never filled in.</Card.Description>
+			<Card.Action>
+				<FormDialog id="add-file" label="Add file" title="Add file" description="A secret file stays on the API. Its content is not shown again." failed={settingsField === 'file' && message != null}>
+					{#snippet children(settle, cancel)}
+						<ProjectFileForm
+							action={actionUrlFrom(page.url, 'saveProjectFile')}
+							error={settingsField === 'file' ? message : null}
+							onSaved={(name) => (savedFile = name)}
+							onSettled={settle}
+							{cancel}
+						/>
+					{/snippet}
+				</FormDialog>
+			</Card.Action>
 		</Card.Header>
 		<Card.Content class="grid gap-4">
 			{#if files.length === 0}
@@ -220,50 +205,39 @@
 					{/if}
 				</div>
 			{/each}
-			<form method="POST" action={actionUrlFrom(page.url, 'saveProjectFile')} class="grid gap-3" use:enhance={clearFile}>
-				<Label class="grid gap-1.5" for="file-name">
-					Name
-					<Input id="file-name" name="name" bind:value={fileName} required maxlength={64} autocomplete="off" spellcheck="false" />
-				</Label>
-				<Label class="grid gap-1.5" for="file-content">
-					Content
-					<Textarea
-						id="file-content"
-						name="content"
-						bind:value={fileContent}
-						rows={6}
-						spellcheck="false"
-						autocomplete="off"
-						aria-label="File content"
-						aria-invalid={settingsField === 'file' && message ? true : undefined}
-						aria-describedby={settingsField === 'file' && message ? 'file-error' : undefined}
-					/>
-				</Label>
-				<Input type="hidden" name="secret" value={fileSecret ? '1' : '0'} />
-				<Label class="flex items-center gap-2">
-					<Checkbox id="file-secret" checked={fileSecret} aria-label="Secret file" onCheckedChange={(value) => (fileSecret = value === true)} />
-					Secret
-				</Label>
-				{#if savedFile && !(settingsField === 'file' && message)}
-					<Notice kind="success">Saved file {savedFile}.</Notice>
-				{/if}
-				{#if settingsField === 'file' && message}
-					<div id="file-error" tabindex="-1" class="max-w-full min-w-0 break-words focus-visible:ring-3 focus-visible:ring-ring">
-						<Notice kind="error">{message}</Notice>
-					</div>
-				{/if}
-				<div>
-					<Button type="submit">Save file</Button>
-				</div>
-			</form>
+			{#if savedFile}
+				<Notice kind="success">Saved file {savedFile}.</Notice>
+			{/if}
 		</Card.Content>
 	</Card.Root>
 	<Card.Root id="registries" class="mt-4">
 		<Card.Header>
 			<Card.Title>Registries</Card.Title>
 			<Card.Description>The token is write-only. It is not shown again.</Card.Description>
+			<Card.Action>
+				<FormDialog
+					id="add-registry"
+					label="Add registry"
+					title="Add registry"
+					description="Sign-in for a private image registry, such as ghcr.io. Saving the same host again replaces it."
+					failed={settingsField === 'token' && message != null}
+				>
+					{#snippet children(settle, cancel)}
+						<RegistryForm
+							action={actionUrlFrom(page.url, 'saveRegistry')}
+							error={settingsField === 'token' ? message : null}
+							onSaved={(host) => (savedRegistry = host)}
+							onSettled={settle}
+							{cancel}
+						/>
+					{/snippet}
+				</FormDialog>
+			</Card.Action>
 		</Card.Header>
 		<Card.Content class="grid gap-4">
+			{#if savedRegistry}
+				<Notice kind="success">Saved registry {savedRegistry}.</Notice>
+			{/if}
 			{#if registries.length === 0}
 				<p class="text-muted-foreground text-sm">No registries.</p>
 			{/if}
@@ -280,38 +254,6 @@
 					/>
 				</div>
 			{/each}
-			<form method="POST" action={actionUrlFrom(page.url, 'saveRegistry')} class="grid gap-3" use:enhance={clearToken}>
-				<Label class="grid gap-1.5" for="registry-host">
-					Host
-					<Input id="registry-host" name="host" required maxlength={255} autocomplete="off" spellcheck="false" />
-				</Label>
-				<Label class="grid gap-1.5" for="registry-username">
-					Username
-					<Input id="registry-username" name="username" required maxlength={255} autocomplete="off" spellcheck="false" />
-				</Label>
-				<Label class="grid gap-1.5" for="registry-token">
-					Token
-					<Input
-						id="registry-token"
-						name="token"
-						type="password"
-						bind:value={token}
-						required
-						maxlength={4096}
-						autocomplete="off"
-						aria-invalid={settingsField === 'token' && message ? true : undefined}
-						aria-describedby={settingsField === 'token' && message ? 'registry-token-error' : undefined}
-					/>
-				</Label>
-				{#if settingsField === 'token' && message}
-					<div id="registry-token-error" tabindex="-1" class="max-w-full min-w-0 break-words focus-visible:ring-3 focus-visible:ring-ring">
-						<Notice kind="error">{message}</Notice>
-					</div>
-				{/if}
-				<div>
-					<Button type="submit">Save registry</Button>
-				</div>
-			</form>
 		</Card.Content>
 	</Card.Root>
 {/if}

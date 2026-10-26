@@ -6,6 +6,7 @@ import { parseCreatedJoin } from '../src/lib/server/shape.ts';
 import CommandBlock from '../src/lib/components/CommandBlock.svelte';
 import ProjectPage from '../src/routes/projects/[id]/+page.svelte';
 import HostsSection from '../src/routes/projects/[id]/HostsSection.svelte';
+import JoinTokenResult from '../src/routes/projects/[id]/JoinTokenResult.svelte';
 import TokensSection from '../src/routes/projects/[id]/TokensSection.svelte';
 import type { CreatedJoin, Host } from '../src/lib/api-types.ts';
 import { JOIN, PROJECT, USER } from './harness.ts';
@@ -87,8 +88,13 @@ function renderHosts(
 	return render(ProjectPage, { props: { data: data as never, form: form as never } }).body;
 }
 
+/** The join token dialog's result view. The dialog itself is portaled, so it is rendered on its own. */
+function renderResult(created: CreatedJoin, message: string | null = null): string {
+	return render(JoinTokenResult, { props: { created, slug: PROJECT.slug, enrolment: { kind: 'waiting' }, message, copyId: 'copy' } }).body;
+}
+
 test('a created token is only in the token display and the Copy token value', () => {
-	const html = renderHosts({ id: TOKEN_ID, token: JOIN, server: SERVER }, false);
+	const html = renderResult({ id: TOKEN_ID, token: JOIN, server: SERVER });
 	const display = html.match(/<p class="font-mono text-sm break-all">([^<]*)<\/p>/);
 	assert.equal(display?.[1], JOIN);
 	assert.equal(times(html, JOIN), 1);
@@ -99,26 +105,29 @@ test('a created token is only in the token display and the Copy token value', ()
 	assert.equal(html.includes(SERVER), true);
 	assert.match(html, /Paste the join token at the hidden prompt\. Do not put it on the command line\./);
 
-	const placeholder = renderHosts({ id: TOKEN_ID, token: JOIN, server: null }, true, 'Server URL not shown: unexpected format');
+	const placeholder = renderResult({ id: TOKEN_ID, token: JOIN, server: null }, 'Server URL not shown: unexpected format');
 	assert.equal(decode(placeholder).includes(PLACEHOLDER), true);
 	assert.equal(PLACEHOLDER.includes(JOIN), false);
 	assert.equal(placeholder.includes('Server URL not shown: unexpected format'), true);
 	assert.equal(times(placeholder, JOIN), 1);
 	assert.equal(placeholder.includes('Copy install command'), false);
 
-	const dev = decode(renderHosts({ id: TOKEN_ID, token: JOIN, server: 'ws://127.0.0.1:8090/agent/v1/ws' }, false));
+	const dev = decode(renderResult({ id: TOKEN_ID, token: JOIN, server: 'ws://127.0.0.1:8090/agent/v1/ws' }));
 	assert.equal(dev.includes("sudo ./install.sh enroll --server 'ws://127.0.0.1:8090/agent/v1/ws' --runner --insecure-dev"), true);
 	assert.equal(decode(html).includes('--insecure-dev'), false);
 	assert.equal(decode(placeholder).includes('--insecure-dev'), false);
-	const remote = decode(renderHosts({ id: TOKEN_ID, token: JOIN, server: 'ws://evil.example/x' }, false));
+	const remote = decode(renderResult({ id: TOKEN_ID, token: JOIN, server: 'ws://evil.example/x' }));
 	assert.equal(remote.includes("--server 'ws://evil.example/x' --runner"), true);
 	assert.equal(remote.includes('--insecure-dev'), false);
 
-	const source = readFileSync(new URL('../src/routes/projects/[id]/AddHostSection.svelte', import.meta.url), 'utf8');
+	const source = readFileSync(new URL('../src/routes/projects/[id]/JoinTokenResult.svelte', import.meta.url), 'utf8');
 	const copies = [...source.matchAll(/<CopyButton\b[\s\S]*?\/>/g)].map((match) => match[0]);
-	assert.deepEqual(copies, ['<CopyButton value={created.token} label="Copy token" />']);
-	// The created-token card sits above the guide, the form and the hosts list.
-	const order = ['Copy this now.', 'Add a host</summary>', 'Create a join token', 'id="hosts-heading"'].map((needle) => html.indexOf(needle));
+	assert.deepEqual(copies.map((tag) => tag.match(/value=\{[^}]*\}/)?.[0]), ['value={prompt}', 'value={created.token}'], 'only the prompt and the token are copied');
+
+	// On the page the token is only in the dialog, never in the server render; the guide and trigger sit above the hosts list.
+	const page = renderHosts({ id: TOKEN_ID, token: JOIN, server: SERVER }, false);
+	assert.equal(times(page, JOIN), 0);
+	const order = ['Add a host</summary>', 'id="create-join-token"', 'id="hosts-heading"'].map((needle) => page.indexOf(needle));
 	assert.ok(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])), String(order));
 });
 
@@ -151,10 +160,11 @@ test('the add-a-host guide shows the slug and both links, and starts open with n
 	assert.equal(detailsOpen(open), true);
 	const guide = open.match(/<details\b[\s\S]*?<\/details>/)?.[0] ?? '';
 	assert.equal(guide.match(/<li\b/g)?.length, 6);
-	assert.match(open, /<\/summary>\s*<p>An AI agent can run these steps for you\.[^<]*<\/p>\s*<div>[\s\S]*?Copy instructions for your AI agent[\s\S]*?<\/div>\s*<p>Run the commands below on the host you are adding \(for example over ssh -t\)\.<\/p>\s*<ol\b/);
+	assert.match(open, /<\/summary>\s*<p>Create a join token to get instructions for your AI agent\.[^<]*<\/p>\s*<p>Run the commands below on the host you are adding \(for example over ssh -t\)\.<\/p>\s*<ol\b/);
 	assert.match(open, /sudo \.\/install\.sh check --runner --project lab --image (?:'|&#39;)&lt;pattern(?:>|&gt;)(?:'|&#39;) --enable/);
 	assert.match(open, /sudo \.\/install\.sh install --runner --project lab --image (?:'|&#39;)&lt;pattern(?:>|&gt;)(?:'|&#39;) --enable/);
-	assert.match(open, /<code>next:<\/code> line, with the server URL shown on the token card/);
+	assert.match(open, /Create a join token with the button below\. Run the enrol command from the install output's <code>next:<\/code> line, with the server URL shown with the token\./);
+	assert.equal(open.includes('Copy instructions for your AI agent'), false);
 	assert.equal(open.includes('sha256sum -c'), true);
 	assert.match(open, /The host appears in the list below as online\./);
 	for (const href of [RELEASES, GUIDE]) {
@@ -191,12 +201,15 @@ test('an empty host list links an admin to the Add a host card and tells a viewe
 test('the Hosts tab shows the Add a host card to an admin only, and the tokens tab links to it', () => {
 	const admin = renderHosts(null, false);
 	assert.match(admin, /id="new-host"/);
-	assert.match(admin, /Create a join token/);
-	assert.match(admin, /action="\?tab=hosts&amp;\/createToken"|action="[^"]*tab=hosts[^"]*createToken"/);
+	assert.match(admin.replace(/<!--[\s\S]*?-->/g, ''), /<button\b[^>]*id="create-join-token"[^>]*aria-haspopup="dialog"[^>]*>[\s\S]*?Create join token<\/button>/);
+	// The create form is inside the closed dialog, so the server render has no form for it.
+	assert.equal(admin.includes('createToken'), false);
+	assert.equal(admin.includes('name="host_name_hint"'), false);
 
 	const viewer = renderHosts(null, false, null, null, false);
 	assert.equal(viewer.includes('id="new-host"'), false);
 	assert.equal(viewer.includes('Create a join token'), false);
+	assert.equal(viewer.includes('create-join-token'), false);
 	assert.equal(viewer.includes('Copy instructions for your AI agent'), false);
 	assert.match(viewer.replace(/<!--[\s\S]*?-->/g, ''), /No hosts enrolled\. Ask a project admin to add one\./);
 

@@ -62,7 +62,10 @@
 
 	const action = $derived((form ?? null) as ProjectActionData | null);
 	const scope = $derived<ProjectScope>(action?.scope ?? data.tab ?? 'hosts');
-	const sectionMessage = $derived(action?.scope === scope ? (action.message ?? null) : null);
+	// A dialog form's message (createToken, addMember) shows in its dialog, not on the page.
+	const sectionMessage = $derived(action?.scope === scope && !action.field ? (action.message ?? null) : null);
+	const createTokenMessage = $derived(action?.field === 'createToken' ? (action.message ?? null) : null);
+	const addMemberMessage = $derived(action?.field === 'addMember' ? (action.message ?? null) : null);
 	const rename = $derived(servicesRenameView(action));
 	const healthEditor = $derived(servicesHealthView(action));
 	const catalogEditor = $derived(action?.scope === 'catalog' ? (action.catalogEditor ?? null) : null);
@@ -165,6 +168,7 @@
 					created={action?.scope === 'hosts' ? (action.created ?? null) : null}
 					slug={data.project.slug}
 					open={data.hosts.length === 0 && !data.hostsMessage}
+					message={createTokenMessage}
 				/>
 			{/if}
 		</HostsSection>
@@ -225,6 +229,7 @@
 			canOwner={data.canOwner}
 			currentUserId={data.userId ?? null}
 			message={sectionMessage ?? data.membersMessage}
+			{addMemberMessage}
 			invites={data.invites}
 			invitesOmitted={data.invitesOmitted}
 			invitesTruncated={data.invitesTruncated}

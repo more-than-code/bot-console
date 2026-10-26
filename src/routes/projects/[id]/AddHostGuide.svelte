@@ -1,8 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import CommandBlock from '$lib/components/CommandBlock.svelte';
-	import CopyButton from '$lib/components/CopyButton.svelte';
-	import { agentPrompt } from '$lib/add-host';
 	import * as Card from '$lib/components/ui/card';
 
 	const RELEASES = 'https://github.com/more-than-code/bot-agent/releases/latest';
@@ -13,16 +11,12 @@
 	const startOpen = untrack(() => open);
 	// Policy flags need bundle v0.2.7+; <pattern> stays for the admin to fill in.
 	const policyFlags = $derived(`--runner --project ${slug} --image '<pattern>' --enable`);
-	const prompt = $derived(agentPrompt(slug));
 </script>
 
 <Card.Root class="mb-4">
 	<details class="grid gap-3 px-(--card-spacing)" open={startOpen}>
 		<summary class="cursor-pointer text-base leading-snug font-medium">Add a host</summary>
-		<p>An AI agent can run these steps for you. It stops for your agreement before installing, and you run the enrol command yourself.</p>
-		<div>
-			<CopyButton value={prompt} label="Copy instructions for your AI agent" />
-		</div>
+		<p>Create a join token to get instructions for your AI agent. It stops for your agreement before installing, and you run the enrol command yourself.</p>
 		<p>Run the commands below on the host you are adding (for example over ssh -t).</p>
 		<ol class="list-decimal pl-5 [&_li+li]:mt-3">
 			<li>
@@ -38,7 +32,7 @@
 				<CommandBlock command={`sudo ./install.sh install ${policyFlags}`} label="Copy runner install command" ariaLabel="Runner install command" />
 			</li>
 			<li>For programs, or a policy the flags can't express, install with --runner only and edit /etc/bot-agent/runner.toml by hand (see the full guide).</li>
-			<li>Create a join token below. Run the enrol command from the install output's <code>next:</code> line, with the server URL shown on the token card. The token is typed at the prompt.</li>
+			<li>Create a join token with the button below. Run the enrol command from the install output's <code>next:</code> line, with the server URL shown with the token. The token is typed at the prompt.</li>
 			<li>The host appears in the list below as online.</li>
 		</ol>
 		<p>

@@ -17,7 +17,7 @@ import {
 } from '$lib/health-checks';
 import { SERVICE_DEFAULT_DIR, SERVICE_DEFAULT_SORT, serviceColumns, serviceHostReachable } from '$lib/host-view';
 import { serviceShow } from '$lib/service-view';
-import type { CatalogPermissionsState, ProjectScope } from '$lib/project-action';
+import type { ActionField, CatalogPermissionsState, ProjectScope } from '$lib/project-action';
 import { ApiError, actionFailure, apiFetch, apiList, loadFailure } from '$lib/server/api';
 import {
 	catalogCreate,
@@ -84,8 +84,8 @@ function projectId(params: { id?: string }): string {
 	return params.id;
 }
 
-function invalid(event: RequestEvent, scope: ProjectScope, message: string) {
-	return fail(400, present(event, { scope, message }));
+function invalid(event: RequestEvent, scope: ProjectScope, message: string, field?: ActionField) {
+	return fail(400, present(event, field ? { scope, message, field } : { scope, message }));
 }
 
 function tabOf(value: string | null, canAdmin: boolean): ProjectScope {
@@ -623,8 +623,8 @@ export const actions: Actions = {
 		const form = await event.request.formData();
 		const email = cleanEmail(formText(form, 'email'));
 		const role = cleanRole(formText(form, 'role'));
-		if (!email) return invalid(event, 'members', 'Enter an email address.');
-		if (!role) return invalid(event, 'members', 'Choose admin or viewer.');
+		if (!email) return invalid(event, 'members', 'Enter an email address.', 'addMember');
+		if (!role) return invalid(event, 'members', 'Choose admin or viewer.', 'addMember');
 		try {
 			await apiFetch(event, `/v1/projects/${id}/members`, {
 				method: 'POST',
@@ -632,7 +632,7 @@ export const actions: Actions = {
 			});
 			redirect(303, backTo(event.url));
 		} catch (err) {
-			return actionFailure(event, err, 'members');
+			return actionFailure(event, err, 'members', 'addMember');
 		}
 	},
 
@@ -731,9 +731,9 @@ export const actions: Actions = {
 		const form = await event.request.formData();
 		const hintText = formText(form, 'host_name_hint');
 		const hint = hintText.trim() ? cleanHint(hintText) : null;
-		if (hintText.trim() && !hint) return invalid(event, 'hosts', 'Host name hint must be 1–80 characters.');
+		if (hintText.trim() && !hint) return invalid(event, 'hosts', 'Host name hint must be 1–80 characters.', 'createToken');
 		const expiry = cleanExpiry(formText(form, 'expires_in_sec'));
-		if (!expiry.ok) return invalid(event, 'hosts', 'Expiry must be between 300 and 604800 seconds, or blank.');
+		if (!expiry.ok) return invalid(event, 'hosts', 'Expiry must be between 300 and 604800 seconds, or blank.', 'createToken');
 		const body: { host_name_hint?: string; expires_in_sec?: number } = {};
 		if (hint) body.host_name_hint = hint;
 		if (expiry.seconds != null) body.expires_in_sec = expiry.seconds;
@@ -744,15 +744,16 @@ export const actions: Actions = {
 					body: JSON.stringify(body)
 				})
 			);
-			if (!created) return fail(502, present(event, { scope: 'hosts', message: 'The API returned an unexpected response.' }));
+			if (!created) return fail(502, present(event, { scope: 'hosts', field: 'createToken' as const, message: 'The API returned an unexpected response.' }));
 			// Stay on this response so the plaintext token is shown once. A reload is a GET and drops it.
 			return present(event, {
 				scope: 'hosts' as const,
+				field: 'createToken' as const,
 				created,
 				message: created.server ? null : 'Server URL not shown: unexpected format'
 			});
 		} catch (err) {
-			return actionFailure(event, err, 'hosts');
+			return actionFailure(event, err, 'hosts', 'createToken');
 		}
 	},
 

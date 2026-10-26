@@ -162,17 +162,38 @@ export function consentRedirect(value: unknown): string | null {
 	return url.href;
 }
 
+/** Characters a server URL may use. No quotes, `$`, backticks, spaces, `?`, `#`, `%` or non-ASCII (bidi, zero-width). */
+const SERVER_CHARS = /^[A-Za-z0-9._~:/\-[\]]+$/;
+const SERVER_HOSTNAME = /^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])$/;
+
+/**
+ * An agent server URL that is safe to put inside single quotes in a shell command and into an AI agent prompt:
+ * wss://, or ws:// only for a loopback host; no userinfo, query or fragment; plain ASCII only.
+ * Returns the string as given, or null.
+ */
+export function acceptedServerUrl(server: string): string | null {
+	if (server.length === 0 || server.length > 2048 || !SERVER_CHARS.test(server)) return null;
+	let url: URL;
+	try {
+		url = new URL(server);
+	} catch {
+		return null;
+	}
+	if (url.username || url.password || url.search || url.hash) return null;
+	if (!SERVER_HOSTNAME.test(url.hostname)) return null;
+	if (url.protocol !== 'wss:' && !(url.protocol === 'ws:' && isLoopbackHost(url.hostname))) return null;
+	return server;
+}
+
 /**
  * Server URL from the API install command. Null when the command is not the
- * fixed form, embeds a different token, contains `$(`, or the server itself
- * contains the token. The console never shows that command.
+ * fixed form, embeds a different token, the server itself contains the token,
+ * or the server fails `acceptedServerUrl`. The console never shows that command.
  */
 export function acceptedInstallServer(command: string, token: string): string | null {
-	// The server capture would otherwise allow `$(...)` inside the quotes.
-	if (command.includes('$(')) return null;
 	const match = INSTALL_COMMAND.exec(command);
 	if (!match || match[1] !== token) return null;
 	const server = match[2];
 	if (!server || server.includes(token)) return null;
-	return server;
+	return acceptedServerUrl(server);
 }

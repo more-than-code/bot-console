@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { render } from 'svelte/server';
 import type { Member } from '../src/lib/api-types.ts';
 import MembersSection from '../src/routes/projects/[id]/MembersSection.svelte';
+import AddMemberForm from '../src/routes/projects/[id]/AddMemberForm.svelte';
 import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import { PROJECT, USER } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
@@ -91,6 +92,9 @@ test('member selects expose their visible labels', () => {
 		}).body
 	);
 	assert.equal(accessibleName(html, `member-role-${BEA}`), 'Role for bea@example.com');
-	assert.equal(accessibleName(html, 'member-role'), 'Role');
+	// The add form is in the closed Add member dialog; its select is checked on the form itself.
+	assert.equal(html.includes('id="member-role"'), false);
+	const addForm = decode(render(AddMemberForm, { props: { action: '?/addMember', onAdded: () => {}, onSettled: () => {} } }).body);
+	assert.equal(accessibleName(addForm, 'member-role'), 'Role');
 	assert.equal(accessibleName(html, 'new-owner'), 'New owner');
 });

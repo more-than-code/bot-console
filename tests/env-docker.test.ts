@@ -846,7 +846,7 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 			}
 		}).body;
 		const actionAt = html.indexOf('data-slot="card-action"');
-		const newAt = html.indexOf('>New env set<');
+		const newAt = html.indexOf('id="new-env-set"');
 		const addAtHtml = html.indexOf('Add variable');
 		const tableAt = html.indexOf('id="env-table-app"');
 		assert.equal(actionAt >= 0 && newAt > actionAt && addAtHtml > newAt && tableAt > addAtHtml, true);

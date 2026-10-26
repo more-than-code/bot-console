@@ -201,9 +201,11 @@ export async function apiList<T>(
 	return { items, omitted, truncated };
 }
 
-export function actionFailure(event: RequestEvent, err: unknown, scope?: string) {
+/** `field` names the form the failure belongs to, so its dialog shows the message instead of the page. */
+export function actionFailure(event: RequestEvent, err: unknown, scope?: string, field?: string) {
 	if (isRedirect(err) || isHttpError(err)) throw err;
-	const data = scope ? { scope, message: messageOf(err) } : { message: messageOf(err) };
+	const base = scope ? { scope, message: messageOf(err) } : { message: messageOf(err) };
+	const data = field ? { ...base, field } : base;
 	const status = err instanceof ApiError && err.status >= 400 && err.status <= 599 ? err.status : 503;
 	return fail(status, present(event, data));
 }

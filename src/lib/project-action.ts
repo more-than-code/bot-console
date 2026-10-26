@@ -19,6 +19,9 @@ import type { ImageDigestResult, ImageTagsResult } from '$lib/image-tags';
 
 export type ProjectScope = 'hosts' | 'services' | 'catalog' | 'members' | 'tokens' | 'settings';
 
+/** The dialog form an action result belongs to. Its message shows in that dialog, not on the page. */
+export type ActionField = 'createToken' | 'addMember';
+
 export type CatalogRunKind = 'run' | 'stop' | 'restart' | 'logs' | 'status';
 
 export type CatalogDraft = {
@@ -89,6 +92,8 @@ export type CatalogPermissionsState = {
 
 export type ProjectActionData = {
 	scope: ProjectScope;
+	/** Set by createToken and addMember. */
+	field?: ActionField;
 	message?: string;
 	confirmHostId?: string;
 	created?: CreatedJoin;

@@ -1,15 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { after, mock, test } from 'node:test';
-import { render } from 'svelte/server';
 import { ENROL_WAIT_MS, agentPrompt, createEnrolPoller, enrolStatus, type EnrolStatus, type VisibilityDoc } from '../src/lib/add-host.ts';
 import type { CreatedJoin, Host, JoinToken } from '../src/lib/api-types.ts';
 import { parseCreatedJoin } from '../src/lib/server/shape.ts';
-import AddHostGuide from '../src/routes/projects/[id]/AddHostGuide.svelte';
-import AddHostSection from '../src/routes/projects/[id]/AddHostSection.svelte';
 import { load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
 import { JOIN, PROJECT, USER, envelope, fakeEvent, installFetch, restoreEnv, useApi } from './harness.ts';
-import { setPageUrl } from './stubs/app-state.ts';
 
 const TOKEN_ID = '00000000-0000-4000-8000-000000000070';
 const HOST_ID = '00000000-0000-4000-8000-000000000080';
@@ -287,44 +282,6 @@ test('hidden for 16 minutes with the host enrolled at minute 10 settles on enrol
 	await settle();
 	assert.deepEqual(status(), { kind: 'enrolled', name: 'pi5', status: 'online' });
 	poller.dispose();
-});
-
-test('the guide copies agentPrompt(slug)', () => {
-	const html = render(AddHostGuide, { props: { slug: PROJECT.slug, open: true } }).body;
-	assert.match(html, /Copy instructions for your AI agent/);
-	const source = readFileSync(new URL('../src/routes/projects/[id]/AddHostGuide.svelte', import.meta.url), 'utf8');
-	// No DOM in these tests, and CopyButton does not render its value; check the wiring in the source.
-	assert.match(source, /const prompt = \$derived\(agentPrompt\(slug\)\);/);
-	const copies = [...source.matchAll(/<CopyButton\b[\s\S]*?\/>/g)].map((match) => match[0]);
-	assert.deepEqual(copies, ['<CopyButton value={prompt} label="Copy instructions for your AI agent" />']);
-});
-
-test('the created-token card shows the enrol status in a polite live region without the token', () => {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=hosts`);
-	const props = { created: CREATED, slug: PROJECT.slug, open: false };
-	const body = (extra: object) => render(AddHostSection, { props: { ...props, tokens: [TOKEN], hosts: [], ...extra } }).body.replace(/<!--[\s\S]*?-->/g, '');
-	const live = (html: string) => html.match(/<p[^>]*aria-live="polite"[^>]*>([\s\S]*?)<\/p>/)?.[1] ?? '';
-
-	const waiting = body({});
-	assert.match(live(waiting), /^\s*Waiting for the host to enrol…\s*$/);
-	assert.equal(waiting.split(JOIN).length - 1, 1);
-	assert.equal(live(waiting).includes(JOIN), false);
-
-	const enrolled = body({ tokens: [used], hosts: [HOST] });
-	assert.match(live(enrolled), /^\s*Enrolled: pi5 is online\.\s*$/);
-	assert.equal(enrolled.split(JOIN).length - 1, 1);
-
-	const revoked = body({ tokens: [{ ...TOKEN, revoked_at: '2026-10-26T10:02:00Z' }] });
-	assert.match(live(revoked), /^\s*This token was revoked\.\s*$/);
-	const expired = body({ tokens: [{ ...TOKEN, expires_at: '2020-01-01T00:00:00Z' }] });
-	assert.match(live(expired), /^\s*This token has expired\. Create a new one\.\s*$/);
-
-	const none = body({ created: null });
-	assert.equal(none.includes('Waiting for the host to enrol'), false);
-	assert.doesNotMatch(none, /<p[^>]*aria-live="polite"[^>]*>/);
-
-	const section = readFileSync(new URL('../src/routes/projects/[id]/AddHostSection.svelte', import.meta.url), 'utf8');
-	assert.match(section, /createEnrolPoller\(\{[\s\S]*?await invalidate\('project:enrol'\);\s*now = Date\.now\(\);/);
 });
 
 test('the Hosts tab load depends on project:enrol before any early return', async () => {

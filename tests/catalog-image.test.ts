@@ -40,6 +40,8 @@ import CatalogSection from '../src/routes/projects/[id]/CatalogSection.svelte';
 import ProjectPage from '../src/routes/projects/[id]/+page.svelte';
 import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import SettingsSection from '../src/routes/projects/[id]/SettingsSection.svelte';
+import ProjectFileForm from '../src/routes/projects/[id]/ProjectFileForm.svelte';
+import RegistryForm from '../src/routes/projects/[id]/RegistryForm.svelte';
 import { actions as projectActions, load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
 import {
 	imageAuxFormSettle,
@@ -1406,8 +1408,12 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(html.includes('patchEnvKey'), false);
 		assert.equal(html.includes(REGISTRY_TOKEN), false);
 		assert.equal(html.includes('API_TOKEN'), true);
-		assert.match(html, /type="password"/);
-		assert.doesNotMatch(html, /type="password"[^>]*value="[^"]+"/);
+		// The registry form is in the closed Add registry dialog.
+		assert.equal(html.includes('id="registry-token"'), false);
+		assert.match(html.replace(/<!--[\s\S]*?-->/g, ''), /<button\b[^>]*id="add-registry"[^>]*aria-expanded="false"[^>]*>[\s\S]*?Add registry<\/button>/);
+		const registryForm = render(RegistryForm, { props: { action: '?/saveRegistry', onSaved: () => {}, onSettled: () => {} } }).body;
+		assert.match(registryForm, /type="password"/);
+		assert.doesNotMatch(registryForm, /type="password"[^>]*value="[^"]+"/);
 
 		const calls = installFetch(() => envelope(null, 400, 'bad_request', `refused ${SECRET}`));
 		const saved = await projectActions.saveEnvSet(
@@ -1826,18 +1832,22 @@ describe('catalog images', { concurrency: false }, () => {
 				registries: []
 			}
 		}).body;
-		const tokenAt = html.indexOf('id="registry-token"');
-		const errorAt = html.indexOf('id="registry-token-error"');
-		assert.equal(tokenAt >= 0 && errorAt > tokenAt, true);
-		assert.equal(html.includes('Paste the value again.'), true);
+		// The failure forces the Add registry dialog open; its form renders inside on the client.
+		assert.match(html, /<button\b[^>]*id="add-registry"[^>]*aria-expanded="true"/);
 		assert.equal(html.includes(token), false);
-		assert.match(html, /id="registry-token-error"[^>]*tabindex="-1"/);
-		assert.match(html, /id="registry-token-error"[^>]*break-words/);
-		assert.match(html, /id="registry-token-error"[^>]*focus-visible:ring-3/);
-		assert.doesNotMatch(html, /id="registry-token-error"[^>]*outline-none/);
-		assert.equal(html.includes('aria-describedby="registry-token-error"'), true);
-		assert.equal(html.includes('aria-invalid="true"'), true);
-		assert.doesNotMatch(html, /type="password"[^>]*value="[^"]+"/);
+		const formHtml = render(RegistryForm, { props: { action: '?/saveRegistry', error: data.message ?? null, onSaved: () => {}, onSettled: () => {} } }).body;
+		const tokenAt = formHtml.indexOf('id="registry-token"');
+		const errorAt = formHtml.indexOf('id="registry-token-error"');
+		assert.equal(tokenAt >= 0 && errorAt > tokenAt, true);
+		assert.equal(formHtml.includes('Paste the value again.'), true);
+		assert.equal(formHtml.includes(token), false);
+		assert.match(formHtml, /id="registry-token-error"[^>]*tabindex="-1"/);
+		assert.match(formHtml, /id="registry-token-error"[^>]*break-words/);
+		assert.match(formHtml, /id="registry-token-error"[^>]*focus-visible:ring-3/);
+		assert.doesNotMatch(formHtml, /id="registry-token-error"[^>]*outline-none/);
+		assert.equal(formHtml.includes('aria-describedby="registry-token-error"'), true);
+		assert.equal(formHtml.includes('aria-invalid="true"'), true);
+		assert.doesNotMatch(formHtml, /type="password"[^>]*value="[^"]+"/);
 		const dotenvHtml = render(SettingsSection, {
 			props: {
 				project: PROJECT,
@@ -2985,17 +2995,24 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(html.includes('aria-label="View key.json"'), false);
 		assert.equal(html.includes(secretLine), false);
 		assert.equal(html.includes(otherLine), false);
-		const secretInput = [...html.matchAll(/<input\b[^>]*>/g)].map((match) => match[0]).find((tag) => tag.includes('name="secret"'));
+		// The save form is in the closed Add file dialog.
+		assert.equal(html.includes('id="file-content"'), false);
+		assert.match(html.replace(/<!--[\s\S]*?-->/g, ''), /<button\b[^>]*id="add-file"[^>]*aria-expanded="false"[^>]*>[\s\S]*?Add file<\/button>/);
+		const fileForm = (error: string | null = null) =>
+			render(ProjectFileForm, { props: { action: '?/saveProjectFile', error, onSaved: () => {}, onSettled: () => {} } }).body;
+		const formHtml = fileForm();
+		const secretInput = [...formHtml.matchAll(/<input\b[^>]*>/g)].map((match) => match[0]).find((tag) => tag.includes('name="secret"'));
 		assert.equal(secretInput?.includes('value="1"'), true);
-		assert.equal(html.includes('aria-label="Secret file"'), true);
-		const area = html.match(/<textarea\b[^>]*id="file-content"[^>]*>[\s\S]*?<\/textarea>/);
+		assert.equal(formHtml.includes('aria-label="Secret file"'), true);
+		const area = formHtml.match(/<textarea\b[^>]*id="file-content"[^>]*>[\s\S]*?<\/textarea>/);
 		assert.equal(area != null, true);
 		assert.equal(area?.[0].includes('autocomplete="off"'), true);
 		assert.equal(area?.[0].includes(secretLine), false);
 		assert.doesNotMatch(html, /[?&]content=/);
 
 		const settings = readFileSync(new URL('../src/routes/projects/[id]/SettingsSection.svelte', import.meta.url), 'utf8');
-		assert.match(settings, /settleFileSave\(/);
+		const fileFormSource = readFileSync(new URL('../src/routes/projects/[id]/ProjectFileForm.svelte', import.meta.url), 'utf8');
+		assert.match(fileFormSource, /settleFileSave\(/);
 		assert.match(settings, /showViewedFile\(/);
 		assert.match(settings, /message="Delete file \{file\.name\}\?"/);
 		assert.match(settings, /messageClass="max-w-full min-w-0 break-all"/);
@@ -3032,10 +3049,14 @@ describe('catalog images', { concurrency: false }, () => {
 		}).body;
 		assert.equal(failedHtml.includes(secretLine), false);
 		assert.equal(failedHtml.includes(otherLine), false);
-		assert.equal(failedHtml.includes('Paste the value again.'), true);
-		const failedArea = failedHtml.match(/<textarea\b[^>]*id="file-content"[^>]*>[\s\S]*?<\/textarea>/);
+		assert.match(failedHtml, /<button\b[^>]*id="add-file"[^>]*aria-expanded="true"/);
+		const failedForm = fileForm(failedData.message ?? null);
+		assert.equal(failedForm.includes(secretLine), false);
+		assert.equal(failedForm.includes(otherLine), false);
+		assert.equal(failedForm.includes('Paste the value again.'), true);
+		const failedArea = failedForm.match(/<textarea\b[^>]*id="file-content"[^>]*>[\s\S]*?<\/textarea>/);
 		assert.equal(failedArea?.[0].includes(secretLine), false);
-		assert.match(failedHtml, /id="file-error"[^>]*tabindex="-1"/);
+		assert.match(failedForm, /id="file-error"[^>]*tabindex="-1"/);
 
 		const savedCalls = installFetch(() =>
 			envelope({
@@ -3107,7 +3128,7 @@ describe('catalog images', { concurrency: false }, () => {
 			props: { project: PROJECT, canOwner: true, canAdmin: true, message: null, files }
 		}).body;
 		assert.equal(afterSave.includes(secretLine), false);
-		assert.equal(afterSave.match(/<textarea\b[^>]*id="file-content"[^>]*>[\s\S]*?<\/textarea>/)?.[0].includes(content), false);
+		assert.equal(afterSave.includes('id="file-content"'), false);
 
 		const viewCalls = installFetch(() =>
 			envelope({
@@ -3196,8 +3217,9 @@ describe('catalog images', { concurrency: false }, () => {
 		const filesAt = conflictHtml.indexOf('>Files<');
 		const rowAt = conflictHtml.indexOf('key.json');
 		const messageAt = conflictHtml.indexOf('referenced by api, web');
-		const formAt = conflictHtml.indexOf('id="file-name"');
-		assert.equal(filesAt >= 0 && rowAt > filesAt && messageAt > rowAt && formAt > messageAt, true);
+		assert.equal(filesAt >= 0 && rowAt > filesAt && messageAt > rowAt, true);
+		// A delete conflict is not a save failure: the Add file dialog stays closed.
+		assert.match(conflictHtml, /id="add-file"[^>]*aria-expanded="false"/);
 		assert.equal(conflictHtml.slice(0, filesAt).includes('referenced by api, web'), false);
 		assert.match(conflictHtml, new RegExp(`break-all[\\s\\S]{0,80}${longName}`));
 
@@ -3759,10 +3781,15 @@ describe('catalog images', { concurrency: false }, () => {
 				content: secret
 			} as never
 		}).body;
-		const area = echoed.match(/<textarea\b[^>]*id="file-content"[^>]*>[\s\S]*?<\/textarea>/);
+		assert.equal(echoed.includes(secret), false);
+		// The form renders inside the dialog; it starts empty even with the failure shown.
+		const form = render(ProjectFileForm, {
+			props: { action: '?/saveProjectFile', error: returned.message ?? null, onSaved: () => {}, onSettled: () => {}, content: secret } as never
+		}).body;
+		const area = form.match(/<textarea\b[^>]*id="file-content"[^>]*>[\s\S]*?<\/textarea>/);
 		const inner = area?.[0].replace(/^<textarea\b[^>]*>/, '').replace(/<\/textarea>$/, '') ?? secret;
 		assert.equal(inner.trim(), '');
-		assert.equal(echoed.includes(secret), false);
+		assert.equal(form.includes(secret), false);
 		const page = render(ProjectPage, {
 			props: {
 				data: {
@@ -3782,9 +3809,6 @@ describe('catalog images', { concurrency: false }, () => {
 				form: { ...returned, content: secret } as never
 			}
 		}).body;
-		const pageArea = page.match(/<textarea\b[^>]*id="file-content"[^>]*>[\s\S]*?<\/textarea>/);
-		const pageInner = pageArea?.[0].replace(/^<textarea\b[^>]*>/, '').replace(/<\/textarea>$/, '') ?? secret;
-		assert.equal(pageInner.trim(), '');
 		assert.equal(page.includes(secret), false);
 	});
 
