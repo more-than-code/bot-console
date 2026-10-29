@@ -300,23 +300,26 @@ describe('public site pages', () => {
 		assert.equal(title(render(TermsPage).head), 'Terms of Service · Deploybot');
 	});
 
-	test('the About hero carries the pitch; How it works has the short summary and no feature cards', () => {
+	test('the About hero carries the pitch; How it works has the short summary; the panels live only in What you get', () => {
 		// Joe 2026-10-26: the pitch is the hero subtitle on deploybot.dev, naming agents generically.
 		const PITCH =
 			'Let any AI agent that speaks MCP run your own servers, without handing it SSH keys or a cloud token. It can only deploy what your catalog allows, as you, after a confirm step.';
 		const body = render(AboutPage).body.replace(/<!--[^]*?-->/g, '').replace(/\s+/g, ' ');
-		const hero = body.slice(body.indexOf('id="hero-title"'), body.indexOf('aria-labelledby="how-title"'));
+		const hero = body.slice(body.indexOf('id="hero-title"'), body.indexOf('aria-labelledby="visual-title"'));
 		assert.ok(hero.includes(PITCH), 'pitch in the hero');
 		const how = body.slice(body.indexOf('id="how-title"'));
 		assert.ok(how.includes('Three steps from a new host to a running service.'));
-		// Joe 2026-10-26: the feature cards repeated the diagram and were removed.
-		assert.equal(body.includes('features-title'), false);
+		// Spec about-page §3.3/§3.5 (Joe 2026-10-29): the diagram shows only the flow; its four panels
+		// became the What you get section, so each panel heading appears there once and nowhere else.
+		for (const panel of ['Security', 'Resilience', 'Visibility', 'Teams']) {
+			assert.equal(body.match(new RegExp(`>${panel}<`, 'g'))?.length, 1, panel);
+		}
 	});
 
-	test('the pitch diagrams (landscape and portrait) sit in the About hero with accessible names and generic agents', () => {
-		// Joe 2026-10-26: docs/brand/pitch-diagram.svg under the About hero.
+	test('the pitch diagrams (landscape and portrait) sit in the flow section with accessible names and generic agents', () => {
+		// Joe 2026-10-26: docs/brand/pitch-diagram.svg on the About page; since spec about-page §3.3 its own section.
 		const body = render(AboutPage).body.replace(/<!--[^]*?-->/g, '');
-		const hero = body.slice(body.indexOf('id="hero-title"'), body.indexOf('aria-labelledby="how-title"'));
+		const hero = body.slice(body.indexOf('id="flow-title"'), body.indexOf('aria-labelledby="compare-title"'));
 		assert.match(hero, /<svg[^>]*role="img"[^>]*aria-labelledby="pitch-title" aria-describedby="pitch-desc"/);
 		assert.match(hero, /<svg[^>]*role="img"[^>]*aria-labelledby="pitch-portrait-title" aria-describedby="pitch-portrait-desc"/);
 		for (const id of ['pitch-title', 'pitch-portrait-title']) {
@@ -324,8 +327,11 @@ describe('public site pages', () => {
 		}
 		assert.ok(hero.includes('id="pitch-desc"') && hero.includes('id="pitch-portrait-desc"'));
 		for (const word of ['Claude', 'Codex', 'Grok']) assert.equal(hero.includes(word), false, `no ${word} in the hero`);
-		// Joe 2026-10-26: an icon per box and panel (13 in each diagram, with the Mac mini), and no duplicated dial-out line in Security.
-		assert.equal(hero.match(/<g class="line[^"]*" transform="translate\(/g)?.length, 26);
+		// Joe 2026-10-26: an icon per box, at least 9 in each diagram (the flow only since spec about-page §3.3).
+		for (const id of ['pitch-title', 'pitch-portrait-title']) {
+			const svg = hero.slice(hero.indexOf(`aria-labelledby="${id}"`)).split('</svg>')[0] ?? '';
+			assert.ok((svg.match(/<g class="line[^"]*" transform="translate\(/g)?.length ?? 0) >= 9, id);
+		}
 		assert.equal(hero.match(/hosted or self-hosted/gi)?.length, 4, 'subtitle in both diagrams and both descs');
 		assert.equal(hero.includes('Hosts dial out, so no open ports'), false);
 		assert.equal(body.includes('prefers-color-scheme'), false, 'dark mode follows the theme switch, not the OS');
@@ -381,9 +387,9 @@ describe('public site pages', () => {
 				.filter((tag) => tag.includes(SIGN_IN_URL));
 			for (const tag of tags) assert.ok(tag.includes('data-sveltekit-reload'), tag);
 		}
-		for (const html of [layout, pages[0] ?? '']) {
-			assert.equal(hrefs(html).filter((href) => href === SIGN_IN_URL).length, 1);
-		}
+		// The layout has one Sign in; About has Get started in the hero and in the closing section (spec about-page §3).
+		assert.equal(hrefs(layout).filter((href) => href === SIGN_IN_URL).length, 1);
+		assert.equal(hrefs(pages[0] ?? '').filter((href) => href === SIGN_IN_URL).length, 2);
 		for (const file of PUBLIC_SOURCES.filter((f) => f !== 'src/lib/site/links.ts')) {
 			assert.equal(read(file).includes('console.deploybot.dev/signin'), false, file);
 		}
@@ -409,6 +415,7 @@ describe('public site pages', () => {
 		const denied = ['$lib/server', '$lib/api', '$env', '$app/'];
 		const allowed = (spec: string) =>
 			spec === 'svelte' ||
+			/^@lucide\/svelte\/icons\/[a-z0-9-]+$/.test(spec) ||
 			spec.startsWith('$lib/site/') ||
 			spec.startsWith('$lib/legal/') ||
 			spec.startsWith('./');
@@ -430,6 +437,7 @@ describe('public site pages', () => {
 						`${file} imports ${spec}: public pages must not use ${prefix}`
 					);
 				}
+				assert.equal(spec.includes('..'), false, `${file} imports ${spec}: no .. in public-page imports`);
 				assert.ok(allowed(spec), `${file} imports ${spec}: not on the public-page allowlist`);
 			}
 		}
