@@ -81,7 +81,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 	event.locals.projects = [];
 	event.locals.sessionUnavailable = false;
 
-	const path = logicalPath(event.url.pathname);
+	const logical = logicalPath(event.url.pathname);
+	// A client data request with x-sveltekit-trailing-slash=1 arrives as e.g. /about/ (the apex
+	// homepage's /__data.json, rewritten by Caddy); only documents get SvelteKit's 308 first.
+	const path =
+		event.isDataRequest && logical.length > 1 && logical.endsWith('/') ? logical.slice(0, -1) : logical;
 	// The public site pages need no session, so they render even when the API is down or unset.
 	if (isSitePath(path)) return renderPage(event, resolve, path, { indexable: true });
 	if (!apiBaseUrl()) {

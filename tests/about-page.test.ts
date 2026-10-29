@@ -248,7 +248,8 @@ describe('About page', () => {
 			'icon-192.png',
 			'icon-512.png',
 			'lockup-dark.svg',
-			'lockup-light.svg'
+			'lockup-light.svg',
+			'og-image.png'
 		]);
 	});
 

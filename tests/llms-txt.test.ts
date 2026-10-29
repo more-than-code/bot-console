@@ -19,6 +19,10 @@ test('llms.txt links point at main, the latest release', () => {
 	assert.match(LLMS, /bot-agent\/blob\/main\/docs\/install\.md/);
 });
 
-test('robots.txt allows all crawlers', () => {
-	assert.equal(readFileSync('static/robots.txt', 'utf8'), 'User-agent: *\nAllow: /\n');
+test('robots.txt allows all crawlers and names the apex sitemap', () => {
+	// Umbrella docs/spec-seo-site.md §3.4.
+	assert.equal(
+		readFileSync('static/robots.txt', 'utf8'),
+		'User-agent: *\nAllow: /\nSitemap: https://deploybot.dev/sitemap.xml\n'
+	);
 });

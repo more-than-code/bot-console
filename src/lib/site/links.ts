@@ -19,3 +19,6 @@ export const GITHUB_URL = 'https://github.com/more-than-code/deploybot';
 
 /** The bot-agent install guide, on main like the repo links. */
 export const INSTALL_GUIDE_URL = 'https://github.com/more-than-code/bot-agent/blob/main/docs/install.md';
+
+/** The public site's origin (the apex). Canonical, og:url and sitemap URLs use it on every host. */
+export const SITE_URL = 'https://deploybot.dev';

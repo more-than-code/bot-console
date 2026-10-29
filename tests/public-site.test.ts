@@ -217,6 +217,23 @@ describe('public site pages', () => {
 		assert.equal(calls.length, 0);
 	});
 
+	test('a data request SvelteKit hands over as /about/ (trailing-slash flag) takes the shortcut', async () => {
+		// On deploybot.dev the client asks /__data.json?x-sveltekit-trailing-slash=1 for /, Caddy rewrites
+		// it to /about/__data.json, and the hook sees pathname /about/ with isDataRequest (spec-seo-site §3.1).
+		useApi('https://api.test');
+		const calls = apiDown();
+		const data = fakeEvent({ url: 'http://pi.local/about/?x-sveltekit-trailing-slash=1&x-sveltekit-invalidated=01' }).event;
+		(data as { isDataRequest: boolean }).isDataRequest = true;
+		assert.equal(data.url.pathname, '/about/');
+		const response = await run(data);
+		assert.equal(response.status, 200);
+		assert.equal(response.headers.get('location'), null);
+		assert.equal(calls.length, 0);
+
+		// A document request to /about/ is not a site path: SvelteKit 308s it before the hook.
+		await expectSigninRedirect(fakeEvent({ url: 'http://pi.local/about/' }).event, '/signin?next=%2Fabout%2F');
+	});
+
 	test('signed out, near-miss and private paths redirect to /signin with no API call; / goes to /projects', async () => {
 		useApi('https://api.test');
 		const calls = apiDown();
@@ -295,7 +312,7 @@ describe('public site pages', () => {
 	});
 
 	test('page titles are exact', () => {
-		assert.equal(title(render(AboutPage).head), 'About · Deploybot');
+		assert.equal(title(render(AboutPage).head), 'Deploybot: Let AI run your servers, without the keys');
 		assert.equal(title(render(PrivacyPage).head), 'Privacy Policy · Deploybot');
 		assert.equal(title(render(TermsPage).head), 'Terms of Service · Deploybot');
 	});
@@ -370,7 +387,8 @@ describe('public site pages', () => {
 		for (const tag of ['<header', '<main', '<footer']) assert.ok(body.includes(tag), tag);
 		assert.ok(body.includes('<p>child</p>'));
 		const links = hrefs(body);
-		for (const href of ['/about', SIGN_IN_URL, '/privacy', '/terms', `mailto:${SUPPORT_EMAIL}`]) {
+		// The logo links to the homepage, / (umbrella docs/spec-seo-site.md §3.1).
+		for (const href of ['/', SIGN_IN_URL, '/privacy', '/terms', `mailto:${SUPPORT_EMAIL}`]) {
 			assert.ok(links.includes(href), href);
 		}
 		assert.ok(body.includes('/brand/lockup-light.svg') && body.includes('/brand/lockup-dark.svg'));

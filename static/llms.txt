@@ -4,6 +4,8 @@
 
 Deploybot is a control plane for your own hosts: Raspberry Pis, VPSs and cloud VMs. A small agent, bot-agent, runs on each host and dials out to the Deploybot API, so hosts open no inbound ports and can sit behind NAT. Project owners keep a catalog of approved container images and programs. People and AI agents can deploy, run, stop, restart and roll back only those entries, within their role in the project.
 
+Website: https://deploybot.dev/
+
 Hosted service: console at https://console.deploybot.dev, MCP server at https://mcp.deploybot.dev/mcp. Sign-in is with Google. The source is public on GitHub, and you can self-host it.
 
 ## How the safety model works

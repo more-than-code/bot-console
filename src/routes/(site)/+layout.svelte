@@ -17,7 +17,7 @@
 	<header class="flex items-center justify-between gap-3 py-4">
 		<a
 			class="flex min-w-0 items-center gap-2 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-			href="/about"
+			href="/"
 			aria-label="Deploybot"
 		>
 			<img src="/brand/lockup-light.svg" alt="" class="h-6 w-auto dark:hidden" />
