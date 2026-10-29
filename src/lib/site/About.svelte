@@ -138,7 +138,9 @@
 </script>
 
 <section class="py-10 sm:py-16" aria-labelledby="hero-title">
-	<h1 id="hero-title" class="text-4xl font-semibold tracking-tight sm:text-5xl">Deploybot</h1>
+	<h1 id="hero-title" class="text-4xl font-semibold tracking-tight sm:text-5xl">
+		Let AI run your servers, without the keys.
+	</h1>
 	<p class="text-muted-foreground mt-4 max-w-2xl text-lg">
 		Let any AI agent that speaks MCP run your own servers, without handing it SSH keys or a cloud token. It can
 		only deploy what your catalog allows, as you, after a confirm step.

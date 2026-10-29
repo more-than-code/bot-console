@@ -307,6 +307,8 @@ describe('public site pages', () => {
 		const body = render(AboutPage).body.replace(/<!--[^]*?-->/g, '').replace(/\s+/g, ' ');
 		const hero = body.slice(body.indexOf('id="hero-title"'), body.indexOf('aria-labelledby="visual-title"'));
 		assert.ok(hero.includes(PITCH), 'pitch in the hero');
+		// Joe 2026-10-29: the header already shows the Deploybot lockup, so the h1 is the headline, not the name again.
+		assert.match(hero, /^id="hero-title"[^>]*>\s*Let AI run your servers, without the keys\.\s*<\/h1>/);
 		const how = body.slice(body.indexOf('id="how-title"'));
 		assert.ok(how.includes('Three steps from a new host to a running service.'));
 		// Spec about-page §3.3/§3.5 (Joe 2026-10-29): the diagram shows only the flow; its four panels
