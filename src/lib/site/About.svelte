@@ -12,7 +12,47 @@
 	const primaryButton = `bg-primary text-primary-foreground hover:bg-primary/80 inline-flex h-10 items-center rounded-lg px-4 text-sm font-medium ${focus}`;
 	const outlineButton = `bg-background hover:bg-muted inline-flex h-10 items-center rounded-lg border px-4 text-sm font-medium ${focus}`;
 	const linkClass = `text-primary underline-offset-4 hover:underline ${focus}`;
-	const capture = 'bg-muted rounded-lg p-4 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap sm:text-sm';
+
+	// See it in action (spec-about-page §14, rev 7): one illustrative chat thread, with a console capture beside it.
+	// It follows Deploybot's real dev replies with generic names. The thread's names (my-website, my-raspberry-pi)
+	// must match the Catalog capture and its alt text below.
+	type Line = { text: string; tool?: boolean };
+	const thread: { from: 'user' | 'agent'; lines: Line[] }[] = [
+		{ from: 'user', lines: [{ text: 'Deploy my-website to my-raspberry-pi.' }] },
+		{
+			from: 'agent',
+			lines: [
+				{ text: "Deploybot's plan:" },
+				{ text: 'will deploy my-website (nginx:alpine) on my-raspberry-pi', tool: true },
+				{ text: 'Deploy it?' }
+			]
+		},
+		{ from: 'user', lines: [{ text: 'Yes.' }] },
+		{
+			from: 'agent',
+			lines: [
+				{ text: 'Deployed and healthy.' },
+				{ text: 'succeeded · sha256:785835ea65db · running, 0 restarts', tool: true },
+				{ text: '"GET / HTTP/1.1" 200', tool: true }
+			]
+		},
+		{ from: 'user', lines: [{ text: 'Open a root shell on my-raspberry-pi.' }] },
+		{
+			from: 'agent',
+			lines: [{ text: "Deploybot refused: that isn't in your catalog." }, { text: 'not_found: not found', tool: true }]
+		}
+	];
+	/** Splits a line so each hyphenated word (a name like my-raspberry-pi) can sit in a no-wrap span: odd parts. */
+	const wordsWithHyphens = (text: string) => text.split(/(\S*-\S*)/);
+
+	// A real dev capture of the Catalog tab of a clean demo project (no client, host or project names),
+	// in a dark and a light version (static/brand/about-catalog-{dark,light}.webp).
+	const catalogShot = {
+		width: 784,
+		height: 780,
+		caption: 'In the console: your catalog, the only things your AI agent can deploy.',
+		alt: "The Deploybot console's Catalog tab: eight entries such as my-website (nginx), my-database (postgres) and home-assistant, with their images, ports where set, and row actions."
+	};
 
 	// Spec §3.4: the three ways, cell text exact. The highlighted approach is Deploybot.
 	const aspects = [
@@ -45,8 +85,8 @@
 			name: 'Deploybot',
 			can: 'Only your catalog',
 			safeguard: 'Limited by design, acts as you, confirm step',
-			ports: 'Hosts dial out; no open ports; the AI never holds host keys',
-			unattended: 'Health checks; a failed deploy rolls back (later failures: your policy)',
+			ports: 'Hosts dial out, no keys for the AI',
+			unattended: 'Health checks; a failed deploy rolls back',
 			best: 'Running production, teams',
 			highlight: true
 		}
@@ -154,63 +194,71 @@
 	<p class="text-muted-foreground mt-3 text-sm">Agent for Linux amd64 and arm64 · Open source</p>
 </section>
 
-<section class="py-8" aria-labelledby="visual-title">
-	<h2 id="visual-title" class="text-2xl font-semibold tracking-tight">See it work</h2>
-	<div class="mt-4 grid gap-6">
-		<figure class="min-w-0">
-			<img
-				class="h-auto w-full rounded-lg border"
-				src="/brand/about-deploy-result.webp"
-				width="1152"
-				height="784"
-				loading="lazy"
-				decoding="async"
-				alt="The console deploy dialog after a deploy: the health rule (roll back if the deploy fails), a succeeded badge with the sha256 digest, the container log ending with the health check's GET / request answered 200, and the deploy history."
-			/>
-			<figcaption class="text-muted-foreground mt-2 text-sm">
-				Deploy from the console: the agent waits for the health check, then reports.
-			</figcaption>
-		</figure>
-		<div class="grid gap-6 sm:grid-cols-2">
-			<figure class="min-w-0" data-capture="confirm">
-				<div class="space-y-3 rounded-lg border p-3">
-					<div>
-						<p class="text-muted-foreground mb-1 text-xs font-medium">Call (arguments shortened)</p>
-						<pre class={capture}><code>deploy_entry  entry=web  host=pi3-2</code></pre>
-					</div>
-					<div>
-						<p class="text-muted-foreground mb-1 text-xs font-medium">Response (id shortened)</p>
-						<pre class={capture}><code
-								>"plan": "will deploy web (docker.io/library/nginx:alpine) on pi3-2"
-"confirmation_id": "…"</code
-							></pre>
-					</div>
-				</div>
-				<figcaption class="text-muted-foreground mt-2 text-sm">
-					An AI agent asks to deploy. Deploybot answers with a plan, and nothing runs until you confirm.
-				</figcaption>
-			</figure>
-			<figure class="min-w-0" data-capture="refusal">
-				<div class="space-y-3 rounded-lg border p-3">
-					<div>
-						<p class="text-muted-foreground mb-1 text-xs font-medium">Call (arguments shortened)</p>
-						<pre class={capture}><code>deploy_entry  entry=root-shell  host=pi3-2</code></pre>
-					</div>
-					<div>
-						<p class="text-muted-foreground mb-1 text-xs font-medium">Response</p>
-						<pre class={capture}><code class="text-destructive">not_found: not found</code></pre>
-					</div>
-				</div>
-				<figcaption class="text-muted-foreground mt-2 text-sm">An entry that isn't in your catalog is refused.</figcaption>
-			</figure>
-		</div>
-	</div>
-</section>
-
 <section class="py-8" aria-labelledby="flow-title">
 	<h2 id="flow-title" class="text-2xl font-semibold tracking-tight">From your AI agent to your servers</h2>
 	<div class="mt-4">
 		<PitchDiagram />
+	</div>
+</section>
+
+<section class="py-8" aria-labelledby="visual-title">
+	<h2 id="visual-title" class="text-2xl font-semibold tracking-tight">See it in action</h2>
+	<!-- From lg both figures span two shared rows (subgrid): the frames share row 1, whose height the chat
+	     sets, and the captions start together in row 2. -->
+	<div class="mt-4 grid gap-6 lg:grid-cols-2 lg:grid-rows-[1fr_auto] lg:gap-y-2">
+		<figure class="min-w-0 lg:row-span-2 lg:grid lg:grid-rows-subgrid">
+			<div class="bg-card overflow-hidden rounded-lg border">
+				<div class="bg-muted flex items-center gap-1.5 border-b px-3 py-1.5" aria-hidden="true">
+					<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
+					<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
+					<span class="bg-muted-foreground/40 size-2 rounded-full"></span>
+					<span class="text-muted-foreground ml-2 text-xs">AI agent</span>
+				</div>
+				<ol class="flex flex-col gap-2 p-3 text-sm sm:p-4" role="list">
+					{#each thread as message (message)}
+						<li
+							class={[
+								'max-w-[85%] space-y-1.5 rounded-lg px-3 py-2',
+								message.from === 'user' ? 'bg-primary text-primary-foreground self-end' : 'bg-muted self-start'
+							]}
+						>
+							<span class="sr-only">{message.from === 'user' ? 'You: ' : 'AI agent: '}</span>
+							{#each message.lines as line (line)}
+								<p class={[line.tool && 'text-muted-foreground border-l-2 pl-2 font-mono text-xs']}>
+									{#each wordsWithHyphens(line.text) as part, i}{#if i % 2}<span class="whitespace-nowrap"
+												>{part}</span
+											>{:else}{part}{/if}{/each}
+								</p>
+							{/each}
+						</li>
+					{/each}
+				</ol>
+			</div>
+			<figcaption class="text-muted-foreground mt-2 text-sm lg:mt-0">
+				Your AI agent asks, you confirm, Deploybot does it. Anything outside your catalog is refused.
+			</figcaption>
+		</figure>
+		<!-- The image is absolute from lg, so it never drives the row height; object-top trims only the empty
+		     margin under the last row, never the tab bar. -->
+		<figure class="min-w-0 lg:row-span-2 lg:grid lg:grid-rows-subgrid">
+			<div class="bg-card overflow-hidden rounded-lg border lg:relative">
+				{#each ['dark', 'light'] as theme (theme)}
+					<img
+						class={[
+							'h-auto w-full lg:absolute lg:inset-0 lg:h-full lg:object-cover lg:object-top',
+							theme === 'dark' ? 'hidden dark:block' : 'block dark:hidden'
+						]}
+						src={`/brand/about-catalog-${theme}.webp`}
+						width={catalogShot.width}
+						height={catalogShot.height}
+						loading="lazy"
+						decoding="async"
+						alt={catalogShot.alt}
+					/>
+				{/each}
+			</div>
+			<figcaption class="text-muted-foreground mt-2 text-sm lg:mt-0">{catalogShot.caption}</figcaption>
+		</figure>
 	</div>
 </section>
 

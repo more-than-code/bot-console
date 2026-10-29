@@ -305,7 +305,7 @@ describe('public site pages', () => {
 		const PITCH =
 			'Let any AI agent that speaks MCP run your own servers, without handing it SSH keys or a cloud token. It can only deploy what your catalog allows, as you, after a confirm step.';
 		const body = render(AboutPage).body.replace(/<!--[^]*?-->/g, '').replace(/\s+/g, ' ');
-		const hero = body.slice(body.indexOf('id="hero-title"'), body.indexOf('aria-labelledby="visual-title"'));
+		const hero = body.slice(body.indexOf('id="hero-title"'), body.indexOf('aria-labelledby="flow-title"'));
 		assert.ok(hero.includes(PITCH), 'pitch in the hero');
 		// Joe 2026-10-29: the header already shows the Deploybot lockup, so the h1 is the headline, not the name again.
 		assert.match(hero, /^id="hero-title"[^>]*>\s*Let AI run your servers, without the keys\.\s*<\/h1>/);
@@ -321,7 +321,7 @@ describe('public site pages', () => {
 	test('the pitch diagrams (landscape and portrait) sit in the flow section with accessible names and generic agents', () => {
 		// Joe 2026-10-26: docs/brand/pitch-diagram.svg on the About page; since spec about-page §3.3 its own section.
 		const body = render(AboutPage).body.replace(/<!--[^]*?-->/g, '');
-		const hero = body.slice(body.indexOf('id="flow-title"'), body.indexOf('aria-labelledby="compare-title"'));
+		const hero = body.slice(body.indexOf('id="flow-title"'), body.indexOf('aria-labelledby="visual-title"'));
 		assert.match(hero, /<svg[^>]*role="img"[^>]*aria-labelledby="pitch-title" aria-describedby="pitch-desc"/);
 		assert.match(hero, /<svg[^>]*role="img"[^>]*aria-labelledby="pitch-portrait-title" aria-describedby="pitch-portrait-desc"/);
 		for (const id of ['pitch-title', 'pitch-portrait-title']) {
