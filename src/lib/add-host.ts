@@ -1,4 +1,5 @@
 import type { CreatedJoin, Host, HostStatus, JoinToken } from '$lib/api-types';
+import type { VisibilityDoc } from '$lib/visibility';
 
 /** How long the created-token card polls for the new host before it gives up. */
 export const ENROL_WAIT_MS = 15 * 60 * 1000;
@@ -142,13 +143,6 @@ export function enrolStatus(created: CreatedJoin, tokens: JoinToken[], hosts: Ho
 	if (now - startedAt >= ENROL_WAIT_MS) return { kind: 'timeout', expiresAt: token?.expires_at ?? null };
 	return { kind: 'waiting' };
 }
-
-/** The parts of `document` the poller uses. */
-export type VisibilityDoc = {
-	readonly visibilityState: DocumentVisibilityState;
-	addEventListener(type: 'visibilitychange', listener: () => void): void;
-	removeEventListener(type: 'visibilitychange', listener: () => void): void;
-};
 
 /**
  * Calls `refresh` every `intervalMs` while `isWaiting()` and the document is visible.

@@ -15,6 +15,7 @@
 		icon: Icon = Copy,
 		onResult,
 		id,
+		disabled = false,
 		class: className
 	}: {
 		value: string;
@@ -28,6 +29,8 @@
 		onResult?: (note: string) => void;
 		/** Text button only. */
 		id?: string;
+		/** Text button only: nothing to copy yet. */
+		disabled?: boolean;
 		/** Extra classes for the text button, such as letting a long label wrap. */
 		class?: string;
 	} = $props();
@@ -75,7 +78,7 @@
 		</Tooltip.Provider>
 	</span>
 {:else}
-	<Button type="button" variant="outline" size="sm" {id} class={className} onclick={copy} aria-live="polite">
+	<Button type="button" variant="outline" size="sm" {id} {disabled} class={className} onclick={copy} aria-live="polite">
 		{#if copied}
 			<Check class="size-4" />Copied
 		{:else}

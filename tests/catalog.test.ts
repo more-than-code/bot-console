@@ -255,9 +255,9 @@ describe('catalog', { concurrency: false }, () => {
 				}
 			}
 		}).body;
+		// Logs open in LogsDrawer now; a logs result is not rendered in the run dialog.
 		assert.equal(logsHtml.includes('<img'), false);
-		assert.equal(logsHtml.includes('&lt;img'), true);
-		assert.equal(logsHtml.includes('onerror=alert(1)'), true);
+		assert.equal(logsHtml.includes('Log lines'), false);
 	});
 
 	test('a forbidden approval wait is the info notice', () => {

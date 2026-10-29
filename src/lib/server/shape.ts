@@ -68,10 +68,12 @@ import {
 	redactAssignments
 } from '../image-spec';
 import { DIGEST_PATTERN, TAG_PATTERN } from '../image-tags';
+import { stripAnsi } from '../ansi';
 import { isRole } from './roles';
 import { acceptedInstallServer, acceptedInviteUrl, consentRedirect, isJoinToken, isOauthRequestId, isUuid } from './validate';
 
 const CONTROL = /[\u0000-\u001F\u007F]/;
+const CONTROL_ALL = new RegExp(CONTROL.source, 'g');
 /** Catalog command, dir, args, and env values forbid NUL and newline. A tab is kept. */
 const LINE_BREAK = /[\u0000\n\r]/;
 const PATH_MAX_BYTES = 512;
@@ -106,12 +108,17 @@ function optionalPath(value: unknown): string | null | undefined {
 	return value;
 }
 
-/** Keep the text. Control characters become U+FFFD. Over the cap, end with an ellipsis inside the cap. */
+/** Keep the text. A tab becomes a space and every other control character U+FFFD. Over the cap, end with an ellipsis inside the cap. */
 function displayText(value: string, max: number): string {
-	const cleaned = value.replace(CONTROL, '\uFFFD');
+	const cleaned = value.replaceAll('\t', ' ').replace(CONTROL_ALL, '\uFFFD');
 	if (cleaned.length <= max) return cleaned;
 	if (max <= 1) return '\u2026'.slice(0, max);
 	return `${cleaned.slice(0, max - 1)}\u2026`;
+}
+
+/** A log line without terminal escape sequences, then shown like any other agent text. */
+function logLine(value: string): string {
+	return displayText(stripAnsi(value), LOG_LINE_MAX);
 }
 
 function optionalNumber(value: unknown): number | null | undefined {
@@ -1034,7 +1041,7 @@ export function parseProgramLogs(value: unknown): ProgramLogs | null {
 	const lines: string[] = [];
 	for (const item of capped) {
 		if (typeof item !== 'string') return null;
-		lines.push(displayText(item, LOG_LINE_MAX));
+		lines.push(logLine(item));
 	}
 	return { unit, lines, truncated: value.truncated || value.lines.length > LOG_LINE_CAP };
 }
@@ -1296,7 +1303,7 @@ function parseLogLines(value: unknown): { lines: string[]; truncated: boolean } 
 	const lines: string[] = [];
 	for (const item of capped) {
 		if (typeof item !== 'string') return null;
-		lines.push(displayText(item, LOG_LINE_MAX));
+		lines.push(logLine(item));
 	}
 	return { lines, truncated: value.length > LOG_LINE_CAP };
 }

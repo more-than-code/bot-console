@@ -55,17 +55,6 @@
 	{:else if result.status}
 		<p role="status" tabindex="-1" class="break-all" bind:this={focusEl}>{statusLine(result.status)}</p>
 	{/if}
-	{#if result.logs}
-		{#if result.logs.lines.length === 0}
-			<p class="text-muted-foreground text-sm">No log lines.</p>
-		{:else}
-			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-			<pre tabindex="0" aria-label="Log lines" class="bg-muted max-h-64 overflow-auto font-mono whitespace-pre-wrap">{result.logs.lines.join('\n')}</pre>
-		{/if}
-		{#if result.logs.truncated}
-			<p class="text-muted-foreground text-sm">Older lines were left out.</p>
-		{/if}
-	{/if}
 	<div class="flex flex-wrap items-center gap-2" bind:this={closeWrap}>
 		{@render close()}
 	</div>

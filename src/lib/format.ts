@@ -1,6 +1,6 @@
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
-function dateFormat(kind: 'when' | 'clock' | 'day', timeZone: string | undefined): Intl.DateTimeFormat {
+function dateFormat(kind: 'when' | 'clock' | 'time' | 'day', timeZone: string | undefined): Intl.DateTimeFormat {
 	const key = `${kind}:${timeZone ?? ''}`;
 	const cached = formatters.get(key);
 	if (cached) return cached;
@@ -17,6 +17,10 @@ function dateFormat(kind: 'when' | 'clock' | 'day', timeZone: string | undefined
 	} else if (kind === 'clock') {
 		options.hour = '2-digit';
 		options.minute = '2-digit';
+	} else if (kind === 'time') {
+		options.hour = '2-digit';
+		options.minute = '2-digit';
+		options.second = '2-digit';
 	} else {
 		options.day = 'numeric';
 		options.month = 'short';
@@ -40,6 +44,12 @@ export function formatWhen(iso: string | null, timeZone?: string): string {
 	const date = new Date(iso);
 	if (Number.isNaN(date.getTime())) return 'n/a';
 	return dateFormat('when', timeZone || undefined).format(date);
+}
+
+/** `hh:mm:ss`. `timeZone` is an IANA name. Omit it to use the runtime zone. */
+export function formatTime(date: Date, timeZone?: string): string {
+	if (Number.isNaN(date.getTime())) return '';
+	return dateFormat('time', timeZone || undefined).format(date);
 }
 
 /** `timeZone` is an IANA name. Omit it to use the runtime zone. */

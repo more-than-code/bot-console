@@ -22,8 +22,8 @@
 		blockedReason = null,
 		onRowBusy
 	}: {
-		/** What the trigger and a new form do now. A shown result keeps the kind that ran. */
-		kind: CatalogRunKind;
+		/** What the trigger and a new form do now. A shown result keeps the kind that ran. Logs use `LogsDrawer`. */
+		kind: Exclude<CatalogRunKind, 'logs'>;
 		entryName: string;
 		/** The Services row's host. */
 		hostId: string;

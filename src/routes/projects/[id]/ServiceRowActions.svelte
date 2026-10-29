@@ -6,6 +6,7 @@
 	import type { ServiceControls } from '$lib/service-actions';
 	import { actionUrlFrom } from '$lib/url';
 	import CatalogRunDialog from './CatalogRunDialog.svelte';
+	import LogsDrawer from './LogsDrawer.svelte';
 
 	let {
 		controls,
@@ -20,7 +21,7 @@
 		hostName: string;
 		/** The Services row. Null for a not-running item, which has no row yet. */
 		serviceId?: string | null;
-		/** The last start, stop, restart, or logs result on this page. Shown only on its own row. */
+		/** The last start, stop, or restart result on this page. Shown only on its own row. Logs open in a drawer. */
 		runResult?: CatalogRunState | null;
 		/** A program that never ran: Start only, since there are no logs yet. */
 		startOnly?: boolean;
@@ -28,11 +29,6 @@
 
 	let busy = $state(false);
 
-	const others = $derived(
-		startOnly
-			? []
-			: [...(controls.restart ? (['restart'] as const) : []), ...(controls.logs ? (['logs'] as const) : [])]
-	);
 	/** The restart-count line goes on Stop when there is one, else on Logs. */
 	const logsTip = $derived(controls.stateAction === 'stop' ? undefined : (controls.crashNote ?? undefined));
 
@@ -75,18 +71,28 @@
 			{onRowBusy}
 		/>
 	{/if}
-	{#each others as kind (kind)}
+	{#if !startOnly && controls.restart}
 		<CatalogRunDialog
-			{kind}
+			kind="restart"
 			entryName={controls.entry}
 			{hostId}
 			{hostName}
 			{serviceId}
-			action={actionUrlFrom(page.url, RUN_FORM_ACTION[kind])}
-			result={resultFor([kind])}
+			action={actionUrlFrom(page.url, RUN_FORM_ACTION.restart)}
+			result={resultFor(['restart'])}
 			entryKind={controls.entryKind}
-			tip={kind === 'logs' ? logsTip : undefined}
 			{onRowBusy}
 		/>
-	{/each}
+	{/if}
+	{#if !startOnly && controls.logs}
+		<!-- Logs open a drawer at once: read-only, so there is no confirm step. -->
+		<LogsDrawer
+			entryName={controls.entry}
+			entryKind={controls.entryKind}
+			{hostId}
+			{hostName}
+			action={actionUrlFrom(page.url, RUN_FORM_ACTION.logs)}
+			tip={logsTip}
+		/>
+	{/if}
 </fieldset>

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, mock, test } from 'node:test';
-import { ENROL_WAIT_MS, agentPrompt, createEnrolPoller, enrolStatus, type EnrolStatus, type VisibilityDoc } from '../src/lib/add-host.ts';
+import { ENROL_WAIT_MS, agentPrompt, createEnrolPoller, enrolStatus, type EnrolStatus } from '../src/lib/add-host.ts';
+import type { VisibilityDoc } from '../src/lib/visibility.ts';
 import type { CreatedJoin, Host, JoinToken } from '../src/lib/api-types.ts';
 import { parseCreatedJoin } from '../src/lib/server/shape.ts';
 import { load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
