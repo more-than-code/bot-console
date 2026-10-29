@@ -555,10 +555,10 @@ describe('catalog', { concurrency: false }, () => {
 		assert.equal(logs?.lines[1]?.length, 8192);
 		assert.equal(logs?.lines[1]?.endsWith('\u2026'), true);
 		assert.equal(logs?.truncated, false);
-		const many = Array.from({ length: 1001 }, (_, index) => String(index));
+		const many = Array.from({ length: 2001 }, (_, index) => String(index));
 		const capped = parseProgramLogs({ unit: 'unit', lines: many, truncated: false });
-		assert.equal(capped?.lines.length, 1000);
-		assert.equal(capped?.lines[0], '0');
+		assert.equal(capped?.lines.length, 2000);
+		assert.equal(capped?.lines[0], '1');
 		assert.equal(capped?.truncated, true);
 	});
 

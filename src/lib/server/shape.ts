@@ -805,7 +805,8 @@ const CATALOG_ACTIONS = new Set<CatalogAction>(['run', 'stop', 'restart', 'logs'
 const GRANT_ACTION_SET = new Set<CatalogGrantAction>([...GRANT_ACTIONS, 'deploy']);
 const ENTRY_CAP = 200;
 const GRANT_LIST_CAP = 100;
-const LOG_LINE_CAP = 1000;
+/** The largest `lines` the API allows (images 2000; programs are capped at 1000 by the API). */
+const LOG_LINE_CAP = 2000;
 const LOG_LINE_MAX = 8192;
 
 /** command_display is kept whole. Only an empty value, or one with NUL or a newline, is dropped. */
@@ -1037,7 +1038,7 @@ export function parseProgramLogs(value: unknown): ProgramLogs | null {
 	if (!isRecord(value) || typeof value.truncated !== 'boolean' || !Array.isArray(value.lines)) return null;
 	const unit = text(value.unit, 200);
 	if (!unit) return null;
-	const capped = value.lines.slice(0, LOG_LINE_CAP);
+	const capped = value.lines.slice(-LOG_LINE_CAP);
 	const lines: string[] = [];
 	for (const item of capped) {
 		if (typeof item !== 'string') return null;
@@ -1299,7 +1300,7 @@ export function parseImageSpec(value: unknown): ImageSpec | null {
 
 function parseLogLines(value: unknown): { lines: string[]; truncated: boolean } | null {
 	if (!Array.isArray(value)) return null;
-	const capped = value.slice(0, LOG_LINE_CAP);
+	const capped = value.slice(-LOG_LINE_CAP);
 	const lines: string[] = [];
 	for (const item of capped) {
 		if (typeof item !== 'string') return null;

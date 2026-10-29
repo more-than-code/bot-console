@@ -16,6 +16,7 @@ import {
 	isSpecHash
 } from '$lib/catalog';
 import type { CatalogGrant, CatalogGrantAction, Host, Member } from '$lib/api-types';
+import { logLinesChoice } from '$lib/log-lines';
 import type { CatalogDraft, CatalogEditorState, CatalogPermissionsState, CatalogRunKind, CatalogRunState } from '$lib/project-action';
 import { ApiError, actionFailure, apiFetch, apiList } from '$lib/server/api';
 import { formText } from '$lib/server/form';
@@ -295,7 +296,13 @@ async function catalogAct(event: RequestEvent, kind: CatalogRunKind) {
 	if (!isCatalogName(name)) return runFailure(event, 400, target, kind, 'That catalog entry is not valid.');
 	if (!isUuid(hostId)) return runFailure(event, 400, target, kind, 'Choose a host.');
 	const image = formText(form, 'entry_kind') === 'image';
-	const body: { host_id: string; idempotency_key?: string } = { host_id: hostId };
+	const body: { host_id: string; idempotency_key?: string; lines?: number } = { host_id: hostId };
+	if (kind === 'logs' && form.has('lines')) {
+		// Left out, the API default (200) applies.
+		const lines = logLinesChoice(image ? 'image' : 'program', formText(form, 'lines'));
+		if (lines == null) return runFailure(event, 400, target, kind, 'Choose how many lines to show.');
+		body.lines = lines;
+	}
 	if (kind !== 'logs') {
 		const key = formText(form, 'idempotency_key');
 		if (!isIdempotencyKey(key)) return runFailure(event, 400, target, kind, 'The idempotency key is not valid.');

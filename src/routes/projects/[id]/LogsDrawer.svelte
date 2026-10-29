@@ -9,11 +9,13 @@
 	import RowAction from '$lib/components/RowAction.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
+	import * as Select from '$lib/components/ui/select';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Switch } from '$lib/components/ui/switch';
 	import { formatTime } from '$lib/format';
-	import { LogsLoader, canCopy, emptyLogsView, logsText, type LogsView } from '$lib/logs-load';
+	import { DEFAULT_LOG_LINES, TRUNCATED_NOTE, linesKept, pickerChoices, type LinesState } from '$lib/log-lines';
+	import { LogsLoader, canCopy, chooseLines, emptyLogsView, logsText, switchLive, type LogsView } from '$lib/logs-load';
 	import { atBottom, logsAnnouncement, logsInfoLine, scrollAfterUpdate } from '$lib/log-view';
 	import { LIVE_TIMEOUT_NOTE, createLogsPoller, type LiveEnd, type LogsPoller } from '$lib/logs-poll';
 	import { RUN_ICON, RUN_LABEL } from '$lib/run-actions';
@@ -43,12 +45,15 @@
 	const ids = $props.id();
 	const titleId = `${ids}-title`;
 	const liveId = `${ids}-live`;
+	const linesId = `${ids}-lines`;
 	const zones = timeZoneSource();
 
 	let open = $state(false);
 	let view = $state<LogsView>(emptyLogsView());
 	/** Live's only owner. The switch shows it; `onLive` and the poller's end change it. */
 	let live = $state(false);
+	/** The Lines picker: 200 on every open; while Live is on, at most 500 and the choice Live replaced. */
+	let lines = $state<LinesState>({ choice: DEFAULT_LOG_LINES, beforeLive: null });
 	let newBelow = $state(false);
 	let viewEl = $state<HTMLPreElement | null>(null);
 	let slotEl = $state<HTMLSpanElement | null>(null);
@@ -59,6 +64,7 @@
 	const source = $derived(view.logs == null ? null : 'unit' in view.logs ? view.logs.unit : view.logs.container);
 	const firstLoad = $derived(view.loading && view.logs == null && !view.error && !view.endNote);
 	const announcement = $derived(logsAnnouncement({ error: view.error, endNote: view.endNote, firstLoad }));
+	const choices = $derived(pickerChoices(entryKind, live));
 	const info = $derived(logsInfoLine({ live, updated: view.updatedAt ? formatTime(view.updatedAt, zones?.current) : null }));
 
 	// Opening fetches at once; closing stops Live, drops any answer still on its way, and clears the view.
@@ -86,17 +92,26 @@
 			poller = null;
 			loader = null;
 			live = false;
+			lines = { choice: DEFAULT_LOG_LINES, beforeLive: null };
 			newBelow = false;
 		};
 	});
 
 	function onLive(on: boolean) {
 		live = on;
-		poller?.setLive(on);
+		if (loader && poller) lines = switchLive({ loader, poller }, lines, on);
 	}
 
+	function onLines(value: string) {
+		const next = Number(value);
+		if (!choices.includes(next)) return;
+		if (loader && poller) lines = chooseLines({ loader, poller }, next, live);
+	}
+
+	/** Live ended by itself: the picker keeps 500, and the user can pick again. */
 	function onLiveEnd(reason: LiveEnd) {
 		live = false;
+		lines = linesKept(lines);
 		if (reason === 'timeout') loader?.endLive(LIVE_TIMEOUT_NOTE);
 	}
 
@@ -178,6 +193,19 @@
 				<RefreshCw class="size-4 {view.spinning ? 'motion-safe:animate-spin' : ''}" />Refresh
 			</Button>
 			<div class="flex items-center gap-2">
+				<Label for={linesId}>Lines</Label>
+				<Select.Root type="single" value={String(lines.choice)} onValueChange={onLines}>
+					<Select.Trigger id={linesId} size="sm" class="w-24">
+						<Select.Value>{lines.choice}</Select.Value>
+					</Select.Trigger>
+					<Select.Content>
+						{#each choices as choice (choice)}
+							<Select.Item value={String(choice)}>{choice}</Select.Item>
+						{/each}
+					</Select.Content>
+				</Select.Root>
+			</div>
+			<div class="flex items-center gap-2">
 				<Switch id={liveId} checked={live} onCheckedChange={onLive} />
 				<Label for={liveId}>Live</Label>
 			</div>
@@ -220,7 +248,7 @@
 				{/if}
 			{/if}
 			{#if view.logs?.truncated}
-				<p class="text-muted-foreground text-sm">Older lines were left out.</p>
+				<p class="text-muted-foreground text-sm">{TRUNCATED_NOTE}</p>
 			{/if}
 		</div>
 	</Sheet.Content>

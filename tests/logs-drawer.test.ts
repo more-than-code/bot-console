@@ -5,8 +5,19 @@ import type { ActionResult } from '@sveltejs/kit';
 import { render } from 'svelte/server';
 import { stripAnsi } from '../src/lib/ansi.ts';
 import { formatTime } from '../src/lib/format.ts';
+import {
+	DEFAULT_LOG_LINES,
+	LIVE_LOG_LINES_MAX,
+	TRUNCATED_NOTE,
+	linesKept,
+	linesOnLiveOff,
+	linesOnLiveOn,
+	logLineChoices,
+	logLinesChoice,
+	pickerChoices
+} from '../src/lib/log-lines.ts';
 import { LOGS_FAILED, LOGS_LOADING, atBottom, logsAnnouncement, logsInfoLine, logsOutcome, sameOriginPath, scrollAfterUpdate } from '../src/lib/log-view.ts';
-import { LogsLoader, canCopy, emptyLogsView, logsText, type LogsView } from '../src/lib/logs-load.ts';
+import { LogsLoader, canCopy, chooseLines, emptyLogsView, logsText, switchLive, type LogsView } from '../src/lib/logs-load.ts';
 import { LIVE_DELAY_MS, LIVE_MAX_MS, LIVE_NOTE, LIVE_TIMEOUT_NOTE, createLogsPoller, type LiveEnd } from '../src/lib/logs-poll.ts';
 import type { CatalogRunState } from '../src/lib/project-action.ts';
 import type { ServiceControls } from '../src/lib/service-actions.ts';
@@ -380,7 +391,8 @@ describe('logs-load', () => {
 		assert.deepEqual([...body.entries()], [
 			['name', 'web'],
 			['host_id', HOST_ID],
-			['entry_kind', 'image']
+			['entry_kind', 'image'],
+			['lines', '200']
 		]);
 		assert.equal(logs.view.loading, true);
 		assert.equal(logs.view.spinning, true);
@@ -623,8 +635,19 @@ describe('Logs drawer', () => {
 		assert.match(drawer, /role="region"\s+tabindex="0"\s+aria-label="Log lines"/);
 		assert.match(drawer, /function jumpToEnd\(\) \{\s*viewEl\?\.focus\(\);/);
 		assert.match(drawer, /current\.close\(\);/);
-		for (const note of ['No log lines.', 'Older lines were left out.', 'New lines below']) assert.ok(drawer.includes(note), note);
+		for (const note of ['No log lines.', 'New lines below']) assert.ok(drawer.includes(note), note);
 		assert.match(drawer, /data-\[side=right\]:w-full/);
+		// Lines picker: the vendored Select with a visible label, reset to 200 on close, the 64 KB note.
+		assert.match(drawer, /<Label for=\{linesId\}>Lines<\/Label>/);
+		assert.match(drawer, /<Select\.Trigger id=\{linesId\}/);
+		assert.match(drawer, /\{#each choices as choice \(choice\)\}/);
+		assert.match(drawer, /live = false;\s*lines = \{ choice: DEFAULT_LOG_LINES, beforeLive: null \};/);
+		assert.match(drawer, /\{TRUNCATED_NOTE\}/);
+		assert.equal(drawer.includes('Older lines were left out.'), false);
+		assert.match(drawer, /pickerChoices\(entryKind, live\)/);
+		assert.match(drawer, /function onLiveEnd\(reason: LiveEnd\) \{\s*live = false;\s*lines = linesKept\(lines\);/);
+		assert.match(drawer, /lines = switchLive\(\{ loader, poller \}, lines, on\)/);
+		assert.equal(drawer.includes('Live shows the newest'), false);
 		assert.match(source('ServiceRowActions.svelte'), /<LogsDrawer/);
 	});
 
@@ -634,7 +657,7 @@ describe('Logs drawer', () => {
 		assert.equal(source('ServiceRowActions.svelte').includes("kind === 'logs'"), false);
 	});
 
-	test('the logs action posts host_id only and returns cleaned lines', async () => {
+	test('the logs action without lines posts host_id only and returns cleaned lines', async () => {
 		const calls = installFetch(() => envelope({ container: 'deploybot-lab-web', lines: ['\u001B[32mok\u001B[0m\tdone'], truncated: false }));
 		const result = await projectActions.catalogLogs(
 			fakeEvent({
@@ -650,5 +673,238 @@ describe('Logs drawer', () => {
 		assert.equal(calls[0]?.body, JSON.stringify({ host_id: HOST_ID }));
 		const outcome = logsOutcome({ type: 'success', status: 200, data: result as Record<string, unknown> });
 		assert.deepEqual(outcome, { kind: 'logs', logs: { container: 'deploybot-lab-web', lines: ['ok done'], truncated: false } });
+	});
+
+	function logsEvent(form: Record<string, string>) {
+		return fakeEvent({
+			url: `${ORIGIN}/projects/${PROJECT.id}?tab=services&/catalogLogs`,
+			session: TOKEN,
+			user: USER,
+			projects: [PROJECT],
+			params: { id: PROJECT.id },
+			form: { name: 'web', host_id: HOST_ID, ...form }
+		}).event as never;
+	}
+
+	test('the logs action sends a chosen lines value in the kind\'s set and refuses anything else with no API call', async () => {
+		const cases: Array<{ kind: 'program' | 'image'; lines: string; ok: boolean }> = [
+			...['200', '500', '1000'].map((lines) => ({ kind: 'program' as const, lines, ok: true })),
+			...['200', '500', '1000', '2000'].map((lines) => ({ kind: 'image' as const, lines, ok: true })),
+			...['2000', '100', '0', '', ' 200', '0200', '200.0', '-200', 'abc', '1e3'].map((lines) => ({ kind: 'program' as const, lines, ok: false })),
+			...['3000', '1', '', '500 ', 'x'].map((lines) => ({ kind: 'image' as const, lines, ok: false }))
+		];
+		for (const { kind, lines, ok } of cases) {
+			const label = `${kind} ${JSON.stringify(lines)}`;
+			const payload = kind === 'image' ? { container: 'c', lines: ['a'], truncated: false } : { unit: 'u', lines: ['a'], truncated: false };
+			const calls = installFetch(() => envelope(payload));
+			const form: Record<string, string> = { lines };
+			if (kind === 'image') form.entry_kind = 'image';
+			const result = (await projectActions.catalogLogs(logsEvent(form))) as { status?: number; data?: { catalogAction?: CatalogRunState } };
+			if (ok) {
+				assert.equal(calls.length, 1, label);
+				assert.equal(calls[0]?.body, JSON.stringify({ host_id: HOST_ID, lines: Number(lines) }), label);
+			} else {
+				assert.equal(calls.length, 0, label);
+				assert.equal(result.status, 400, label);
+				assert.equal(result.data?.catalogAction?.message, 'Choose how many lines to show.', label);
+			}
+		}
+	});
+
+	test('run, stop and restart ignore lines', async () => {
+		const status = { unit: 'deploybot-lab-web.service', active_state: 'active', sub_state: 'running', main_pid: 9, started_at: null, ports: [] };
+		for (const act of ['catalogRun', 'catalogStop', 'catalogRestart'] as const) {
+			const calls = installFetch(() => envelope(status));
+			await projectActions[act](logsEvent({ idempotency_key: 'run-key-1', lines: 'abc' }));
+			assert.equal(calls[0]?.body, JSON.stringify({ host_id: HOST_ID, idempotency_key: 'run-key-1' }), act);
+		}
+	});
+
+	test('the parse cap is 2000 lines', () => {
+		const lines = (n: number) => Array.from({ length: n }, (_, i) => `l${i}`);
+		const full = parseImageLogs({ container: 'c', lines: lines(2000), truncated: false });
+		assert.equal(full?.lines.length, 2000);
+		assert.equal(full?.truncated, false);
+		const over = parseImageLogs({ container: 'c', lines: lines(2001), truncated: false });
+		assert.equal(over?.lines.length, 2000);
+		assert.equal(over?.lines[0], 'l1', 'the newest lines are kept');
+		assert.equal(over?.truncated, true);
+		assert.equal(parseProgramLogs({ unit: 'u', lines: lines(2000), truncated: false })?.truncated, false);
+	});
+});
+
+describe('log-lines', () => {
+	test('choices per kind, default and Live cap', () => {
+		assert.deepEqual(logLineChoices('program'), [200, 500, 1000]);
+		assert.deepEqual(logLineChoices('image'), [200, 500, 1000, 2000]);
+		assert.equal(DEFAULT_LOG_LINES, 200);
+		assert.equal(LIVE_LOG_LINES_MAX, 500);
+		assert.ok(logLineChoices('program').includes(DEFAULT_LOG_LINES));
+	});
+
+	test('a form value must be one of the kind\'s choices, written plainly', () => {
+		const table: Array<[kind: 'program' | 'image', raw: string, want: number | null]> = [
+			['program', '200', 200],
+			['program', '1000', 1000],
+			['program', '2000', null],
+			['image', '2000', 2000],
+			['image', '500', 500],
+			['image', '0500', null],
+			['image', ' 500', null],
+			['image', '', null],
+			['program', '250', null]
+		];
+		for (const [kind, raw, want] of table) assert.equal(logLinesChoice(kind, raw), want, `${kind} ${JSON.stringify(raw)}`);
+	});
+
+	test('Live offers only 200 and 500', () => {
+		assert.deepEqual(pickerChoices('program', false), [200, 500, 1000]);
+		assert.deepEqual(pickerChoices('image', false), [200, 500, 1000, 2000]);
+		assert.deepEqual(pickerChoices('program', true), [200, 500]);
+		assert.deepEqual(pickerChoices('image', true), [200, 500]);
+	});
+
+	test('Live on switches 1000 or 2000 to 500 and remembers it; Live off restores it and fetches; 200 and 500 stay', () => {
+		assert.deepEqual(linesOnLiveOn(2000), { choice: 500, beforeLive: 2000 });
+		assert.deepEqual(linesOnLiveOn(1000), { choice: 500, beforeLive: 1000 });
+		assert.deepEqual(linesOnLiveOn(500), { choice: 500, beforeLive: null });
+		assert.deepEqual(linesOnLiveOn(200), { choice: 200, beforeLive: null });
+		assert.deepEqual(linesOnLiveOff({ choice: 500, beforeLive: 2000 }), { state: { choice: 2000, beforeLive: null }, fetch: true });
+		assert.deepEqual(linesOnLiveOff({ choice: 200, beforeLive: null }), { state: { choice: 200, beforeLive: null }, fetch: false });
+		assert.deepEqual(linesOnLiveOff({ choice: 500, beforeLive: null }), { state: { choice: 500, beforeLive: null }, fetch: false });
+		// Live ending by itself, or a pick during Live, keeps what the picker shows.
+		assert.deepEqual(linesKept({ choice: 500, beforeLive: 1000 }), { choice: 500, beforeLive: null });
+	});
+
+	test('the note', () => {
+		assert.equal(TRUNCATED_NOTE, 'Only the newest lines that fit in 64 KB are shown.');
+	});
+
+	test('the loader sends the current choice with every fetch', async () => {
+		const { fetcher, logs } = loader();
+		logs.open();
+		logs.setLines(2000);
+		const manual = logs.load(true);
+		assert.equal((fetcher.calls[0]!.init.body as FormData).get('lines'), '2000');
+		fetcher.calls[0]!.answer(linesResult(['a']));
+		await manual;
+		logs.setLines(500);
+		const poll = logs.load(false);
+		assert.equal((fetcher.calls[1]!.init.body as FormData).get('lines'), '500');
+		fetcher.calls[1]!.answer(linesResult(['b']));
+		await poll;
+	});
+
+	/** A loader and a poller wired as the drawer wires them, with a fetch the test answers. */
+	function drawerParts() {
+		const parts = loader();
+		const doc = new FakeDoc();
+		const ends: LiveEnd[] = [];
+		const poller = createLogsPoller({ load: (manual) => parts.logs.load(manual), doc, onLiveEnd: (reason) => ends.push(reason) });
+		parts.logs.open();
+		const sent = (index: number) => (parts.fetcher.calls[index]!.init.body as FormData).get('lines');
+		return { ...parts, poller, ends, sent };
+	}
+
+	test('a choice made while a fetch runs is fetched once that fetch ends, at the full choice', async () => {
+		const { fetcher, logs, poller, sent } = drawerParts();
+		void poller.refresh(true);
+		assert.equal(fetcher.calls.length, 1);
+		chooseLines({ loader: logs, poller }, 1000, false);
+		assert.equal(fetcher.calls.length, 1, 'no second request while one runs');
+		fetcher.calls[0]!.answer(linesResult(['old']));
+		await flush();
+		assert.equal(fetcher.calls.length, 2);
+		assert.equal(sent(1), '1000');
+		assert.equal(logs.view.spinning, true, 'a choice is a manual fetch');
+		fetcher.calls[1]!.answer(linesResult(['new']));
+		await flush();
+		assert.equal(fetcher.calls.length, 2, 'only one queued fetch');
+		poller.dispose();
+	});
+
+	test('Live on from 2000 polls 500; Live off restores 2000 with exactly one fetch', async () => {
+		const { fetcher, logs, poller, sent } = drawerParts();
+		let lines = chooseLines({ loader: logs, poller }, 2000, false);
+		assert.equal(sent(0), '2000');
+		fetcher.calls[0]!.answer(linesResult(['a']));
+		await flush();
+		// The last answer was just now, so Live's first poll waits for the gap; turning it off cancels that poll.
+		lines = switchLive({ loader: logs, poller }, lines, true);
+		assert.deepEqual(lines, { choice: 500, beforeLive: 2000 });
+		lines = switchLive({ loader: logs, poller }, lines, false);
+		assert.deepEqual(lines, { choice: 2000, beforeLive: null });
+		assert.equal(fetcher.calls.length, 2, 'one fetch at the restored value');
+		assert.equal(sent(1), '2000');
+		assert.equal(logs.view.spinning, true);
+		fetcher.calls[1]!.answer(linesResult(['b']));
+		await flush();
+		assert.equal(fetcher.calls.length, 2);
+		poller.dispose();
+
+		const fresh = drawerParts();
+		fresh.logs.setLines(2000);
+		const state = switchLive({ loader: fresh.logs, poller: fresh.poller }, { choice: 2000, beforeLive: null }, true);
+		assert.equal(state.choice, 500);
+		assert.equal(fresh.fetcher.calls.length, 1, 'the turn-on poll');
+		assert.equal(fresh.sent(0), '500');
+		assert.equal(fresh.logs.view.spinning, false, 'a Live poll');
+		fresh.fetcher.calls[0]!.answer(linesResult(['a']));
+		await flush();
+		fresh.poller.dispose();
+	});
+
+	test('Live off with an earlier choice of 200 or 500 restores it and does not fetch', async () => {
+		for (const choice of [200, 500]) {
+			const { fetcher, logs, poller } = drawerParts();
+			logs.setLines(choice);
+			let lines = switchLive({ loader: logs, poller }, { choice, beforeLive: null }, true);
+			assert.deepEqual(lines, { choice, beforeLive: null });
+			fetcher.calls[0]!.answer(linesResult(['a']));
+			await flush();
+			lines = switchLive({ loader: logs, poller }, lines, false);
+			assert.deepEqual(lines, { choice, beforeLive: null });
+			assert.equal(fetcher.calls.length, 1, `no fetch for ${choice}`);
+			poller.dispose();
+		}
+	});
+
+	test('Live ending by itself keeps 500, and the next fetch asks for 500', async (t: TestContext) => {
+		t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+		const { fetcher, logs, poller, ends, sent } = drawerParts();
+		logs.setLines(2000);
+		let lines = switchLive({ loader: logs, poller }, { choice: 2000, beforeLive: null }, true);
+		for (let i = 0; i < 3; i += 1) {
+			assert.equal(fetcher.calls.length, i + 1);
+			assert.equal(sent(i), '500');
+			fetcher.calls[i]!.fail();
+			await flush();
+			t.mock.timers.tick(LIVE_DELAY_MS);
+		}
+		assert.deepEqual(ends, ['failures']);
+		// What the drawer's onLiveEnd does.
+		lines = linesKept(lines);
+		assert.deepEqual(lines, { choice: 500, beforeLive: null });
+		void poller.refresh(true);
+		assert.equal(fetcher.calls.length, 4);
+		assert.equal(sent(3), '500');
+		poller.dispose();
+	});
+
+	test('a choice while Live is on is a Live poll and clears the remembered choice', async () => {
+		const { fetcher, logs, poller, sent } = drawerParts();
+		logs.setLines(1000);
+		switchLive({ loader: logs, poller }, { choice: 1000, beforeLive: null }, true);
+		fetcher.calls[0]!.answer(linesResult(['a']));
+		await flush();
+		const lines = chooseLines({ loader: logs, poller }, 200, true);
+		assert.deepEqual(lines, { choice: 200, beforeLive: null });
+		assert.equal(sent(1), '200');
+		assert.equal(logs.view.spinning, false);
+		fetcher.calls[1]!.answer(linesResult(['b']));
+		await flush();
+		switchLive({ loader: logs, poller }, lines, false);
+		assert.equal(fetcher.calls.length, 2, 'nothing to restore');
+		poller.dispose();
 	});
 });

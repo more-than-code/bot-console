@@ -15,6 +15,8 @@ export type LiveEnd = 'timeout' | 'failures';
 export type LogsPoller = {
 	/** One fetch now, unless one is already running. `manual` is false only for Live's own polls. */
 	refresh: (manual?: boolean) => Promise<void>;
+	/** One fetch now, or as soon as the running one ends. `manual` false asks for the Live line cap. */
+	fetchSoon: (manual: boolean) => void;
 	setLive: (on: boolean) => void;
 	/** The drawer closed: no further fetches, and a late answer is ignored. */
 	dispose: () => void;
@@ -41,6 +43,8 @@ export function createLogsPoller({
 	let liveSince = 0;
 	let failures = 0;
 	let inFlight = false;
+	/** A fetch asked for while one ran: true when any of them was manual. */
+	let pending: boolean | null = null;
 	let disposed = false;
 	let lastAnswerAt: number | null = null;
 	let timer: ReturnType<typeof setTimeout> | undefined;
@@ -86,12 +90,14 @@ export function createLogsPoller({
 		if (disposed) return;
 		lastAnswerAt = now();
 		failures = ok ? 0 : failures + 1;
-		if (!live) return;
-		if (failures >= LIVE_MAX_FAILURES) {
-			endLive('failures');
+		if (live && failures >= LIVE_MAX_FAILURES) endLive('failures');
+		const queued = pending;
+		pending = null;
+		if (queued !== null) {
+			void refresh(queued);
 			return;
 		}
-		scheduleNext();
+		if (live) scheduleNext();
 	}
 
 	const onVisibility = () => {
@@ -103,6 +109,11 @@ export function createLogsPoller({
 
 	return {
 		refresh,
+		fetchSoon(manual) {
+			if (disposed) return;
+			if (inFlight) pending = pending === true || manual;
+			else void refresh(manual);
+		},
 		setLive(on) {
 			if (disposed || on === live) return;
 			live = on;
@@ -117,6 +128,7 @@ export function createLogsPoller({
 		dispose() {
 			disposed = true;
 			live = false;
+			pending = null;
 			clear();
 			doc.removeEventListener('visibilitychange', onVisibility);
 		}
