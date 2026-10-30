@@ -191,12 +191,12 @@ test('process numeric cells stay right-aligned with their headers', () => {
 	assert.match(table, /column\.numeric \? 'text-right'/);
 });
 
-test('services cells are middle-aligned and last seen may wrap so the table fits', () => {
+test('services cells are middle-aligned and there is no Last seen cell', () => {
 	const source = readFileSync(new URL('../src/routes/projects/[id]/ServicesSection.svelte', import.meta.url), 'utf8');
 	const cells = [...source.matchAll(/<td\b[^>]*>/g)].map((match) => match[0]);
 	assert.ok(cells.length >= 7);
 	for (const cell of cells) assert.match(cell, /align-middle/);
-	assert.match(source, /<td class="p-2 align-middle"><LocalTime iso=\{service\.last_seen_at\} \/>/);
+	assert.equal(source.includes('<LocalTime iso={service.last_seen_at}'), false);
 	assert.match(source, /class="ml-auto inline-flex shrink-0 items-center gap-1"/);
 	assert.match(source, /icon=\{Fingerprint\} iconOnly/);
 	assert.match(

@@ -7,7 +7,7 @@ import type { EnvSet, Health, Host, ImageEntry, ImageSpec, ProjectServiceRow } f
 import { applyDockerPaste, blankImageDraft, dockerRunPreview, imageDraftFromForm, imageRequestBody, imageSpecFromDraft, loggingForPreview, parseDockerRun } from '../src/lib/image-spec.ts';
 import { healthSourceLabel } from '../src/lib/service-view.ts';
 import { parseEnvSet, parseHealthHistory, parseHealthPoint, parseImageSpec, parseService } from '../src/lib/server/shape.ts';
-import StatusBadge from '../src/lib/components/StatusBadge.svelte';
+import RuntimeBadge from '../src/routes/projects/[id]/RuntimeBadge.svelte';
 import CatalogImageForm from '../src/routes/projects/[id]/CatalogImageForm.svelte';
 import CatalogSection from '../src/routes/projects/[id]/CatalogSection.svelte';
 import HealthChecks from '../src/routes/projects/[id]/HealthChecks.svelte';
@@ -901,12 +901,12 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 		assert.equal(healthSourceLabel({ gone_at: null, health: { source: 'check' } }), 'Deploybot check');
 		assert.equal(healthSourceLabel({ gone_at: '2026-10-14T00:00:00Z', health: { source: 'docker' } }), null);
 		assert.equal(healthSourceLabel({ gone_at: null, health: null }), null);
-		const dockerBadge = render(StatusBadge, { props: { status: 'up', hint: 'Docker health check' } }).body;
-		assert.equal(dockerBadge.includes('Docker health check'), true);
-		assert.equal(dockerBadge.includes('title="Docker health check"'), true);
-		const checkBadge = render(StatusBadge, { props: { status: 'up', hint: 'Deploybot check' } }).body;
-		assert.equal(checkBadge.includes('Deploybot check'), true);
-		assert.equal(render(StatusBadge, { props: { status: 'up' } }).body.includes('Docker health check'), false);
+		// The services status badge (RuntimeBadge) carries the source in its description.
+		const dockerBadge = render(RuntimeBadge, { props: { status: 'up', detail: '', hint: 'Docker health check' } }).body;
+		assert.match(dockerBadge, /class="sr-only">Docker health check\.</);
+		const checkBadge = render(RuntimeBadge, { props: { status: 'up', detail: '', hint: 'Deploybot check' } }).body;
+		assert.match(checkBadge, /class="sr-only">Deploybot check\.</);
+		assert.equal(render(RuntimeBadge, { props: { status: 'up', detail: '' } }).body.includes('Docker health check'), false);
 
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
 		const health: Health = { status: 'up', last_checked_at: '2026-10-14T00:00:00Z', latency_ms: null, source: 'docker' };

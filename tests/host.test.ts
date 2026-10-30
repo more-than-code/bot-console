@@ -118,20 +118,20 @@ test('process search matches pid, process, user, and command', () => {
 test('project service columns are server-sorted and ports is not a sort', () => {
 	assert.deepEqual(
 		SERVICE_COLUMNS.filter((column) => column.sortable).map((column) => column.key),
-		['name', 'host', 'kind', 'status', 'last_seen']
+		['name', 'host', 'kind', 'status']
 	);
 	assert.equal(
 		SERVICE_COLUMNS.find((column) => column.key === 'ports')?.sortable,
 		undefined
 	);
-	assert.equal(SERVICE_COLUMNS.find((column) => column.key === 'last_seen')?.firstDir, 'desc');
+	assert.equal(SERVICE_COLUMNS.some((column) => column.key === 'last_seen'), false);
 	assert.equal(SERVICE_DEFAULT_SORT, 'name');
 	assert.equal(SERVICE_DEFAULT_DIR, 'asc');
 	assert.equal(smallestPort([8080, 80]), 80);
 	assert.equal(smallestPort([]), null);
 	assert.deepEqual(
 		serviceColumns(true).map((column) => column.key),
-		['name', 'host', 'project', 'kind', 'ports', 'status', 'actions', 'last_seen', 'checks']
+		['name', 'host', 'project', 'kind', 'ports', 'status', 'actions', 'checks']
 	);
 	assert.equal(showProjectColumn('Lab', [{ project_name: 'Lab' }]), false);
 	assert.equal(showProjectColumn('Lab', [{ project_name: 'Lab' }, { project_name: 'Other' }]), true);

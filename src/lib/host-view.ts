@@ -215,7 +215,7 @@ export const PROJECT_COLUMN: Column<ProjectServiceRow> = {
 	value: (row) => row.project_name
 };
 
-/** Server-sorted project services. Ports has no API sort. `last_seen` opens descending. */
+/** Server-sorted project services. Ports has no API sort. Last seen is in the status tooltip, not a column. */
 export const SERVICE_COLUMNS: Column<ProjectServiceRow>[] = [
 	{ key: 'name', label: 'Name', sortable: true, value: (row) => serviceLabel(row) },
 	{ key: 'host', label: 'Host', sortable: true, value: (row) => row.host_name },
@@ -224,7 +224,6 @@ export const SERVICE_COLUMNS: Column<ProjectServiceRow>[] = [
 	{ key: 'status', label: 'Status', sortable: true, value: (row) => row.health?.status ?? 'unknown' },
 	// Next to the state it acts on, so it stays in view when the table scrolls sideways.
 	{ key: 'actions', label: 'Actions', srLabel: true, hideBelowSm: true },
-	{ key: 'last_seen', label: 'Last seen', sortable: true, firstDir: 'desc', value: (row) => row.last_seen_at },
 	{ key: 'checks', label: 'Checks' }
 ];
 

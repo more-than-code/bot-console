@@ -14,7 +14,6 @@
 	import DataTable from '$lib/components/DataTable.svelte';
 	import LocalTime from '$lib/components/LocalTime.svelte';
 	import Notice from '$lib/components/Notice.svelte';
-	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { formatLatency } from '$lib/format';
 	import {
 		SERVICE_DEFAULT_DIR,
@@ -482,23 +481,21 @@
 			<td class="p-2 align-middle">{serviceKindLabel(service.kind)}</td>
 			<td class="p-2 align-middle font-mono">{ports(service.ports)}</td>
 			<td class="p-2 align-middle">
-				{#if controls && controls !== 'checking'}
-					<RuntimeBadge
-						status={serviceRowStatus(service)}
-						detail={runtimeDetail(runtimeOf(service) ?? UNKNOWN_RUNTIME, service.host_status) ?? ''}
-						hint={healthSourceLabel(service)}
-					/>
-				{:else}
-					<StatusBadge status={serviceRowStatus(service)} hint={healthSourceLabel(service)} />
-				{/if}
+				<!-- Every row: a focusable badge whose tooltip and description end with Last seen. -->
+				<RuntimeBadge
+					status={serviceRowStatus(service)}
+					detail={controls && controls !== 'checking'
+						? (runtimeDetail(runtimeOf(service) ?? UNKNOWN_RUNTIME, service.host_status) ?? '')
+						: ''}
+					hint={healthSourceLabel(service)}
+					lastSeen={service.last_seen_at}
+				/>
 			</td>
 			<td class="w-px p-2 align-middle whitespace-nowrap max-sm:hidden">
 				{#if controls && wide.current}
 					{@render rowActions(service, controls)}
 				{/if}
 			</td>
-			<!-- Last seen may wrap (date, then time), so the table fits at 1280 px. -->
-			<td class="p-2 align-middle"><LocalTime iso={service.last_seen_at} /></td>
 			<td class="p-2 align-middle">
 				{#if showsDockerHealthcheck(service)}
 					<p class="text-muted-foreground text-sm">docker healthcheck</p>

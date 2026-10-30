@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
 import type { CatalogAction, Host, HostStatus, ProjectServiceRow, ServiceRuntime } from '../src/lib/api-types.ts';
 import type { CatalogRunState } from '../src/lib/project-action.ts';
+import { formatWhen } from '../src/lib/format.ts';
 import { runResultTitle } from '../src/lib/run-actions.ts';
+import { statusTooltipText } from '../src/lib/service-view.ts';
 import {
 	NO_CONTAINER_NOTE,
 	STATE_UNKNOWN_NOTE,
@@ -22,6 +25,7 @@ import {
 	type ServiceEntryRef
 } from '../src/lib/service-actions.ts';
 import CatalogRunResult from '../src/routes/projects/[id]/CatalogRunResult.svelte';
+import RuntimeBadge from '../src/routes/projects/[id]/RuntimeBadge.svelte';
 import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import { load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER, type FetchCall } from './harness.ts';
@@ -375,10 +379,73 @@ describe('services rows', () => {
 		const tag = html.match(/<button\b[^>]*aria-describedby="([^"]+)"[^>]*>(?:(?!<\/button>)[\s\S])*text-status-unknown/)?.[0] ?? '';
 		assert.notEqual(tag, '');
 		const id = tag.match(/aria-describedby="([^"]+)"/)?.[1] ?? '';
-		assert.match(html, new RegExp(`id="${id}"[^>]*>Docker running, 0 restarts, ports 80\\.<`));
-		// A discovered row keeps the plain badge.
-		const plain = renderSection([row({ source: 'discovered', catalog_entry: null })], [image()]);
-		assert.equal(/aria-describedby/.test(plain), false);
+		const seen = formatWhen('2026-10-14T12:00:00Z');
+		assert.match(html, new RegExp(`id="${id}"[^>]*>Docker running, 0 restarts, ports 80\\. Last seen ${escape(seen)}\\.<`));
+	});
+
+	/** The badge button's description text for the only row, or '' when the badge has none. */
+	function badgeDescription(html: string): string {
+		const id = html.match(/<button\b[^>]*aria-describedby="([^"]+)"[^>]*>(?:(?!<\/button>)[\s\S])*text-status-/)?.[1];
+		if (!id) return '';
+		return html.match(new RegExp(`<span id="${id}" class="sr-only">([^<]*)<`))?.[1] ?? '';
+	}
+
+	function escape(text: string): string {
+		return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	}
+
+	test('every status badge is a focusable button whose description ends with Last seen', () => {
+		const seen = formatWhen('2026-10-14T12:00:00Z');
+		// Catalog program row with known controls: live details first.
+		const program_ = badgeDescription(
+			renderSection([row({ kind: 'systemd', catalog_entry: 'api', container_name: null, runtime: { state: 'running', restarts: null } })], [program()])
+		);
+		assert.equal(program_, `Program running. Last seen ${seen}.`);
+		// Discovered row with a Docker health source: the source, then Last seen.
+		const discovered = badgeDescription(
+			renderSection(
+				[row({ source: 'discovered', catalog_entry: null, health: { status: 'up', source: 'docker' } as ProjectServiceRow['health'] })],
+				[image()]
+			)
+		);
+		assert.equal(discovered, `Docker health check. Last seen ${seen}.`);
+		// Gone row: no health source, Last seen is the useful part.
+		const gone = badgeDescription(
+			renderSection([row({ source: 'discovered', catalog_entry: null, gone_at: '2026-10-14T13:00:00Z' })], [image()])
+		);
+		assert.equal(gone, `Last seen ${seen}.`);
+		// A container whose state is still being read has no live details yet.
+		assert.equal(badgeDescription(renderSection([row()], [image()])), `Last seen ${seen}.`);
+	});
+
+	test('a row with no details, no source and no last-seen time shows a plain badge', () => {
+		const html = renderSection([row({ source: 'discovered', catalog_entry: null, last_seen_at: null })], [image()]);
+		assert.equal(badgeDescription(html), '');
+		assert.equal(/aria-describedby/.test(html), false);
+		assert.match(html, /text-status-unknown/);
+		// The badge on its own: a trigger button only when there is text to show.
+		const withText = render(RuntimeBadge, { props: { status: 'up', detail: '', lastSeen: '2026-10-14T12:00:00Z' } }).body;
+		assert.equal(withText.includes('data-tooltip-trigger'), true);
+		const empty = render(RuntimeBadge, { props: { status: 'up', detail: '', lastSeen: null } }).body;
+		assert.equal(empty.includes('data-tooltip-trigger'), false);
+		assert.equal(empty.includes('<button'), false);
+		assert.equal(empty.includes('sr-only'), false);
+		assert.match(empty, /text-status-up/);
+	});
+
+	test('a tap toggles the status tooltip and a trigger click does not close it at once', () => {
+		const source = readFileSync(new URL('../src/routes/projects/[id]/RuntimeBadge.svelte', import.meta.url), 'utf8');
+		assert.match(source, /<Tooltip\.Root bind:open disableCloseOnTriggerClick>/);
+		assert.match(source, /onclick=\{\(\) => \(open = !open\)\}/);
+		// Our onclick comes after the trigger props, so it is the one that runs.
+		assert.ok(source.indexOf('{...props}') < source.indexOf('onclick='));
+	});
+
+	test('the status tooltip text leaves out empty parts', () => {
+		assert.equal(statusTooltipText('', null, null), '');
+		assert.equal(statusTooltipText('Program stopped.', 'Deploybot check', null), 'Program stopped. Deploybot check.');
+		assert.equal(statusTooltipText('', null, 'not a date'), '');
+		assert.equal(statusTooltipText('', null, '2026-10-30T21:05:00Z', 'UTC'), `Last seen ${formatWhen('2026-10-30T21:05:00Z', 'UTC')}.`);
 	});
 
 	test('a container whose state is not read yet says checking', () => {

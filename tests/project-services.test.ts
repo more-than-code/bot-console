@@ -319,10 +319,28 @@ describe('project services', { concurrency: false }, () => {
 		);
 		const lastSeenList = serviceList(lastSeenCalls);
 		assert.ok(lastSeenList);
-		assert.equal(lastSeenList.url.searchParams.get('sort'), 'last_seen');
-		assert.equal(lastSeenList.url.searchParams.get('dir'), 'desc');
+		// Last seen is no longer a column, so an old link falls back to the default sort.
+		assert.equal(lastSeenList.url.searchParams.get('sort'), 'name');
+		assert.equal(lastSeenList.url.searchParams.get('dir'), 'asc');
 		assert.equal(lastSeen.services.length, 0);
 		assert.equal(lastSeen.servicesMessage, null);
+
+		const lastSeenDescCalls = installFetch((call) =>
+			shell(call, () => envelope({ items: [], total: 0, next_cursor: null, prev_cursor: null }))
+		);
+		await projectLoad(
+			fakeEvent({
+				url: `http://console.example/projects/${PROJECT.id}?tab=services&services.sort=last_seen&services.dir=desc`,
+				session: TOKEN,
+				user: USER,
+				projects: [PROJECT],
+				params: { id: PROJECT.id }
+			}).event as never
+		);
+		const lastSeenDescList = serviceList(lastSeenDescCalls);
+		assert.ok(lastSeenDescList);
+		assert.equal(lastSeenDescList.url.searchParams.get('sort'), 'name');
+		assert.equal(lastSeenDescList.url.searchParams.get('dir'), 'asc');
 
 		const tooLong = installFetch((call) => shell(call, () => envelope(null, 500, 'error', 'should not list')));
 		const refused = pageData(

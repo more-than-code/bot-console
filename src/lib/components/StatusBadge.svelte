@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { Badge } from '$lib/components/ui/badge';
-	import * as Tooltip from '$lib/components/ui/tooltip';
 
-	let { status, hint = null }: { status: string; hint?: string | null } = $props();
+	let { status }: { status: string } = $props();
 
 	const known = [
 		'online',
@@ -64,23 +63,7 @@
 	};
 </script>
 
-{#snippet badge()}
-	<Badge variant="outline" class={tone[text] ?? 'text-status-unknown'}>
-		<span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
-		{label[text] ?? text}
-	</Badge>
-{/snippet}
-{#if hint}
-	<Tooltip.Provider>
-		<Tooltip.Root>
-			<Tooltip.Trigger>
-				{#snippet child({ props })}
-					<span {...props} title={hint}>{@render badge()}</span>
-				{/snippet}
-			</Tooltip.Trigger>
-			<Tooltip.Content>{hint}</Tooltip.Content>
-		</Tooltip.Root>
-	</Tooltip.Provider>
-{:else}
-	{@render badge()}
-{/if}
+<Badge variant="outline" class={tone[text] ?? 'text-status-unknown'}>
+	<span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
+	{label[text] ?? text}
+</Badge>

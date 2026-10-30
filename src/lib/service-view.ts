@@ -1,5 +1,6 @@
 import type { HealthStatus } from './api-types';
 import { isCatalogName } from './catalog';
+import { formatWhen } from './format';
 import { SERVICE_LOGS_PARAM } from './url';
 
 export { SERVICE_LOGS_PARAM };
@@ -61,6 +62,18 @@ export function healthSourceLabel(row: {
 	if (row.health.source === 'docker') return 'Docker health check';
 	if (row.health.source === 'check') return 'Deploybot check';
 	return null;
+}
+
+/**
+ * Status badge tooltip and description on a services row: live details, the health source,
+ * then `Last seen <when>` in the viewer's zone (as `LocalTime` shows it). Empty parts are left out.
+ */
+export function statusTooltipText(detail: string, hint: string | null, lastSeen: string | null, timeZone?: string): string {
+	const parts = [detail.trim()];
+	if (hint) parts.push(`${hint}.`);
+	const when = formatWhen(lastSeen, timeZone);
+	if (when !== 'n/a') parts.push(`Last seen ${when}.`);
+	return parts.filter((part) => part !== '').join(' ');
 }
 
 /**
