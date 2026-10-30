@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { canRenameService, processServiceHref, serviceLabel } from '../src/lib/service-label.ts';
+import { canRenameService, processServiceHref, renameStartValue, serviceLabel } from '../src/lib/service-label.ts';
 
 const PROJECT = '00000000-0000-4000-8000-000000000010';
 const OTHER = '00000000-0000-4000-8000-000000000099';
@@ -54,4 +54,11 @@ test('a process service link caps services.q at 100 code points', () => {
 	const emojiHref = new URL(processServiceHref(PROJECT, host, `${emoji}z`), 'http://console.example');
 	assert.equal(emojiHref.searchParams.get('services.q'), emoji);
 	assert.equal([...(emojiHref.searchParams.get('services.q') ?? '')].length, 100);
+});
+
+test('the rename field starts from the display name, or a container\'s container name', () => {
+	assert.equal(renameStartValue({ display_name: 'Edvisor', kind: 'container', container_name: 'ai-hub-aihub-edvisor' }), 'Edvisor');
+	assert.equal(renameStartValue({ display_name: null, kind: 'container', container_name: 'ai-hub-aihub-edvisor' }), 'ai-hub-aihub-edvisor');
+	assert.equal(renameStartValue({ display_name: null, kind: 'container', container_name: null }), '');
+	assert.equal(renameStartValue({ display_name: null, kind: 'process', container_name: null }), '');
 });

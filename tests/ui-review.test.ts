@@ -181,7 +181,7 @@ test('an icon-only copy failure shows the digest below the name line and then cl
 	assert.equal(COPY_FAILED_NOTE, 'Copy failed. Select the text and copy it manually.');
 });
 
-test('service label and container name use a definite max width', () => {
+test('the service label uses a definite max width and its tooltip carries the container name', () => {
 	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
 	const row: ProjectServiceRow = {
 		id: SERVICE_ID,
@@ -224,9 +224,11 @@ test('service label and container name use a definite max width', () => {
 		}
 	}).body;
 	assert.match(html, /class="inline-block max-w-48 min-w-0 truncate"/);
-	assert.match(html, /class="text-muted-foreground inline-block max-w-40 min-w-0 truncate font-mono text-sm"/);
-	assert.equal(html.includes('title="A very long service label that should truncate"'), true);
-	assert.equal(html.includes('title="a-very-long-container-name"'), true);
+	assert.equal(html.includes('font-mono text-sm" title="a-very-long-container-name"'), false);
+	assert.equal(
+		html.includes('title="A very long service label that should truncate (container a-very-long-container-name)"'),
+		true
+	);
 });
 
 test('the edit form sits in its row and the add form in a dialog', () => {

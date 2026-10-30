@@ -1103,6 +1103,23 @@ function renderServices(rows: ProjectServiceRow[], extra: Record<string, unknown
 	}).body;
 }
 
+test('an owned container shows its container name by default; a rename shows alone with the container name on hover', () => {
+	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+	const owned = serviceRow('Lab', {
+		name: 'aihub-edvisor',
+		source: 'owned',
+		kind: 'container',
+		display_name: null,
+		catalog_entry: 'aihub-edvisor',
+		container_name: 'ai-hub-aihub-edvisor'
+	});
+	const plain = decode(renderServices([owned]));
+	assert.match(plain, /title="ai-hub-aihub-edvisor">ai-hub-aihub-edvisor</);
+	const renamed = decode(renderServices([{ ...owned, display_name: 'Edvisor' }]));
+	assert.match(renamed, /title="Edvisor \(container ai-hub-aihub-edvisor\)">Edvisor</);
+	assert.equal(renamed.replace(/ title="[^"]*"/g, '').includes('ai-hub-aihub-edvisor'), false);
+});
+
 test('the Project column renders only when a row is from another project', () => {
 	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services&services.q=api`);
 	const same = decode(renderServices([serviceRow('Lab')]));

@@ -1657,8 +1657,9 @@ describe('catalog images', { concurrency: false }, () => {
 				typedName: null
 			}
 		}).body;
-		// The label tooltip repeats the name. The muted container name is omitted when it matches the label.
+		// With no rename the label is the container name, shown once.
 		assert.equal(once.replace(/ title="[^"]*"/g, '').split('web-1').length - 1, 1);
+		assert.equal(once.includes('title="web-1"'), true);
 		assert.equal(once.includes(`aria-label="Image digest ${digest('a')}"`), true);
 		assert.equal(once.split(digest('a')).join('').includes(shortDigest(digest('a')) ?? ''), false);
 		const discovered = { ...row, source: 'discovered' as const, display_name: null, catalog_entry: null, image_digest: null };

@@ -55,7 +55,7 @@
 	<Dialog.Content>
 		<Dialog.Header>
 			<Dialog.Title>Rename service</Dialog.Title>
-			<Dialog.Description>Shown in place of the discovered name. Clear removes it.</Dialog.Description>
+			<Dialog.Description>Changes only the name Deploybot shows. The container, unit or catalog entry keeps its own name. Clear restores the default name.</Dialog.Description>
 		</Dialog.Header>
 		<RenameForm {action} {serviceId} bind:value={draft} message={failed ? message : null} onSettled={settle}>
 			{#snippet cancel()}

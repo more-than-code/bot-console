@@ -107,8 +107,9 @@ test('a services row shows the digest icon and not the short digest text', () =>
 	assert.equal(html.includes(`aria-label="Image digest ${DIGEST}"`), true);
 	assert.equal(html.includes(`title="${DIGEST}"`), true);
 	assert.equal(html.includes('>catalog<'), true);
-	assert.equal(html.includes('web-1'), true);
-	assert.equal(html.includes(`title="web-1"`), true);
+	// The container name is in the label's tooltip, not shown beside it.
+	assert.equal(html.includes('title="Web (container web-1)"'), true);
+	assert.equal(html.replace(/ title="[^"]*"/g, '').includes('web-1'), false);
 	const short = `sha256:${DIGEST.slice('sha256:'.length, 'sha256:'.length + 12)}`;
 	assert.equal(html.split(DIGEST).join('').includes(short), false);
 	assert.match(html, /<svg[^>]*lucide-fingerprint/);

@@ -34,6 +34,17 @@ export function serviceLabel(service: {
 	return owner ? `port ${number} \u00b7 ${owner}` : `port ${number}`;
 }
 
+/** The rename field starts from the display name, or a container's own name so it can be edited. */
+export function renameStartValue(service: {
+	display_name?: string | null;
+	kind?: string | null;
+	container_name?: string | null;
+}): string {
+	if (service.display_name != null) return service.display_name;
+	if (service.kind === 'container') return service.container_name ?? '';
+	return '';
+}
+
 /** Project Services tab for this host, filtered to the discovered service name. */
 export function processServiceHref(projectId: string, hostId: string, serviceName: string): string {
 	const params = new URLSearchParams({

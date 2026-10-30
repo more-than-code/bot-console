@@ -25,7 +25,7 @@
 		showProjectColumn
 	} from '$lib/host-view';
 	import { canEditHealthChecks, SAVED_HEALTH_CHECKS } from '$lib/health-checks';
-	import { serviceLabel } from '$lib/service-label';
+	import { renameStartValue, serviceLabel } from '$lib/service-label';
 	import {
 		SERVICE_SHOW_LABEL,
 		SERVICE_SHOWS,
@@ -231,7 +231,7 @@
 
 	function typedFor(row: ProjectServiceRow): string {
 		if (renameServiceId === row.id && typedName != null) return typedName;
-		return row.display_name ?? '';
+		return renameStartValue(row);
 	}
 
 	type DigestFailure = { value: string; failedAt: number };
@@ -357,10 +357,12 @@
 		<tr id={serviceDomId(service.id)}>
 			<td class="p-2 align-middle">
 				<div class="flex min-w-0 items-center gap-2">
-					<span class="inline-block max-w-48 min-w-0 truncate" title={label}>{label}</span>
-					{#if service.source === 'owned' && service.kind === 'container' && service.container_name && service.container_name !== label}
-						<span class="text-muted-foreground inline-block max-w-40 min-w-0 truncate font-mono text-sm" title={service.container_name}>{service.container_name}</span>
-					{/if}
+					<span
+						class="inline-block max-w-48 min-w-0 truncate"
+						title={service.kind === 'container' && service.container_name && service.container_name !== label
+							? `${label} (container ${service.container_name})`
+							: label}>{label}</span
+					>
 					<span class="ml-auto inline-flex shrink-0 items-center gap-1">
 						{#if digest}
 							<CopyButton value={digest} label="Image digest {digest}" icon={Fingerprint} iconOnly onResult={(note) => onDigestResult(service.id, digest, note)} />
