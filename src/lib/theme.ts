@@ -39,6 +39,16 @@ export function themeCookieOptions(url: URL): {
 	};
 }
 
+/**
+ * The toaster's theme. The `dark` class on <html> is the live state for all three
+ * choices (system resolves through app.html), so read it rather than the cookie.
+ */
+export function toasterTheme(
+	root: { classList: { contains(token: string): boolean } } | null | undefined
+): 'light' | 'dark' {
+	return root?.classList.contains('dark') ? 'dark' : 'light';
+}
+
 /** Apply a choice on the document element. No-op during SSR. */
 export function applyThemeClass(theme: ThemeChoice): void {
 	if (typeof document === 'undefined') return;

@@ -115,54 +115,6 @@ export function imageAuxFormSettle(open: boolean, resultType: string): { open: b
 	return { open, take: resultType === 'success' || resultType === 'failure' };
 }
 
-export type ImageNoticeSeen = {
-	projectId: string;
-	tab: string;
-	permissions: boolean;
-};
-
-/**
- * Drop a saved-image notice when the project changes, the tab leaves Catalog,
- * or Permissions opens. The name does not come back on its own.
- */
-export function imageNoticeOnView(
-	name: string | null,
-	seen: ImageNoticeSeen | null,
-	next: ImageNoticeSeen
-): { name: string | null; seen: ImageNoticeSeen } {
-	if (seen == null) return { name: next.tab === 'catalog' && !next.permissions ? name : null, seen: next };
-	if (seen.projectId !== next.projectId) return { name: null, seen: next };
-	if (seen.tab === 'catalog' && next.tab !== 'catalog') return { name: null, seen: next };
-	if (!seen.permissions && next.permissions) return { name: null, seen: next };
-	return { name, seen: next };
-}
-
-/**
- * Catalog actions a person starts. Hidden env-set and file loads, and the image save
- * itself, are omitted: a cancelled save still submits `catalogCreate` or
- * `catalogUpdate`, and that must not clear the line.
- */
-const IMAGE_NOTICE_CLEAR_ACTIONS: ReadonlySet<string> = new Set([
-	'catalogDelete',
-	'catalogRun',
-	'catalogStop',
-	'catalogRestart',
-	'catalogDeploy',
-	'catalogRollback'
-]);
-
-/** Those actions clear the notice. Anything else, including a cancelled save, leaves it. */
-export function imageNoticeOnSubmit(name: string | null, action: string | null): string | null {
-	if (action != null && IMAGE_NOTICE_CLEAR_ACTIONS.has(action)) return null;
-	return name;
-}
-
-/** Opening a create or edit dialog clears the notice. Closing it, or leaving it open, does not. */
-export function imageNoticeOnDialog(name: string | null, wasOpen: boolean, open: boolean): string | null {
-	if (!wasOpen && open) return null;
-	return name;
-}
-
 /**
  * The success name is announced only once the dialog has finished closing.
  * While it is still open the name stays pending, so the notice is not read
@@ -174,13 +126,6 @@ export function imageNoticeOnCloseComplete(
 ): { pending: string | null; announce: string | null } {
 	if (open || pending == null) return { pending, announce: null };
 	return { pending: null, announce: pending };
-}
-
-/** A fresh image save shows the notice again. A failure clears it. */
-export function imageNoticeOnSave(name: string | null): string | null {
-	if (name == null) return null;
-	const trimmed = name.trim();
-	return trimmed === '' ? null : trimmed;
 }
 
 /**

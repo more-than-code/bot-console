@@ -6,7 +6,6 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import type { Host, ProgramEntry } from '$lib/api-types';
-	import { imageNoticeOnDialog } from '$lib/dialog-open';
 	import type { CatalogEditorState } from '$lib/project-action';
 	import CatalogEntryForm from './CatalogEntryForm.svelte';
 
@@ -18,7 +17,6 @@
 		parseAction,
 		revealed = false,
 		editor = null,
-		onOpened,
 		disabled = false
 	}: {
 		mode: 'create' | 'edit';
@@ -28,25 +26,15 @@
 		parseAction: string;
 		revealed?: boolean;
 		editor?: CatalogEditorState | null;
-		onOpened?: () => void;
 		disabled?: boolean;
 	} = $props();
 
 	let open = $state(untrack(() => revealed));
 	let sawReveal = $state(untrack(() => revealed));
-	let wasOpen = $state(untrack(() => revealed));
 
 	$effect(() => {
 		if (revealed && !untrack(() => sawReveal)) open = true;
 		sawReveal = revealed;
-	});
-
-	// Opening New service or Edit clears a saved-image notice. Closing does not.
-	$effect(() => {
-		const now = open;
-		const previous = untrack(() => wasOpen);
-		if (imageNoticeOnDialog('notice', previous, now) == null) onOpened?.();
-		wasOpen = now;
 	});
 </script>
 

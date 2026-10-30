@@ -62,8 +62,7 @@
 		probeIndex = null,
 		probeMessage = null,
 		showProbe = false,
-		onSaved,
-		onOpened
+		onSaved
 	}: {
 		action: string;
 		probeAction: string;
@@ -86,8 +85,7 @@
 		probeIndex?: number | null;
 		probeMessage?: string | null;
 		showProbe?: boolean;
-		onSaved?: (serviceId: string | null) => void;
-		onOpened?: () => void;
+		onSaved?: (serviceId: string) => void;
 	} = $props();
 
 	let open = $state(untrack(() => failed));
@@ -100,7 +98,7 @@
 	let pendingSaved = $state<string | null>(null);
 	let sawProbe = $state(false);
 	let dismissedProbeText = $state<string | null>(null);
-	// Resolved when bits-ui finishes closing, so the notice is not inside the dialog.
+	// Resolved when bits-ui finishes closing, so the toast is not announced inside the dialog.
 	let closeWait: (() => void) | null = null;
 
 	const formRows = $derived(healthFormRows(drafts));
@@ -119,7 +117,6 @@
 				redundancy = null;
 				ignoreServer = true;
 			}
-			onOpened?.();
 		}
 		wasOpen = now;
 	});
@@ -505,7 +502,6 @@
 						});
 						if (view.notice == null) {
 							ignoreServer = false;
-							onSaved?.(null);
 							await update({ reset: false });
 							await focusInvalid();
 							return;

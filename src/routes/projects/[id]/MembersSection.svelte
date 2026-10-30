@@ -13,6 +13,7 @@
 	import { formDialogOutcome, nextFormDialog, nextInviteSecret, type DialogOutcome } from '$lib/dialog-open';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
+	import { toastMemberAdded } from '$lib/success-toast';
 	import Link from '@lucide/svelte/icons/link';
 	import UserCog from '@lucide/svelte/icons/user-cog';
 	import RowAction from '$lib/components/RowAction.svelte';
@@ -58,8 +59,14 @@
 		addMemberMessage?: string | null;
 	} = $props();
 
-	// "Added {email}." after the Add member dialog succeeds.
-	let addedEmail = $state<string | null>(null);
+	// An added email waits for the Add member dialog to finish closing, like the image and health toasts.
+	let pendingAdded = $state<string | null>(null);
+
+	function onAddMemberClosed() {
+		const email = pendingAdded;
+		pendingAdded = null;
+		if (email) toastMemberAdded(email);
+	}
 
 	let open = $state(untrack(() => inviteMessage != null || inviteUrl != null));
 	let sawFailure = $state(untrack(() => inviteMessage != null));
@@ -325,22 +332,17 @@
 	</DataTable>
 
 	<div class="mt-4">
-		<FormDialog id="add-member" label="Add member" title="Add member" description="Add a person to this project by email." failed={addMemberMessage != null}>
+		<FormDialog id="add-member" label="Add member" title="Add member" description="Add a person to this project by email." failed={addMemberMessage != null} onCloseComplete={onAddMemberClosed}>
 			{#snippet children(settle, cancel)}
 				<AddMemberForm
 					action={actionUrlFrom(page.url, 'addMember')}
 					error={addMemberMessage}
-					onAdded={(email) => (addedEmail = email)}
+					onAdded={(email) => (pendingAdded = email)}
 					onSettled={settle}
 					{cancel}
 				/>
 			{/snippet}
 		</FormDialog>
-		{#if addedEmail}
-			<div class="mt-2 max-w-full min-w-0 break-all">
-				<Notice kind="success">Added {addedEmail}.</Notice>
-			</div>
-		{/if}
 	</div>
 {/if}
 

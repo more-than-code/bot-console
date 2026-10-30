@@ -43,9 +43,7 @@
 		permissions = null,
 		imageEditor = null,
 		imageDeploy = null,
-		savedImage = null,
-		onImageSaved,
-		onEditOpen
+		onImageSaved
 	}: {
 		canOwner: boolean;
 		canAdmin?: boolean;
@@ -59,9 +57,7 @@
 		permissions?: CatalogPermissionsState | null;
 		imageEditor?: ImageEditorState | null;
 		imageDeploy?: ImageDeployState | null;
-		savedImage?: string | null;
-		onImageSaved?: (name: string | null) => void;
-		onEditOpen?: () => void;
+		onImageSaved?: (name: string) => void;
 	} = $props();
 
 	let rowBusy = $state<string | null>(null);
@@ -105,11 +101,6 @@
 	const permissionEntry = $derived(permissions ? (entries.find((item) => item.name === permissions.name) ?? null) : null);
 </script>
 
-{#if savedImage}
-	<div class="max-w-full min-w-0 break-all">
-		<Notice kind="success">Saved {savedImage}.</Notice>
-	</div>
-{/if}
 {#if message}
 	<Notice kind="error">{message}</Notice>
 {/if}
@@ -183,7 +174,6 @@
 							parseAction={actionUrlFrom(page.url, 'catalogParse')}
 							revealed={editor?.mode === 'edit' && editor.name === entry.name}
 							editor={editor?.mode === 'edit' && editor.name === entry.name ? editor : null}
-							onOpened={onEditOpen}
 							disabled={rowBusy === entry.name}
 						/>
 					{:else if (canOwner || canAdmin) && entry.kind === 'image'}

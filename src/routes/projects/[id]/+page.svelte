@@ -1,24 +1,11 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import Notice from '$lib/components/Notice.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
-	import {
-		imageNoticeOnDialog,
-		imageNoticeOnSave,
-		imageNoticeOnSubmit,
-		imageNoticeOnView,
-		type ImageNoticeSeen
-	} from '$lib/dialog-open';
-	import {
-		healthNoticeOnAction,
-		healthNoticeOnDialog,
-		healthNoticeOnView,
-		servicesHealthView,
-		type HealthNoticeSeen
-	} from '$lib/health-checks';
+	import { servicesHealthView } from '$lib/health-checks';
 	import { servicesRenameView, type ProjectActionData, type ProjectScope } from '$lib/project-action';
-	import { actionUrlFrom, namedFormAction } from '$lib/url';
+	import { toastHealthSaved, toastImageSaved } from '$lib/success-toast';
+	import { actionUrlFrom } from '$lib/url';
 	import CatalogEntryDialog from './CatalogEntryDialog.svelte';
 	import CatalogImageDialog from './CatalogImageDialog.svelte';
 	import AddHostSection from './AddHostSection.svelte';
@@ -31,34 +18,6 @@
 	import TokensSection from './TokensSection.svelte';
 
 	let { data, form } = $props();
-	let savedImage = $state<string | null>(null);
-	let seenNotice = $state<ImageNoticeSeen | null>(null);
-	let savedHealthId = $state<string | null>(null);
-	let seenHealth = $state<HealthNoticeSeen | null>(null);
-
-	function onImageSaved(name: string | null) {
-		savedImage = imageNoticeOnSave(name);
-	}
-
-	function onCatalogEditOpen() {
-		savedImage = imageNoticeOnDialog(savedImage, false, true);
-	}
-
-	function onHealthSaved(serviceId: string | null) {
-		savedHealthId = serviceId;
-	}
-
-	function onHealthOpen() {
-		savedHealthId = healthNoticeOnDialog(savedHealthId, false, true);
-	}
-
-	function onCatalogSubmit(event: SubmitEvent) {
-		const target = event.target;
-		if (!(target instanceof HTMLFormElement)) return;
-		const named = namedFormAction(target.action);
-		savedImage = imageNoticeOnSubmit(savedImage, named);
-		savedHealthId = healthNoticeOnAction(savedHealthId, named);
-	}
 
 	const action = $derived((form ?? null) as ProjectActionData | null);
 	const scope = $derived<ProjectScope>(action?.scope ?? data.tab ?? 'hosts');
@@ -80,18 +39,6 @@
 		return sectionMessage ?? data.catalogMessage ?? null;
 	});
 
-	$effect(() => {
-		const projectId = data.project?.id ?? '';
-		const tab = scope;
-		const permissions = page.url.searchParams.has('permissions');
-		const next = imageNoticeOnView(untrack(() => savedImage), untrack(() => seenNotice), { projectId, tab, permissions });
-		savedImage = next.name;
-		seenNotice = next.seen;
-		const healthNext = healthNoticeOnView(untrack(() => savedHealthId), untrack(() => seenHealth), { projectId, tab });
-		savedHealthId = healthNext.notice;
-		seenHealth = healthNext.seen;
-	});
-
 	const tabs = $derived(
 		data.project
 			? [
@@ -110,8 +57,6 @@
 			: []
 	);
 </script>
-
-<svelte:window onsubmit={onCatalogSubmit} />
 
 <svelte:head>
 	<title>{data.project ? data.project.name : 'Project'} · Deploybot</title>
@@ -135,7 +80,6 @@
 					parseAction={actionUrlFrom(page.url, 'catalogParse')}
 					revealed={catalogEditor?.mode === 'create'}
 					editor={catalogEditor?.mode === 'create' ? catalogEditor : null}
-					onOpened={onCatalogEditOpen}
 				/>
 				<CatalogImageDialog
 					mode="create"
@@ -146,7 +90,7 @@
 					digestAction={actionUrlFrom(page.url, 'catalogImageDigest')}
 					revealed={imageEditor?.mode === 'create'}
 					editor={imageEditor?.mode === 'create' ? imageEditor : null}
-					onSaved={onImageSaved}
+					onSaved={toastImageSaved}
 				/>
 			{/if}
 		{/snippet}
@@ -190,15 +134,13 @@
 			editorProbe={healthEditor.editorProbe}
 			renameServiceId={rename.renameServiceId}
 			typedName={rename.typedName}
-			{savedHealthId}
 			healthServiceId={healthEditor.serviceId}
 			healthField={healthEditor.field}
 			healthIndex={healthEditor.index}
 			healthMessage={healthEditor.message}
 			probeIndex={action?.scope === 'services' ? (action.probeIndex ?? null) : null}
 			probeMessage={action?.scope === 'services' ? (action.probeMessage ?? null) : null}
-			{onHealthSaved}
-			{onHealthOpen}
+			onHealthSaved={toastHealthSaved}
 			entries={data.serviceEntries ?? []}
 			entriesMessage={data.serviceEntriesMessage ?? null}
 			notRunning={data.notRunning ?? []}
@@ -220,9 +162,7 @@
 			permissions={catalogPermissions}
 			imageEditor={imageEditor?.mode === 'edit' ? imageEditor : null}
 			imageDeploy={imageDeploy}
-			{savedImage}
-			{onImageSaved}
-			onEditOpen={onCatalogEditOpen}
+			onImageSaved={toastImageSaved}
 		/>
 	{:else if scope === 'members'}
 		<MembersSection

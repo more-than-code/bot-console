@@ -12,6 +12,7 @@
 		title,
 		description = null,
 		failed = false,
+		onCloseComplete,
 		children
 	}: {
 		/** The trigger's id. Closing returns focus to it. */
@@ -22,6 +23,8 @@
 		description?: string | null;
 		/** This dialog's own action failed. A new failure forces it open (the `nextFormDialog` rule). */
 		failed?: boolean;
+		/** Runs once bits-ui has finished closing, after the content has left the tree (outside aria-modal). */
+		onCloseComplete?: () => void;
 		/**
 		 * The form. Call `settle` with the action result type: success closes the dialog, a failure keeps it open.
 		 * Render `cancel` next to the submit button. The form unmounts on close, so anything it holds
@@ -45,13 +48,16 @@
 		sawFailure = next.sawFailure;
 	}
 
+	function closeComplete(isOpen: boolean) {
+		if (!isOpen) onCloseComplete?.();
+	}
 </script>
 
 {#snippet cancel()}
 	<Dialog.Close type="button" class={buttonVariants({ variant: 'outline' })}>Cancel</Dialog.Close>
 {/snippet}
 
-<Dialog.Root bind:open>
+<Dialog.Root bind:open onOpenChangeComplete={closeComplete}>
 	<Dialog.Trigger {id} class={buttonVariants({ variant: 'outline' })}>
 		<Plus class="size-4" />
 		{label}

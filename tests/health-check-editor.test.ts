@@ -18,10 +18,7 @@ import {
 	healthChecksSaveState,
 	healthFailureOutcome,
 	healthFormRows,
-	healthNoticeOnAction,
 	healthNoticeOnCloseComplete,
-	healthNoticeOnDialog,
-	healthNoticeOnView,
 	probeRequestBody,
 	servicesHealthView,
 	setCheckPort,
@@ -367,23 +364,7 @@ describe('health check save state', () => {
 });
 
 describe('saved health-check notice', () => {
-	test('any named action except the save clears the line', () => {
-		assert.equal(healthNoticeOnAction(SERVICE_ID, 'rename'), null);
-		assert.equal(healthNoticeOnAction(SERVICE_ID, 'probe'), null);
-		assert.equal(healthNoticeOnAction(SERVICE_ID, 'saveHealthChecks'), SERVICE_ID);
-		assert.equal(healthNoticeOnAction(SERVICE_ID, null), SERVICE_ID);
-	});
-
-	test('leaving Services or switching projects clears the line', () => {
-		const seen = { projectId: PROJECT.id, tab: 'services' };
-		assert.equal(healthNoticeOnView(SERVICE_ID, seen, { projectId: PROJECT.id, tab: 'hosts' }).notice, null);
-		assert.equal(healthNoticeOnView(SERVICE_ID, seen, { projectId: OTHER_ID, tab: 'services' }).notice, null);
-		assert.equal(healthNoticeOnView(SERVICE_ID, seen, { projectId: PROJECT.id, tab: 'services' }).notice, SERVICE_ID);
-	});
-
-	test('opening the dialog clears the line and the close announces it', () => {
-		assert.equal(healthNoticeOnDialog(SERVICE_ID, false, true), null);
-		assert.equal(healthNoticeOnDialog(SERVICE_ID, true, false), SERVICE_ID);
+	test('the save is announced only after the dialog has closed', () => {
 		assert.deepEqual(healthNoticeOnCloseComplete(SERVICE_ID, true), { pending: SERVICE_ID, announce: null });
 		assert.deepEqual(healthNoticeOnCloseComplete(SERVICE_ID, false), { pending: null, announce: SERVICE_ID });
 	});
@@ -441,14 +422,12 @@ describe('health check permission', () => {
 		assert.equal(html.includes('aria-label="Rename '), false);
 	});
 
-	test('an admin row has the Health checks button and the saved line', () => {
+	test('an admin row has the Health checks button and no inline saved line', () => {
 		const html = renderServices();
 		assert.match(html, /aria-label="Health checks Widget"/);
 		assert.equal(html.includes('name="hc_protocol"'), false);
-		const saved = renderServices({ savedHealthId: SERVICE_ID });
-		assert.equal(saved.includes('Saved health checks.'), true);
-		const other = renderServices({ savedHealthId: OTHER_ID });
-		assert.equal(other.includes('Saved health checks.'), false);
+		// "Saved health checks." is a toast now (tests/success-toast.test.ts).
+		assert.equal(html.includes('Saved health checks.'), false);
 	});
 
 	test('a sharing admin does not see the button on another project service', () => {
@@ -749,9 +728,7 @@ test('the services editor calls the health-check functions', () => {
 		['routes/projects/[id]/HealthChecks.svelte', 'healthFormRows('],
 		['routes/projects/[id]/HealthChecks.svelte', 'healthNoticeOnCloseComplete('],
 		['routes/projects/[id]/HealthChecks.svelte', 'draftFromChecks('],
-		['routes/projects/[id]/+page.svelte', 'healthNoticeOnView('],
-		['routes/projects/[id]/+page.svelte', 'healthNoticeOnAction('],
-		['routes/projects/[id]/+page.svelte', 'healthNoticeOnDialog('],
+		['routes/projects/[id]/+page.svelte', 'onHealthSaved={toastHealthSaved}'],
 		['routes/projects/[id]/+page.svelte', 'servicesHealthView('],
 		['routes/projects/[id]/+page.server.ts', 'validateHealthChecks('],
 		['routes/projects/[id]/+page.server.ts', 'draftsFromForm('],
@@ -759,7 +736,7 @@ test('the services editor calls the health-check functions', () => {
 		['routes/projects/[id]/+page.server.ts', 'probeRequestBody('],
 		['routes/projects/[id]/+page.server.ts', 'fieldForHealthMessage('],
 		['routes/projects/[id]/ServicesSection.svelte', 'canEditHealthChecks('],
-		['routes/projects/[id]/ServicesSection.svelte', 'SAVED_HEALTH_CHECKS'],
+		['lib/success-toast.ts', 'toast.success(SAVED_HEALTH_CHECKS)'],
 		['routes/projects/[id]/ServicesSection.svelte', '{#if renameAllowed(service)}']
 	];
 	for (const [file, needle] of anchors) {

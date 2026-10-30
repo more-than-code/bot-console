@@ -57,7 +57,8 @@ export async function resolve(specifier, context, nextResolve) {
 		const url = withExtension(abs);
 		if (url) return { url, shortCircuit: true };
 	}
-	return nextResolve(specifier, context);
+	// Vite resolves the `svelte` export condition. Some Svelte libraries (runed under svelte-sonner) export nothing else.
+	return nextResolve(specifier, { ...context, conditions: [...(context.conditions ?? []), 'svelte'] });
 }
 
 /** Compile route and component modules so `svelte/server` `render` can load them. */

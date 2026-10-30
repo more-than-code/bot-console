@@ -917,7 +917,8 @@
 			<Notice kind="error">{message}</Notice>
 		</div>
 	{/if}
-	<div class="flex flex-wrap items-center gap-2">
+	<!-- Stays at the bottom of the scrolling dialog so Save is reachable without scrolling to the end. -->
+	<div data-slot="form-actions" class="bg-popover sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t pt-3">
 		<Button type="submit">{mode === 'create' ? 'Create' : 'Save'}</Button>
 		{#if cancel}
 			{@render cancel()}

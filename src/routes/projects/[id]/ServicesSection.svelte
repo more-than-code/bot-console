@@ -24,7 +24,7 @@
 		serviceKindLabel,
 		showProjectColumn
 	} from '$lib/host-view';
-	import { canEditHealthChecks, SAVED_HEALTH_CHECKS } from '$lib/health-checks';
+	import { canEditHealthChecks } from '$lib/health-checks';
 	import { renameStartValue, serviceLabel } from '$lib/service-label';
 	import {
 		SERVICE_SHOW_LABEL,
@@ -77,7 +77,6 @@
 		editorProbe = false,
 		renameServiceId,
 		typedName,
-		savedHealthId = null,
 		healthServiceId = null,
 		healthField = null,
 		healthIndex = null,
@@ -85,7 +84,6 @@
 		probeIndex = null,
 		probeMessage = null,
 		onHealthSaved,
-		onHealthOpen,
 		entries = [],
 		entriesMessage = null,
 		notRunning = [],
@@ -109,15 +107,13 @@
 		editorProbe?: boolean;
 		renameServiceId: string | null;
 		typedName: string | null;
-		savedHealthId?: string | null;
 		healthServiceId?: string | null;
 		healthField?: string | null;
 		healthIndex?: number | null;
 		healthMessage?: string | null;
 		probeIndex?: number | null;
 		probeMessage?: string | null;
-		onHealthSaved?: (serviceId: string | null) => void;
-		onHealthOpen?: () => void;
+		onHealthSaved?: (serviceId: string) => void;
 		/** This project's catalog entries the caller has a grant on. */
 		entries?: ServiceEntryRef[];
 		entriesMessage?: string | null;
@@ -399,7 +395,6 @@
 								{probeMessage}
 								showProbe={editorProbe && probeServiceId === service.id}
 								onSaved={onHealthSaved}
-								onOpened={onHealthOpen}
 							/>
 						{/if}
 					</span>
@@ -414,11 +409,6 @@
 					<div class="mt-1 grid gap-1">
 						<p class="font-mono text-sm break-all select-text">{digestFailure.value}</p>
 						<p class="text-muted-foreground text-sm" role="status">{COPY_FAILED_NOTE}</p>
-					</div>
-				{/if}
-				{#if savedHealthId === service.id}
-					<div class="mt-2">
-						<Notice kind="success">{SAVED_HEALTH_CHECKS}</Notice>
 					</div>
 				{/if}
 			</td>

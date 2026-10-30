@@ -89,11 +89,6 @@ export type HealthSaveView = {
 	message: string | null;
 };
 
-export type HealthNoticeSeen = {
-	projectId: string;
-	tab: string;
-};
-
 const MISSING_PATH = 'Enter a path that starts with /.';
 const BAD_PATH = 'Enter a path that starts with a single / and has no spaces or @ \\ ? #.';
 const LONG_PATH = 'Path must be at most 512 bytes.';
@@ -393,30 +388,6 @@ export function healthChecksSaveState(input: {
 		return { close: false, notice: null, field: input.field ?? null, message: input.message ?? null };
 	}
 	return { close: false, notice: null, field: null, message: null };
-}
-
-/** Leave Services or switch projects and the saved line does not come back. */
-export function healthNoticeOnView(
-	notice: string | null,
-	seen: HealthNoticeSeen | null,
-	next: HealthNoticeSeen
-): { notice: string | null; seen: HealthNoticeSeen } {
-	if (seen == null) return { notice: next.tab === 'services' ? notice : null, seen: next };
-	if (seen.projectId !== next.projectId) return { notice: null, seen: next };
-	if (seen.tab === 'services' && next.tab !== 'services') return { notice: null, seen: next };
-	return { notice, seen: next };
-}
-
-/** Any named action except the save itself clears the line. A cancelled save is not a new action name. */
-export function healthNoticeOnAction(notice: string | null, action: string | null): string | null {
-	if (action == null || action === 'saveHealthChecks') return notice;
-	return null;
-}
-
-/** Opening the dialog clears the line. Closing it does not. */
-export function healthNoticeOnDialog(notice: string | null, wasOpen: boolean, open: boolean): string | null {
-	if (!wasOpen && open) return null;
-	return notice;
 }
 
 /** Announce only after the dialog has finished closing, so the line is not read from inside it. */

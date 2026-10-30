@@ -7,6 +7,7 @@
 	import LogOut from '@lucide/svelte/icons/log-out';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+	import { Toaster } from '$lib/components/ui/sonner';
 	import ThemeSwitch from '$lib/components/ThemeSwitch.svelte';
 	import { avatarInitial } from '$lib/avatar';
 	import { browserTimeZone, provideTimeZone, rememberTimeZone } from '$lib/time-zone';
@@ -122,4 +123,6 @@
 			</nav>
 		</footer>
 	</div>
+	<!-- Success confirmations only. Errors stay inline next to what failed. -->
+	<Toaster position="bottom-center" />
 {/if}

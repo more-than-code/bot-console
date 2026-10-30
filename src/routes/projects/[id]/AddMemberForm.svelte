@@ -17,8 +17,8 @@
 		action: string;
 		/** The addMember failure message. */
 		error?: string | null;
-		/** The added email, or null when a new add starts. */
-		onAdded: (email: string | null) => void;
+		/** The added email, after a successful add. */
+		onAdded: (email: string) => void;
 		onSettled: (resultType: string) => void;
 		/** The dialog's Cancel button. */
 		cancel?: Snippet;
@@ -31,7 +31,6 @@
 	class="grid gap-3"
 	use:enhance={({ formData }) => {
 		const email = String(formData.get('email') ?? '').trim();
-		onAdded(null);
 		return async ({ result, update }) => {
 			await update();
 			if (result.type === 'redirect') onAdded(email);

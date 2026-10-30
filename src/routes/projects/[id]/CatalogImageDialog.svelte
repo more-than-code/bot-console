@@ -11,7 +11,6 @@
 	import {
 		imageDialogReveal,
 		imageNoticeOnCloseComplete,
-		imageNoticeOnDialog,
 		imageSaveView,
 		settleImageAuxLoad,
 		type DialogOutcome
@@ -42,7 +41,7 @@
 		digestAction?: string | null;
 		revealed?: boolean;
 		editor?: ImageEditorState | null;
-		onSaved?: (name: string | null) => void;
+		onSaved?: (name: string) => void;
 		disabled?: boolean;
 	} = $props();
 
@@ -51,7 +50,7 @@
 	let sawFailure = $state(untrack(() => revealed));
 	let wasOpen = $state(untrack(() => revealed));
 	let pendingSaved = $state<string | null>(null);
-	// Resolved when bits-ui finishes closing, so update() cannot drop the notice first.
+	// Resolved when bits-ui finishes closing, so the save's update() waits until the toast has fired.
 	let closeWait: (() => void) | null = null;
 	let sets = $state<KnownSet[]>([]);
 	let setsMessage = $state<string | null>(null);
@@ -71,15 +70,11 @@
 		sawReveal = next.sawReveal;
 	});
 
-	// Opening create or edit drops the previous notice. A close keeps a name that is waiting to be announced.
+	// Opening create or edit drops a name still waiting for its toast. A close keeps it.
 	$effect(() => {
 		const now = open;
 		const previous = untrack(() => wasOpen);
-		// 'notice' is a stand-in. Only the opening transition returns null; the page holds the real name.
-		if (imageNoticeOnDialog('notice', previous, now) == null) {
-			pendingSaved = null;
-			onSaved?.(null);
-		}
+		if (!previous && now) pendingSaved = null;
 		wasOpen = now;
 	});
 
@@ -89,7 +84,6 @@
 		sawFailure = next.sawFailure;
 		if (next.savedName == null) {
 			pendingSaved = null;
-			onSaved?.(null);
 			return;
 		}
 		pendingSaved = next.savedName;
@@ -102,7 +96,7 @@
 		});
 	}
 
-	// bits-ui calls this after the dialog content has left the tree, so the notice is not inside aria-modal.
+	// bits-ui calls this after the dialog content has left the tree, so the toast is not announced inside aria-modal.
 	function onDialogOpenChangeComplete(isOpen: boolean) {
 		const next = imageNoticeOnCloseComplete(pendingSaved, isOpen);
 		pendingSaved = next.pending;
@@ -195,7 +189,8 @@
 			<Dialog.Title class="break-all">{mode === 'create' ? 'Container' : `Edit ${entry?.name ?? 'image'}`}</Dialog.Title>
 			<Dialog.Description>An image runs on a host that has Docker.</Dialog.Description>
 		</Dialog.Header>
-		<div class="min-h-0 overflow-y-auto">
+		<!-- scroll-pb-16 keeps a focused field or error clear of the sticky Save bar. -->
+		<div class="min-h-0 scroll-pb-16 overflow-y-auto" data-slot="image-form-scroll">
 			<form
 				bind:this={setsForm}
 				method="POST"

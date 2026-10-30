@@ -27,20 +27,6 @@ export function actionUrlFrom(url: URL, name: string, drop: readonly string[] = 
 	return qs ? `?${qs}&/${name}` : `?/${name}`;
 }
 
-/** Named action key from a form `action`, such as `?/catalogDelete` or `?tab=catalog&/catalogRun`. */
-export function namedFormAction(action: string): string | null {
-	let url: URL;
-	try {
-		url = new URL(action, 'http://console.local');
-	} catch {
-		return null;
-	}
-	for (const key of url.searchParams.keys()) {
-		if (key.startsWith('/')) return key.slice(1);
-	}
-	return null;
-}
-
 /** Same path and query after a successful action. Drops `confirm` and the `/name` action key. */
 export function backTo(url: URL): string {
 	const params = new URLSearchParams(url.searchParams);

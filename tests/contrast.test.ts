@@ -130,6 +130,8 @@ test('theme tokens keep their contrast floors', () => {
 		for (const surface of ['background', 'card'] as const) {
 			assertAtLeast(contrastRatio(y(tokens, 'input'), y(tokens, surface)), 3, `${selector} input on ${surface}`);
 		}
+		// Toasts (and menus) paint popover-foreground on popover.
+		assertAtLeast(contrastRatio(y(tokens, 'popover-foreground'), y(tokens, 'popover')), 4.5, `${selector} popover-foreground on popover`);
 		const ring = tokens.ring;
 		assert.ok(ring);
 		for (const surface of SURFACES) {
