@@ -8,6 +8,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import * as Select from '$lib/components/ui/select';
+	import * as Sheet from '$lib/components/ui/sheet';
 	import Notice from '$lib/components/Notice.svelte';
 	import type { Host, ProgramEntry } from '$lib/api-types';
 	import { hoistPreviewEnv, previewToken, runAsChoices, shellRisk, shouldApplyPreviewUpdate, submitCatalogPreview } from '$lib/catalog';
@@ -140,7 +141,7 @@
 	bind:this={formEl}
 	method="POST"
 	action={saveAction}
-	class="grid gap-3"
+	class="flex min-h-0 flex-1 flex-col"
 	use:enhance={({ submitter }) => {
 		const previewing = submitter === previewButton;
 		if (!previewing) {
@@ -155,98 +156,100 @@
 		};
 	}}
 >
-	{#if saveMessage}
-		<Notice kind="error">{saveMessage}</Notice>
-	{/if}
-	<Input type="hidden" name="editor_mode" value={mode === 'edit' ? 'edit' : 'create'} />
-	{#if mode === 'edit' && entry}
-		<Input type="hidden" name="entry_name" value={entry.name} />
-	{:else}
-		<Label class="grid gap-1.5" for="{fieldId}-name">
-			Name
-			<Input id="{fieldId}-name" name="name" bind:value={name} required maxlength={48} autocomplete="off" />
+	<div class="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto scroll-py-4 px-4 pb-4" data-slot="form-body">
+		{#if saveMessage}
+			<Notice kind="error">{saveMessage}</Notice>
+		{/if}
+		<Input type="hidden" name="editor_mode" value={mode === 'edit' ? 'edit' : 'create'} />
+		{#if mode === 'edit' && entry}
+			<Input type="hidden" name="entry_name" value={entry.name} />
+		{:else}
+			<Label class="grid gap-1.5" for="{fieldId}-name">
+				Name
+				<Input id="{fieldId}-name" name="name" bind:value={name} required maxlength={48} autocomplete="off" />
+			</Label>
+		{/if}
+		<Label class="grid gap-1.5" for="{fieldId}-dir">
+			Working directory
+			<Input id="{fieldId}-dir" name="dir" bind:value={dir} required maxlength={255} autocomplete="off" />
 		</Label>
-	{/if}
-	<Label class="grid gap-1.5" for="{fieldId}-dir">
-		Working directory
-		<Input id="{fieldId}-dir" name="dir" bind:value={dir} required maxlength={255} autocomplete="off" />
-	</Label>
-	<Label class="grid gap-1.5" for="{fieldId}-command">
-		Command
-		<Input id="{fieldId}-command" name="command" bind:value={command} required maxlength={4096} autocomplete="off" />
-	</Label>
-	<Label class="flex items-center gap-2" for="{fieldId}-shell">
-		<Checkbox id="{fieldId}-shell" name="shell" value="1" checked={shell} onCheckedChange={(value) => (shell = value)} />
-		Run through a shell
-	</Label>
-	{#if shell && risk}
-		<p class="text-muted-foreground text-sm">{risk}</p>
-	{/if}
-	<div class="grid gap-1.5">
-		<Label for="{fieldId}-run-as">Run as</Label>
-		<Select.Root type="single" name="run_as" bind:value={runAs}>
-			<Select.Trigger id="{fieldId}-run-as" class="w-full">
-				<Select.Value placeholder="Choose an account" />
-			</Select.Trigger>
-			<Select.Content>
-				{#each choices as account (account)}
-					<Select.Item value={account}>{account}</Select.Item>
+		<Label class="grid gap-1.5" for="{fieldId}-command">
+			Command
+			<Input id="{fieldId}-command" name="command" bind:value={command} required maxlength={4096} autocomplete="off" />
+		</Label>
+		<Label class="flex items-center gap-2" for="{fieldId}-shell">
+			<Checkbox id="{fieldId}-shell" name="shell" value="1" checked={shell} onCheckedChange={(value) => (shell = value)} />
+			Run through a shell
+		</Label>
+		{#if shell && risk}
+			<p class="text-muted-foreground text-sm">{risk}</p>
+		{/if}
+		<div class="grid gap-1.5">
+			<Label for="{fieldId}-run-as">Run as</Label>
+			<Select.Root type="single" name="run_as" bind:value={runAs}>
+				<Select.Trigger id="{fieldId}-run-as" class="w-full">
+					<Select.Value placeholder="Choose an account" />
+				</Select.Trigger>
+				<Select.Content>
+					{#each choices as account (account)}
+						<Select.Item value={account}>{account}</Select.Item>
+					{/each}
+				</Select.Content>
+			</Select.Root>
+			{#if choices.length === 0}
+				<p class="text-muted-foreground text-sm">No eligible host allows a run-as account.</p>
+			{/if}
+		</div>
+		<Label class="grid gap-1.5" for="{fieldId}-port">
+			Expected port
+			<Input id="{fieldId}-port" name="port" bind:value={port} inputmode="numeric" maxlength={5} autocomplete="off" />
+		</Label>
+		<div class="grid gap-1.5">
+			<Label for="{fieldId}-restart">Restart</Label>
+			<Select.Root type="single" name="restart" bind:value={restart}>
+				<Select.Trigger id="{fieldId}-restart" class="w-40">
+					<Select.Value />
+				</Select.Trigger>
+				<Select.Content>
+					<Select.Item value="on-failure">on-failure</Select.Item>
+					<Select.Item value="no">no</Select.Item>
+				</Select.Content>
+			</Select.Root>
+		</div>
+		<div class="grid gap-2">
+			<p class="text-sm font-medium">Environment</p>
+			{#each envRows as row, index (index)}
+				<div class="flex flex-wrap items-end gap-2">
+					<Label class="grid min-w-0 flex-1 gap-1.5" for="{fieldId}-env-key-{index}">
+						Key
+						<Input id="{fieldId}-env-key-{index}" name="env_key" bind:value={envRows[index].key} maxlength={64} autocomplete="off" />
+					</Label>
+					<Label class="grid min-w-0 flex-1 gap-1.5" for="{fieldId}-env-value-{index}">
+						Value
+						<Input id="{fieldId}-env-value-{index}" name="env_value" bind:value={envRows[index].value} maxlength={4096} autocomplete="off" />
+					</Label>
+					<Button type="button" variant="outline" onclick={() => removeEnv(index)}>Remove</Button>
+				</div>
+			{/each}
+			<Button type="button" variant="outline" disabled={envRows.length >= 64} onclick={addEnv}>Add variable</Button>
+		</div>
+		{#if preview}
+			<p class="flex flex-wrap items-center gap-1">
+				will run:
+				{#each argv as arg, index (index)}
+					<Badge variant="outline" class="max-w-full min-w-0 whitespace-normal break-all">{arg}</Badge>
 				{/each}
-			</Select.Content>
-		</Select.Root>
-		{#if choices.length === 0}
-			<p class="text-muted-foreground text-sm">No eligible host allows a run-as account.</p>
+			</p>
+		{/if}
+		{#if previewMessage}
+			<Notice kind="error">{previewMessage}</Notice>
 		{/if}
 	</div>
-	<Label class="grid gap-1.5" for="{fieldId}-port">
-		Expected port
-		<Input id="{fieldId}-port" name="port" bind:value={port} inputmode="numeric" maxlength={5} autocomplete="off" />
-	</Label>
-	<div class="grid gap-1.5">
-		<Label for="{fieldId}-restart">Restart</Label>
-		<Select.Root type="single" name="restart" bind:value={restart}>
-			<Select.Trigger id="{fieldId}-restart" class="w-40">
-				<Select.Value />
-			</Select.Trigger>
-			<Select.Content>
-				<Select.Item value="on-failure">on-failure</Select.Item>
-				<Select.Item value="no">no</Select.Item>
-			</Select.Content>
-		</Select.Root>
-	</div>
-	<div class="grid gap-2">
-		<p class="text-sm font-medium">Environment</p>
-		{#each envRows as row, index (index)}
-			<div class="flex flex-wrap items-end gap-2">
-				<Label class="grid min-w-0 flex-1 gap-1.5" for="{fieldId}-env-key-{index}">
-					Key
-					<Input id="{fieldId}-env-key-{index}" name="env_key" bind:value={envRows[index].key} maxlength={64} autocomplete="off" />
-				</Label>
-				<Label class="grid min-w-0 flex-1 gap-1.5" for="{fieldId}-env-value-{index}">
-					Value
-					<Input id="{fieldId}-env-value-{index}" name="env_value" bind:value={envRows[index].value} maxlength={4096} autocomplete="off" />
-				</Label>
-				<Button type="button" variant="outline" onclick={() => removeEnv(index)}>Remove</Button>
-			</div>
-		{/each}
-		<Button type="button" variant="outline" disabled={envRows.length >= 64} onclick={addEnv}>Add variable</Button>
-	</div>
-	{#if preview}
-		<p class="flex flex-wrap items-center gap-1">
-			will run:
-			{#each argv as arg, index (index)}
-				<Badge variant="outline" class="max-w-full min-w-0 whitespace-normal break-all">{arg}</Badge>
-			{/each}
-		</p>
-	{/if}
-	{#if previewMessage}
-		<Notice kind="error">{previewMessage}</Notice>
-	{/if}
-	<div class="flex flex-wrap items-center gap-2">
+	<Sheet.Footer class="bg-popover flex-row flex-wrap items-center border-t">
 		<Button type="submit">Save</Button>
 		<Button type="submit" variant="outline" formaction={parseAction} formnovalidate bind:ref={previewButton}>Preview</Button>
 		{#if cancel}
 			{@render cancel()}
 		{/if}
-	</div>
+	</Sheet.Footer>
 </form>

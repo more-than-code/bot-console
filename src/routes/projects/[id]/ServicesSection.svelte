@@ -153,7 +153,7 @@
 		searching ? [] : hostChosen ? notRunning.filter((pair) => pair.host.id === selectedHost) : notRunning
 	);
 
-	// The Catalog Deploy dialog's "View logs in Services" link (`services.logs`): highlight that row and open its Logs once.
+	// The Catalog Deploy drawer's "View logs in Services" link (`services.logs`): highlight that row and open its Logs once.
 	const logsEntry = $derived(serviceLogsEntry(page.url.searchParams.get(SERVICE_LOGS_PARAM)));
 	/** The link was used: the row was found and its controls were read. `replaceState` leaves `page.url` as it was. */
 	let logsDone = $state(false);

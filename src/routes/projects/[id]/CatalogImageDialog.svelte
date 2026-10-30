@@ -5,7 +5,7 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import { untrack } from 'svelte';
 	import { buttonVariants } from '$lib/components/ui/button';
-	import * as Dialog from '$lib/components/ui/dialog';
+	import * as Sheet from '$lib/components/ui/sheet';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import type { ImageEntry } from '$lib/api-types';
 	import {
@@ -96,7 +96,7 @@
 		});
 	}
 
-	// bits-ui calls this after the dialog content has left the tree, so the toast is not announced inside aria-modal.
+	// bits-ui calls this after the drawer content has left the tree, so the toast is not announced inside aria-modal.
 	function onDialogOpenChangeComplete(isOpen: boolean) {
 		const next = imageNoticeOnCloseComplete(pendingSaved, isOpen);
 		pendingSaved = next.pending;
@@ -169,55 +169,53 @@
 	}
 </script>
 
-<Dialog.Root bind:open onOpenChangeComplete={onDialogOpenChangeComplete}>
+<Sheet.Root bind:open onOpenChangeComplete={onDialogOpenChangeComplete}>
 	{#if mode === 'create'}
-		<Dialog.Trigger class={buttonVariants()}>
+		<Sheet.Trigger class={buttonVariants()}>
 			<Plus class="size-4" />
 			Container
-		</Dialog.Trigger>
+		</Sheet.Trigger>
 	{:else if entry}
 		<RowAction label="Edit {entry.name}" icon={Pencil} {disabled}>
 			{#snippet trigger(props)}
-				<Dialog.Trigger {...props}>
+				<Sheet.Trigger {...props}>
 					<Pencil class="size-4" />
-				</Dialog.Trigger>
+				</Sheet.Trigger>
 			{/snippet}
 		</RowAction>
 	{/if}
-	<Dialog.Content class="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-xl">
-		<Dialog.Header class="shrink-0 pr-8">
-			<Dialog.Title class="break-all">{mode === 'create' ? 'Container' : `Edit ${entry?.name ?? 'image'}`}</Dialog.Title>
-			<Dialog.Description>An image runs on a host that has Docker.</Dialog.Description>
-		</Dialog.Header>
-		<!-- scroll-pb-16 keeps a focused field or error clear of the sticky Save bar. -->
-		<div class="min-h-0 scroll-pb-16 overflow-y-auto" data-slot="image-form-scroll">
-			<form
-				bind:this={setsForm}
-				method="POST"
-				action={setsAction}
-				class="hidden"
-				use:enhance={() => {
-					return async ({ result }) => {
-						open = settleImageAuxLoad(result, open, takeSets);
-					};
-				}}
-			></form>
-			<form
-				bind:this={filesForm}
-				method="POST"
-				action={filesAction}
-				class="hidden"
-				use:enhance={() => {
-					return async ({ result }) => {
-						open = settleImageAuxLoad(result, open, takeFiles);
-					};
-				}}
-			></form>
-			<CatalogImageForm {mode} {entry} {saveAction} {sets} {setsMessage} {setsStatus} {retrySets} {files} {filesMessage} {filesStatus} {retryFiles} {tagsAction} {digestAction} {editor} onSettled={settle}>
-				{#snippet cancel()}
-					<Dialog.Close type="button">Cancel</Dialog.Close>
-				{/snippet}
-			</CatalogImageForm>
-		</div>
-	</Dialog.Content>
-</Dialog.Root>
+	<!-- A drawer from the right, full width on a phone. The form scrolls between the header and its pinned Save footer. -->
+	<Sheet.Content side="right" class="data-[side=right]:w-full data-[side=right]:sm:max-w-2xl">
+		<Sheet.Header class="pr-12 pb-0">
+			<Sheet.Title class="break-all">{mode === 'create' ? 'Container' : `Edit ${entry?.name ?? 'image'}`}</Sheet.Title>
+			<Sheet.Description>An image runs on a host that has Docker.</Sheet.Description>
+		</Sheet.Header>
+		<form
+			bind:this={setsForm}
+			method="POST"
+			action={setsAction}
+			class="hidden"
+			use:enhance={() => {
+				return async ({ result }) => {
+					open = settleImageAuxLoad(result, open, takeSets);
+				};
+			}}
+		></form>
+		<form
+			bind:this={filesForm}
+			method="POST"
+			action={filesAction}
+			class="hidden"
+			use:enhance={() => {
+				return async ({ result }) => {
+					open = settleImageAuxLoad(result, open, takeFiles);
+				};
+			}}
+		></form>
+		<CatalogImageForm {mode} {entry} {saveAction} {sets} {setsMessage} {setsStatus} {retrySets} {files} {filesMessage} {filesStatus} {retryFiles} {tagsAction} {digestAction} {editor} onSettled={settle}>
+			{#snippet cancel()}
+				<Sheet.Close type="button" class={buttonVariants({ variant: 'outline' })}>Cancel</Sheet.Close>
+			{/snippet}
+		</CatalogImageForm>
+	</Sheet.Content>
+</Sheet.Root>

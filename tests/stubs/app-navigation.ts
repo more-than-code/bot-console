@@ -17,3 +17,6 @@ export const replaceStateCalls: string[] = [];
 export function replaceState(url: string | URL): void {
 	replaceStateCalls.push(String(url));
 }
+
+/** Server render does not navigate, so no callback runs. */
+export function afterNavigate(): void {}

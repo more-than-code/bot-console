@@ -2,7 +2,8 @@
 	import Rocket from '@lucide/svelte/icons/rocket';
 	import { browser } from '$app/environment';
 	import { untrack } from 'svelte';
-	import * as Dialog from '$lib/components/ui/dialog';
+	import { buttonVariants } from '$lib/components/ui/button';
+	import * as Sheet from '$lib/components/ui/sheet';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import type { Host, ImageEntry } from '$lib/api-types';
 	import { IMAGE_DEPLOY_TIP } from '$lib/catalog';
@@ -68,45 +69,45 @@
 	});
 </script>
 
-<Dialog.Root bind:open>
+<Sheet.Root bind:open>
 	<RowAction label="Deploy {entry.name}" tip={IMAGE_DEPLOY_TIP} icon={Rocket} {disabled}>
 		{#snippet trigger(props)}
-			<Dialog.Trigger {...props}>
+			<Sheet.Trigger {...props}>
 				<Rocket class="size-4" />
-			</Dialog.Trigger>
+			</Sheet.Trigger>
 		{/snippet}
 	</RowAction>
-	<Dialog.Content
+	<!-- A drawer from the right, full width on a phone. The log grows into the free height; Deploy and Cancel stay pinned at the bottom. -->
+	<Sheet.Content
 		bind:ref={contentEl}
+		side="right"
 		tabindex={flight ? -1 : undefined}
-		class="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-xl"
+		class="data-[side=right]:w-full data-[side=right]:sm:max-w-2xl"
 		showCloseButton={!flight}
 		escapeKeydownBehavior={flight ? 'ignore' : 'close'}
 		interactOutsideBehavior={flight ? 'ignore' : 'close'}
 	>
-		<Dialog.Header class="shrink-0 pr-8">
-			<Dialog.Title class="break-all">{entry.spec.kind === 'job' ? 'Run' : 'Deploy'} {entry.name}</Dialog.Title>
-			<Dialog.Description>Choose a host in this project, or a host shared with it at deploy.</Dialog.Description>
-		</Dialog.Header>
-		<div class="min-h-0 overflow-y-auto">
-			<CatalogDeployForm
-				{entry}
-				{hosts}
-				{deployAction}
-				{rollbackAction}
-				{removeAction}
-				{confirmAction}
-				{historyAction}
-				{result}
-				active={open}
-				{onBusy}
-				{projectId}
-				onViewLogs={() => (open = false)}
-			>
-				{#snippet cancel()}
-					<Dialog.Close type="button" disabled={flight}>Cancel</Dialog.Close>
-				{/snippet}
-			</CatalogDeployForm>
-		</div>
-	</Dialog.Content>
-</Dialog.Root>
+		<Sheet.Header class="pr-12 pb-0">
+			<Sheet.Title class="break-all">{entry.spec.kind === 'job' ? 'Run' : 'Deploy'} {entry.name}</Sheet.Title>
+			<Sheet.Description>Choose a host in this project, or a host shared with it at deploy.</Sheet.Description>
+		</Sheet.Header>
+		<CatalogDeployForm
+			{entry}
+			{hosts}
+			{deployAction}
+			{rollbackAction}
+			{removeAction}
+			{confirmAction}
+			{historyAction}
+			{result}
+			active={open}
+			{onBusy}
+			{projectId}
+			onViewLogs={() => (open = false)}
+		>
+			{#snippet cancel()}
+				<Sheet.Close type="button" class={buttonVariants({ variant: 'outline' })} disabled={flight}>Cancel</Sheet.Close>
+			{/snippet}
+		</CatalogDeployForm>
+	</Sheet.Content>
+</Sheet.Root>

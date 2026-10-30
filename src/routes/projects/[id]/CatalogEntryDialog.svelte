@@ -3,7 +3,7 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import { untrack } from 'svelte';
 	import { buttonVariants } from '$lib/components/ui/button';
-	import * as Dialog from '$lib/components/ui/dialog';
+	import * as Sheet from '$lib/components/ui/sheet';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import type { Host, ProgramEntry } from '$lib/api-types';
 	import type { CatalogEditorState } from '$lib/project-action';
@@ -38,30 +38,31 @@
 	});
 </script>
 
-<Dialog.Root bind:open>
+<Sheet.Root bind:open>
 	{#if mode === 'create'}
-		<Dialog.Trigger class={buttonVariants()}>
+		<Sheet.Trigger class={buttonVariants()}>
 			<Plus class="size-4" />
 			New service
-		</Dialog.Trigger>
+		</Sheet.Trigger>
 	{:else if entry}
 		<RowAction label="Edit {entry.name}" icon={Pencil} {disabled}>
 			{#snippet trigger(props)}
-				<Dialog.Trigger {...props}>
+				<Sheet.Trigger {...props}>
 					<Pencil class="size-4" />
-				</Dialog.Trigger>
+				</Sheet.Trigger>
 			{/snippet}
 		</RowAction>
 	{/if}
-	<Dialog.Content class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
-		<Dialog.Header>
-			<Dialog.Title>{mode === 'create' ? 'New service' : `Edit ${entry?.name ?? 'service'}`}</Dialog.Title>
-			<Dialog.Description>A program runs one command in a working directory.</Dialog.Description>
-		</Dialog.Header>
+	<!-- A drawer from the right, full width on a phone. The form scrolls between the header and its pinned Save footer. -->
+	<Sheet.Content side="right" class="data-[side=right]:w-full data-[side=right]:sm:max-w-2xl">
+		<Sheet.Header class="pr-12 pb-0">
+			<Sheet.Title class="break-all">{mode === 'create' ? 'New service' : `Edit ${entry?.name ?? 'service'}`}</Sheet.Title>
+			<Sheet.Description>A program runs one command in a working directory.</Sheet.Description>
+		</Sheet.Header>
 		<CatalogEntryForm {mode} {entry} {hosts} {saveAction} {parseAction} {editor}>
 			{#snippet cancel()}
-				<Dialog.Close type="button">Cancel</Dialog.Close>
+				<Sheet.Close type="button" class={buttonVariants({ variant: 'outline' })}>Cancel</Sheet.Close>
 			{/snippet}
 		</CatalogEntryForm>
-	</Dialog.Content>
-</Dialog.Root>
+	</Sheet.Content>
+</Sheet.Root>

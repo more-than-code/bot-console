@@ -56,6 +56,7 @@ import {
 } from '../src/lib/dialog-open.ts';
 import { parse } from 'svelte/compiler';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
+import { assertDrawerForm } from './drawer-assert.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 
 
@@ -576,7 +577,7 @@ describe('catalog images', { concurrency: false }, () => {
 				editor: null
 			}
 		}).body;
-		// The Save bar stays at the bottom of the scrolling dialog while the long form scrolls, in Edit and Create.
+		// The drawer's footer is pinned below the scrolling fields, in Edit and Create; Save stays inside the form.
 		const createBarHtml = render(CatalogImageForm, {
 			props: { mode: 'create', entry: null, saveAction: '?/catalogCreate', sets: [], setsStatus: 'ready', editor: null }
 		}).body;
@@ -584,19 +585,12 @@ describe('catalog images', { concurrency: false }, () => {
 			['edit', editHtml, 'Save'],
 			['create', createBarHtml, 'Create']
 		] as const) {
-			const bar = /<div data-slot="form-actions" class="([^"]*)">([\s\S]*?)<\/div>/.exec(html);
-			assert.ok(bar, `${label}: form-actions bar`);
-			assert.match(bar[1] ?? '', /\bsticky\b/, label);
-			assert.match(bar[1] ?? '', /\bbottom-0\b/, label);
-			assert.match(bar[1] ?? '', /\bbg-popover\b/, label);
-			assert.match(bar[2] ?? '', new RegExp(`type="submit"[^>]*>(?:<!---->)?${submit}<`), label);
+			assertDrawerForm(html, submit, label);
 		}
-		// The dialog's scroll container has scroll padding at least the bar's height (WCAG 2.4.11).
 		const dialogSource = readSource('../src/routes/projects/[id]/CatalogImageDialog.svelte');
-		const scroller = /<div class="([^"]*)" data-slot="image-form-scroll">/.exec(dialogSource);
-		assert.ok(scroller, 'image form scroll container');
-		assert.match(scroller[1] ?? '', /\boverflow-y-auto\b/);
-		assert.match(scroller[1] ?? '', /\bscroll-pb-16\b/);
+		assert.equal(dialogSource.includes('image-form-scroll'), false);
+		assert.equal(dialogSource.includes('Dialog.'), false);
+		assert.match(dialogSource, /<Sheet\.Content side="right" class="data-\[side=right\]:w-full data-\[side=right\]:sm:max-w-2xl">/);
 		function portBox(source: string, label: string): string {
 			const tag = [...source.matchAll(/<button\b[^>]*>/g)].map((match) => match[0]).find((item) => item.includes(`aria-label="${label}"`));
 			assert.equal(tag != null, true, label);
@@ -1484,20 +1478,13 @@ describe('catalog images', { concurrency: false }, () => {
 			}
 		}).body;
 		assert.equal(shown.includes('Deploy web'), true);
-		assert.equal(shown.includes('admin_deploy'), true);
-		const program = render(CatalogSection, {
-			props: {
-				canOwner: true,
-				entries: [programEntry()],
-				omitted: 0,
-				truncated: false,
-				message: null,
-				hosts: [host()],
-				members: [],
-				permissions: { name: 'web', grants: [], message: null, loaded: true }
-			}
+		// The Permissions drawer renders only in the browser, so check what the section passes and the form itself.
+		const section = readSource('../src/routes/projects/[id]/CatalogSection.svelte');
+		assert.equal(section.includes("includeDeploy={permissionEntry?.kind === 'image'}"), true);
+		const imageForm = render(CatalogPermissionsForm, {
+			props: { action: '?/catalogPermissions', name: 'web', grants: [], members: [], loaded: true, includeDeploy: true }
 		}).body;
-		assert.equal(program.includes('admin_deploy'), false);
+		assert.equal(imageForm.includes('admin_deploy'), true);
 		const form = render(CatalogPermissionsForm, {
 			props: { action: '?/catalogPermissions', name: 'web', grants: [], members: [], loaded: true, includeDeploy: false }
 		}).body;

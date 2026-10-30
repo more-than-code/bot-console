@@ -312,8 +312,10 @@ test('an in-flight deploy shows a spinner, a label, and a timer', () => {
 		assert.match(source, /showCloseButton=\{!flight\}/);
 		assert.match(source, /escapeKeydownBehavior=\{flight \? 'ignore' : 'close'\}/);
 		assert.match(source, /interactOutsideBehavior=\{flight \? 'ignore' : 'close'\}/);
-		assert.match(source, /<Dialog\.Close type="button" disabled=\{flight\}>Cancel<\/Dialog\.Close>/);
 	}
+	assert.match(runDialog, /<Dialog\.Close type="button" disabled=\{flight\}>Cancel<\/Dialog\.Close>/);
+	// Deploy is a drawer now; its Cancel is the Sheet's close, still blocked in flight.
+	assert.match(deployDialog, /<Sheet\.Close type="button" class=\{buttonVariants\(\{ variant: 'outline' \}\)\} disabled=\{flight\}>Cancel<\/Sheet\.Close>/);
 	assert.equal(readSource('CatalogSection.svelte').includes('disabled={rowBusy === entry.name}'), true);
 	assert.equal(readSource('ServiceRowActions.svelte').includes('<fieldset disabled={busy}'), true);
 	assert.equal(runDialog.includes('<CatalogRunForm'), true);

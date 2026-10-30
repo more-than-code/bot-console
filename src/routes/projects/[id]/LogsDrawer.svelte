@@ -39,7 +39,7 @@
 		action: string;
 		/** Extra hover sentence on the row button. */
 		tip?: string;
-		/** Open on mount (the Catalog Deploy dialog's "View logs in Services" link). Read once. */
+		/** Open on mount (the Catalog Deploy drawer's "View logs in Services" link). Read once. */
 		initialOpen?: boolean;
 	} = $props();
 

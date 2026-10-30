@@ -38,6 +38,8 @@ import {
 	parseService
 } from '../src/lib/server/shape.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
+import { assertDrawerForm, assertDrawerSource } from './drawer-assert.ts';
+import { permissionsCloseHrefFor, permissionsCloseTarget, permissionsOpenFields, permissionsRequested } from '../src/lib/url.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 
 
@@ -702,38 +704,81 @@ describe('catalog', { concurrency: false }, () => {
 		assert.equal(timer.includes('requestSubmit'), false);
 	});
 
-	test('permissions form is in the page, and cancel drops the permissions query', () => {
-		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog&permissions=web&catalog.q=we`);
+	test('permissions open in a drawer, and cancel drops the permissions query', () => {
+		// The drawer content renders only in the browser, so render the form and the row's opener.
 		const html = decode(
-			render(CatalogSection, {
+			render(CatalogPermissionsForm, {
 				props: {
-					canOwner: true,
-					entries: [entry(['run'])],
-					omitted: 0,
-					truncated: false,
-					message: null,
-					hosts: [host()],
+					action: '?/catalogPermissions',
+					name: 'web',
+					grants: [
+						{ subject: 'role:admin', actions: ['run'] },
+						{ subject: 'role:viewer', actions: ['logs'] }
+					],
 					members: [member()],
-					permissions: {
-						name: 'web',
-						grants: [
-							{ subject: 'role:admin', actions: ['run'] },
-							{ subject: 'role:viewer', actions: ['logs'] }
-						],
-						message: null,
-						loaded: true
-					}
+					loaded: true
 				}
 			}).body
 		);
 		assert.equal(html.includes('name="admin_run"'), true);
-		const cancel = html.match(/href="([^"]*)"[^>]*>(?:<!---->)?Cancel/);
-		assert.ok(cancel);
-		assert.equal(cancel[1], `/projects/${PROJECT.id}?tab=catalog&catalog.q=we`);
-		assert.equal(cancel[1].includes('permissions'), false);
+		assertDrawerForm(html, 'Save', 'permissions');
 		const permissionsSource = readFileSync(new URL('../src/routes/projects/[id]/CatalogPermissions.svelte', import.meta.url), 'utf8');
-		assert.equal(permissionsSource.includes('{#key name}'), true);
-		assert.equal(permissionsSource.includes('Dialog.Content'), false);
+		assertDrawerSource(permissionsSource, 'permissions');
+
+		// The row's opener carries the table state, so closing returns to the same search and sort.
+		const tableUrl = `http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=we&catalog.sort=name&/catalogDelete`;
+		setPageUrl(tableUrl);
+		const section = decode(
+			render(CatalogSection, {
+				props: { canOwner: true, entries: [entry(['run'])], omitted: 0, truncated: false, message: null, hosts: [host()], members: [member()] }
+			}).body
+		);
+		const opener = /<form method="GET"[^>]*>([\s\S]*?)<\/form>/.exec(section);
+		assert.ok(opener);
+		assert.match(opener[0], /data-sveltekit-keepfocus/);
+		assert.match(opener[0], /data-sveltekit-noscroll/);
+		const fields = [...opener[1].matchAll(/<input[^>]*type="hidden"[^>]*>/g)].map((match) => [
+			/name="([^"]*)"/.exec(match[0])?.[1],
+			/value="([^"]*)"/.exec(match[0])?.[1]
+		]);
+		assert.deepEqual(fields, [
+			['tab', 'catalog'],
+			['catalog.q', 'we'],
+			['catalog.sort', 'name'],
+			['permissions', 'web']
+		]);
+		assert.match(opener[1], new RegExp(`<button[^>]*id="catalog-permissions-${ENTRY_ID}"[^>]*aria-label="Permissions web"`));
+		const opened = new URL(`http://console.example/projects/${PROJECT.id}`);
+		for (const [name, value] of fields) opened.searchParams.append(name ?? '', value ?? '');
+		assert.equal(permissionsRequested(opened), true);
+		assert.equal(permissionsCloseHrefFor(opened), `/projects/${PROJECT.id}?tab=catalog&catalog.q=we&catalog.sort=name`);
+
+		// From another tab or another row's drawer, the opener moves to Catalog and names this row.
+		assert.deepEqual(permissionsOpenFields(new URL(`http://console.example/projects/${PROJECT.id}?tab=services&permissions=old`), 'web'), [
+			{ name: 'tab', value: 'catalog' },
+			{ name: 'permissions', value: 'web' }
+		]);
+		assert.equal(permissionsCloseHrefFor(new URL(`http://console.example/projects/${PROJECT.id}?permissions=web`)), `/projects/${PROJECT.id}`);
+		assert.equal(permissionsRequested(new URL(`http://console.example/projects/${PROJECT.id}?tab=catalog`)), false);
+		assert.equal(permissionsRequested(new URL(`http://console.example/projects/${PROJECT.id}?permissions=`)), false);
+	});
+
+	test('a user close of the Permissions drawer drops the query unless another row is already opening', () => {
+		const base = `http://console.example/projects/${PROJECT.id}`;
+		const current = new URL(`${base}?tab=catalog&catalog.q=my-website&permissions=my-website`);
+		const closeHref = permissionsCloseHrefFor(current);
+		assert.equal(closeHref, `/projects/${PROJECT.id}?tab=catalog&catalog.q=my-website`);
+		// Escape, the X or Cancel with nothing else navigating: always back to the table, though the URL still has the query.
+		assert.equal(permissionsCloseTarget(closeHref, current, null), closeHref);
+		// A click on another row's Permissions during the close animation is on its way and wins.
+		assert.equal(permissionsCloseTarget(closeHref, current, new URL(`${base}?tab=catalog&catalog.q=my-website&permissions=api`)), null);
+		// A navigation to this same drawer's URL, or to a URL without the query, does not keep the drawer.
+		assert.equal(permissionsCloseTarget(closeHref, current, new URL(current.href)), closeHref);
+		assert.equal(permissionsCloseTarget(closeHref, current, new URL(`${base}?tab=catalog`)), closeHref);
+		// Only a navigation that lands on a permissions URL reopens; the close's own landing does not.
+		assert.equal(permissionsRequested(new URL(`${base}${closeHref.slice(`/projects/${PROJECT.id}`.length)}`)), false);
+		const source = readFileSync(new URL('../src/routes/projects/[id]/CatalogPermissions.svelte', import.meta.url), 'utf8');
+		assert.equal(source.includes('$effect('), false, 'no effect re-reads the URL while the drawer closes');
 		const formSource = readFileSync(new URL('../src/routes/projects/[id]/CatalogPermissionsForm.svelte', import.meta.url), 'utf8');
 		assert.equal(formSource.includes('label={member.name}'), true);
 	});
@@ -748,9 +793,12 @@ describe('catalog', { concurrency: false }, () => {
 		assert.equal(runSource.includes('cancel()'), true);
 		assert.equal(runSource.includes("formData.set('idempotency_key', crypto.randomUUID())"), false);
 		const scroll = 'max-h-[calc(100dvh-2rem)] overflow-y-auto';
-		assert.equal(readFileSync(new URL('../src/routes/projects/[id]/CatalogEntryDialog.svelte', import.meta.url), 'utf8').includes(scroll), true);
 		assert.equal(readFileSync(new URL('../src/routes/projects/[id]/CatalogRunDialog.svelte', import.meta.url), 'utf8').includes(scroll), true);
-		assert.equal(readFileSync(new URL('../src/routes/projects/[id]/CatalogPermissions.svelte', import.meta.url), 'utf8').includes(scroll), true);
+		// The program editor and Permissions are drawers: their forms scroll in a body between header and footer.
+		for (const name of ['CatalogEntryForm.svelte', 'CatalogPermissionsForm.svelte']) {
+			const source = readFileSync(new URL(`../src/routes/projects/[id]/${name}`, import.meta.url), 'utf8');
+			assert.equal(source.includes('min-h-0 flex-1 content-start gap-3 overflow-y-auto scroll-py-4'), true, name);
+		}
 		const catalogSource = readFileSync(new URL('../src/lib/catalog.ts', import.meta.url), 'utf8');
 		assert.equal(catalogSource.includes('NODE_OPTIONS'), false);
 		assert.equal(catalogSource.includes('LD_PRELOAD'), false);

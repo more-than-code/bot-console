@@ -26,3 +26,6 @@ export const page = {
 	form: null,
 	state: {}
 };
+
+/** No navigation runs during a server render. */
+export const navigating = { from: null, to: null, type: null, willUnload: null, delta: null, complete: null };

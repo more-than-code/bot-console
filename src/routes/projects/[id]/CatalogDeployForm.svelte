@@ -12,6 +12,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import * as Sheet from '$lib/components/ui/sheet';
 	import type { Host, ImageDeploy, ImageEntry } from '$lib/api-types';
 	import { imageFilesBlockReason, imageHealthPolicyBlockReason, imageHostBlockReason, imageLoggingBlockReason, isCatalogHost, reuseIdempotencyKey } from '$lib/catalog';
 	import { blockInFlightSubmit, deployProgressNote, flightFocusTarget, flightLabel } from '$lib/catalog-flight';
@@ -61,7 +62,7 @@
 		historyAction: string;
 		result?: ImageDeployState | null;
 		active?: boolean;
-		/** Initial history fetch. The dialog leaves this false; the effect sets it when the request starts. */
+		/** Initial history fetch. The drawer leaves this false; the effect sets it when the request starts. */
 		historyInFlight?: boolean;
 		/** Renders Deploy or Rollback in flight without a browser submit. */
 		inFlight?: 'deploy' | 'rollback' | null;
@@ -71,13 +72,16 @@
 		cancel?: Snippet;
 		/** A finished deploy or rollback on a host links to this project's Services row and its logs. */
 		projectId?: string | null;
-		/** The link was clicked: the dialog closes while the page navigates. */
+		/** The link was clicked: the drawer closes while the page navigates. */
 		onViewLogs?: () => void;
 	} = $props();
 
 	const eligible = $derived(hosts.filter((host) => isCatalogHost(host)));
 	const waitSec = $derived(entry.spec.kind === 'job' ? entry.spec.timeout_sec : entry.spec.healthy_after_sec);
 	const actionLabel = $derived(entry.spec.kind === 'job' ? 'Run job' : 'Deploy');
+	// The Deploy button sits in the pinned footer, outside the form, because History's rollback forms come between.
+	const formIds = $props.id();
+	const deployFormId = `${formIds}-deploy`;
 
 	function firstHost(): string {
 		return eligible[0]?.id ?? '';
@@ -323,241 +327,264 @@
 	<Input type="hidden" name="wait_sec" value={String(waitSec)} />
 </form>
 
-<form method="POST" action={deployAction} class="grid gap-3" use:enhance={deployEnhance}>
-	<Input type="hidden" name="name" value={entry.name} />
-	<Input type="hidden" name="workload" value={entry.spec.kind} />
-	<Input type="hidden" name="wait_sec" value={String(waitSec)} />
-	<Input type="hidden" name="idempotency_key" value={deployKey} />
-	<div class="grid min-w-0 gap-1.5">
-		<Label id="deploy-{entry.name}-host">Host</Label>
-		<div role="radiogroup" aria-labelledby="deploy-{entry.name}-host" class="grid min-w-0 gap-1">
-			{#each eligible as host (host.id)}
-				<Button
-					type="button"
-					role="radio"
-					variant={hostId === host.id ? 'secondary' : 'outline'}
-					aria-checked={hostId === host.id}
-					class="h-auto w-full min-w-0 justify-start text-left whitespace-normal break-all"
-					disabled={busy}
-					onclick={() => {
-						if (!busy) hostId = host.id;
-					}}>{host.name}</Button>
-			{/each}
-		</div>
-		<Input type="hidden" name="host_id" value={hostId} />
-		{#each eligible as host (host.id)}
-			{@const reason = imageHostBlockReason(host)}
-			{@const filesReason = imageFilesBlockReason(host, entry.spec.files.length > 0)}
-			{@const loggingReason = imageLoggingBlockReason(host, entry.spec.logging != null)}
-			{@const policyReason = imageHealthPolicyBlockReason(host, hasHealthPolicy)}
-			{#if reason}
-				<p class="text-muted-foreground text-sm">{host.name}: {reason}</p>
-			{/if}
-			{#if filesReason}
-				<p class="text-muted-foreground text-sm">{host.name}: {filesReason}</p>
-			{/if}
-			{#if loggingReason}
-				<p class="text-muted-foreground text-sm">{host.name}: {loggingReason}</p>
-			{/if}
-			{#if policyReason}
-				<p class="text-muted-foreground text-sm">{host.name}: {policyReason}</p>
-			{/if}
-		{/each}
-	</div>
-	{#if entry.spec.kind === 'service'}
-		<p class="text-sm">{healthPolicyRule(entry.spec.health_policy)}</p>
-	{/if}
-	<Label class="flex items-center gap-2">
-		<Checkbox name="force" value="1" bind:checked={force} disabled={busy} />
-		Force
-	</Label>
-	{#if result?.message}
-		<div bind:this={noticeEl} tabindex="-1" class="max-w-full min-w-0 focus-visible:ring-3 focus-visible:ring-ring break-words">
-			<Notice kind="error">{result.message}</Notice>
-		</div>
-	{/if}
-	{#if result?.outcome}
-		<div class="flex flex-wrap items-center gap-2" role="status">
-			<StatusBadge status={result.outcome.outcome} />
-			{#if digest}
-				<span class="font-mono text-sm">{digest}</span>
-			{/if}
-			<span class="text-sm">{result.outcome.exit_code == null ? 'exit none' : `exit ${result.outcome.exit_code}`}</span>
-		</div>
-	{/if}
-	{#if result?.status && (result.status.state === 'unknown' || !result.outcome)}
-		<p role="status" class="flex flex-wrap items-center gap-2 text-sm">
-			{result.status.container ?? 'unnamed'}
-			{#if result.status.state === 'unknown'}
-				<StatusBadge status="unknown" />
-			{:else}
-				{result.status.state}
-			{/if}
-		</p>
-	{/if}
-	{#if result && result.lines.length > 0}
-		<pre class="bg-muted max-h-40 overflow-auto rounded-lg p-2 font-mono text-xs whitespace-pre-wrap" aria-label="Deploy log">{result.lines.join('\n')}</pre>
-	{/if}
-	{#if logsHref && !busy}
-		<!-- A plain click closes the dialog; a new-tab click keeps it and its result. Hidden in flight, like Cancel. No hover preload, like the Services tab: its load reads container status from the hosts. -->
-		<a
-			class="text-primary w-fit rounded-sm text-sm underline underline-offset-4 outline-none focus-visible:ring-3 focus-visible:ring-ring"
-			href={logsHref}
-			data-sveltekit-preload-data="off"
-			data-logs-link
-			onclick={onPlainClick(onViewLogs)}>View logs in Services</a
+<!-- Body and footer share one column, so the footer sits right under the body like the other drawers. -->
+<div class="flex min-h-0 flex-1 flex-col">
+	<div class="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-py-4 px-4 pb-4" data-slot="deploy-body">
+		<form
+			id={deployFormId}
+			method="POST"
+			action={deployAction}
+			class="flex shrink-0 flex-col gap-3"
+			use:enhance={deployEnhance}
 		>
-	{/if}
-	{#if portLine !== ''}
-		<p class="font-mono text-sm">{portLine}</p>
-	{/if}
-	{#if publishesPublic}
-		<p class="text-muted-foreground text-sm">Publishes on all of the host's interfaces.</p>
-	{/if}
-	<div class="flex flex-wrap items-center gap-2">
-		<Button
-			type="submit"
-			bind:ref={deploySubmitEl}
-			disabled={activeFlight === 'deploy' ? undefined : busy || submitting || hostId === '' || containerBlocked || filesBlocked || loggingBlocked || healthPolicyBlocked}
-			aria-disabled={activeFlight === 'deploy' ? 'true' : undefined}
-			aria-busy={activeFlight === 'deploy' ? 'true' : undefined}
-			onclick={(event) => {
-				if (blockInFlightSubmit(activeFlight === 'deploy')) event.preventDefault();
-			}}
-		>
-			{#if activeFlight === 'deploy'}
-				<Loader2 class="size-4 motion-safe:animate-spin" />
-				{flightLabel('deploy')}
-			{:else}
-				{actionLabel}
+			<Input type="hidden" name="name" value={entry.name} />
+			<Input type="hidden" name="workload" value={entry.spec.kind} />
+			<Input type="hidden" name="wait_sec" value={String(waitSec)} />
+			<Input type="hidden" name="idempotency_key" value={deployKey} />
+			<div class="grid min-w-0 gap-1.5">
+				<Label id="deploy-{entry.name}-host">Host</Label>
+				<div role="radiogroup" aria-labelledby="deploy-{entry.name}-host" class="grid min-w-0 gap-1">
+					{#each eligible as host (host.id)}
+						<Button
+							type="button"
+							role="radio"
+							variant={hostId === host.id ? 'secondary' : 'outline'}
+							aria-checked={hostId === host.id}
+							class="h-auto w-full min-w-0 justify-start text-left whitespace-normal break-all"
+							disabled={busy}
+							onclick={() => {
+								if (!busy) hostId = host.id;
+							}}>{host.name}</Button>
+					{/each}
+				</div>
+				<Input type="hidden" name="host_id" value={hostId} />
+				{#each eligible as host (host.id)}
+					{@const reason = imageHostBlockReason(host)}
+					{@const filesReason = imageFilesBlockReason(host, entry.spec.files.length > 0)}
+					{@const loggingReason = imageLoggingBlockReason(host, entry.spec.logging != null)}
+					{@const policyReason = imageHealthPolicyBlockReason(host, hasHealthPolicy)}
+					{#if reason}
+						<p class="text-muted-foreground text-sm">{host.name}: {reason}</p>
+					{/if}
+					{#if filesReason}
+						<p class="text-muted-foreground text-sm">{host.name}: {filesReason}</p>
+					{/if}
+					{#if loggingReason}
+						<p class="text-muted-foreground text-sm">{host.name}: {loggingReason}</p>
+					{/if}
+					{#if policyReason}
+						<p class="text-muted-foreground text-sm">{host.name}: {policyReason}</p>
+					{/if}
+				{/each}
+			</div>
+			{#if entry.spec.kind === 'service'}
+				<p class="text-sm">{healthPolicyRule(entry.spec.health_policy)}</p>
 			{/if}
-		</Button>
-		{#if cancel}
-			{@render cancel()}
-		{/if}
-	</div>
-	{#if activeFlight === 'deploy'}
-		<FlightStatus note={deployProgressNote(entry.spec.healthcheck)} />
-	{/if}
-</form>
-
-{#if result?.confirmation && result.confirmKind}
-	<form method="POST" action={confirmAction} class="mt-3 grid gap-3" use:enhance={confirmEnhance}>
-		<Input type="hidden" name="name" value={entry.name} />
-		<Input type="hidden" name="host_id" value={hostId} />
-		<Input type="hidden" name="workload" value={entry.spec.kind} />
-		<Input type="hidden" name="wait_sec" value={String(waitSec)} />
-		<Input type="hidden" name="confirmation_id" value={result.confirmation.confirmation_id} />
-		<Input type="hidden" name="confirm_kind" value={result.confirmKind} />
-		<Input type="hidden" name="idempotency_key" value={confirmKey} />
-		<div class="max-w-full min-w-0 break-words">
-			<Notice kind="info">{result.confirmation.plan}</Notice>
-		</div>
-		<div>
-			<Button type="submit" disabled={busy || submitting}>Confirm</Button>
-		</div>
-	</form>
-{/if}
-
-<div class="mt-4 grid gap-2">
-	<h3 class="text-sm font-medium">History</h3>
-	{#if historyError}
-		<div class="max-w-full min-w-0 break-words">
-			<Notice kind="error">{historyError}</Notice>
-		</div>
-	{/if}
-	{#if historyError || historyPending || (result?.message && result.history == null && !historyReady)}
-		<div>
-			<Button type="button" variant="outline" disabled={busy} onclick={() => historyForm?.requestSubmit()}>Retry</Button>
-		</div>
-	{/if}
-	{#if notice === 'empty'}
-		<p class="text-muted-foreground text-sm">No deploys yet.</p>
-	{:else if notice === 'list'}
-		<ul class="grid gap-2">
-			{#each history as item (item.id)}
-				<li class="flex flex-wrap items-center gap-2 text-sm">
-					<StatusBadge status={item.outcome} />
-					{#if item.outcome !== 'auto_failed'}
-						<span class="font-mono">{shortDigest(item.digest) ?? 'no digest'}</span>
+			<Label class="flex items-center gap-2">
+				<Checkbox name="force" value="1" bind:checked={force} disabled={busy} />
+				Force
+			</Label>
+			{#if result?.message}
+				<div bind:this={noticeEl} tabindex="-1" class="max-w-full min-w-0 focus-visible:ring-3 focus-visible:ring-ring break-words">
+					<Notice kind="error">{result.message}</Notice>
+				</div>
+			{/if}
+			{#if result?.outcome}
+				<!-- The link sits beside the status, not inside it, so the live region announces only the outcome. -->
+				<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+					<div class="flex flex-wrap items-center gap-2" role="status">
+						<StatusBadge status={result.outcome.outcome} />
+						{#if digest}
+							<span class="font-mono text-sm">{digest}</span>
+						{/if}
+						<span class="text-sm">{result.outcome.exit_code == null ? 'exit none' : `exit ${result.outcome.exit_code}`}</span>
+					</div>
+				{#if logsHref && !busy}
+					<!-- On the outcome line, above the log, so it is always in view. A plain click closes the drawer; a new-tab click keeps it and its result. Hidden in flight, like Cancel. No hover preload, like the Services tab: its load reads container status from the hosts. -->
+					<a
+						class="text-primary w-fit rounded-sm text-sm underline underline-offset-4 outline-none focus-visible:ring-3 focus-visible:ring-ring"
+						href={logsHref}
+						data-sveltekit-preload-data="off"
+						data-logs-link
+						onclick={onPlainClick(onViewLogs)}>View logs in Services</a
+					>
+				{/if}
+				</div>
+			{/if}
+			{#if result?.status && (result.status.state === 'unknown' || !result.outcome)}
+				<p role="status" class="flex flex-wrap items-center gap-2 text-sm">
+					{result.status.container ?? 'unnamed'}
+					{#if result.status.state === 'unknown'}
+						<StatusBadge status="unknown" />
+					{:else}
+						{result.status.state}
 					{/if}
-					<span class="text-muted-foreground"><LocalTime iso={item.finished_at ?? item.started_at} /></span>
-					{#if item.via === 'agent'}
-						<span class="text-muted-foreground">Deploybot agent</span>
-					{/if}
-				</li>
-			{/each}
-		</ul>
-	{:else if notice === 'no-hosts'}
-		<p class="text-muted-foreground text-sm">No hosts in this project.</p>
-	{:else if notice === 'loading'}
-		<p class="text-muted-foreground text-sm">Loading history…</p>
-	{/if}
-	{#if historyReady && targets.length > 0 && healthPolicyBlocked && selectedHost}
-		<p id="rollback-{entry.name}-blocked" class="text-muted-foreground text-sm">
-			{selectedHost.name}: {imageHealthPolicyBlockReason(selectedHost, hasHealthPolicy)}
-		</p>
-	{/if}
-	{#if historyReady}
-		{#each targets as item (item.digest)}
-			{@const rollingThis = activeFlight === 'rollback' && shownDigest === item.digest}
-			<form method="POST" action={rollbackAction} class="grid gap-1" use:enhance={rollbackEnhance(item.digest)}>
+				</p>
+			{/if}
+			{#if result && result.lines.length > 0}
+				<!-- Half the screen (at most 32rem, at least 10rem) and scrolls inside: contain-size keeps its lines out of the body's height, so the link below stays in view. -->
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+				<pre
+					role="region"
+					tabindex="0"
+					aria-label="Deploy log"
+					class="bg-muted h-[min(50dvh,32rem)] min-h-40 shrink-0 overflow-auto rounded-lg p-2 font-mono text-xs whitespace-pre-wrap contain-size focus-visible:ring-3 focus-visible:ring-ring">{result.lines.join('\n')}</pre>
+			{/if}
+			{#if portLine !== ''}
+				<p class="font-mono text-sm">{portLine}</p>
+			{/if}
+			{#if publishesPublic}
+				<p class="text-muted-foreground text-sm">Publishes on all of the host's interfaces.</p>
+			{/if}
+		</form>
+
+		{#if result?.confirmation && result.confirmKind}
+			<form method="POST" action={confirmAction} class="mt-3 grid gap-3" use:enhance={confirmEnhance}>
 				<Input type="hidden" name="name" value={entry.name} />
 				<Input type="hidden" name="host_id" value={hostId} />
 				<Input type="hidden" name="workload" value={entry.spec.kind} />
 				<Input type="hidden" name="wait_sec" value={String(waitSec)} />
-				<Input type="hidden" name="digest" value={item.digest} />
-				<div class="flex flex-wrap items-center gap-2">
-					<span class="contents" use:rememberRollback={item.digest}>
-						<Button
-							type="submit"
-							variant="outline"
-							disabled={rollingThis ? undefined : busy || submitting || hostId === '' || containerBlocked || healthPolicyBlocked}
-							aria-describedby={healthPolicyBlocked && !rollingThis ? `rollback-${entry.name}-blocked` : undefined}
-							aria-disabled={rollingThis ? 'true' : undefined}
-							aria-busy={rollingThis ? 'true' : undefined}
-							onclick={(event) => {
-								if (blockInFlightSubmit(rollingThis)) event.preventDefault();
-							}}
-						>
-							{#if rollingThis}
-								<Loader2 class="size-4 motion-safe:animate-spin" />
-								{flightLabel('rollback')}
-							{:else}
-								{item.sameImage ? 'Previous version (same image)' : `Roll back to ${shortDigest(item.digest) ?? item.digest}`}
-							{/if}
-						</Button>
-					</span>
-					{#if !item.sameImage}
-						<span class="font-mono text-sm">{shortDigest(item.digest) ?? item.digest}</span>
-					{/if}
+				<Input type="hidden" name="confirmation_id" value={result.confirmation.confirmation_id} />
+				<Input type="hidden" name="confirm_kind" value={result.confirmKind} />
+				<Input type="hidden" name="idempotency_key" value={confirmKey} />
+				<div class="max-w-full min-w-0 break-words">
+					<Notice kind="info">{result.confirmation.plan}</Notice>
 				</div>
-				{#if item.sameImage}
-					<p class="text-muted-foreground text-sm">Restores the previous container with its earlier files and settings.</p>
-				{/if}
-				{#if activeFlight === 'rollback' && shownDigest === item.digest}
-					<FlightStatus />
-				{/if}
+				<div>
+					<Button type="submit" disabled={busy || submitting}>Confirm</Button>
+				</div>
 			</form>
-		{/each}
-	{/if}
-	{#if hostId !== '' && hostLabel !== ''}
-		<div class="mt-2">
-			<ConfirmAction
-				id="remove-image-{entry.name}"
-				action={removeAction}
-				label="Remove"
-				confirmLabel="Remove"
-				disabled={containerBlocked || busy}
-				message="Remove {entry.name} from {hostLabel}?"
-				hidden={[
-					{ name: 'name', value: entry.name },
-					{ name: 'host_id', value: hostId },
-					{ name: 'workload', value: entry.spec.kind },
-					{ name: 'wait_sec', value: String(waitSec) },
-					{ name: 'idempotency_key', value: removeKey }
-				]}
-			/>
+		{/if}
+
+		<div class="mt-4 grid gap-2">
+			<h3 class="text-sm font-medium">History</h3>
+			{#if historyError}
+				<div class="max-w-full min-w-0 break-words">
+					<Notice kind="error">{historyError}</Notice>
+				</div>
+			{/if}
+			{#if historyError || historyPending || (result?.message && result.history == null && !historyReady)}
+				<div>
+					<Button type="button" variant="outline" disabled={busy} onclick={() => historyForm?.requestSubmit()}>Retry</Button>
+				</div>
+			{/if}
+			{#if notice === 'empty'}
+				<p class="text-muted-foreground text-sm">No deploys yet.</p>
+			{:else if notice === 'list'}
+				<ul class="grid gap-2">
+					{#each history as item (item.id)}
+						<li class="flex flex-wrap items-center gap-2 text-sm">
+							<StatusBadge status={item.outcome} />
+							{#if item.outcome !== 'auto_failed'}
+								<span class="font-mono">{shortDigest(item.digest) ?? 'no digest'}</span>
+							{/if}
+							<span class="text-muted-foreground"><LocalTime iso={item.finished_at ?? item.started_at} /></span>
+							{#if item.via === 'agent'}
+								<span class="text-muted-foreground">Deploybot agent</span>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{:else if notice === 'no-hosts'}
+				<p class="text-muted-foreground text-sm">No hosts in this project.</p>
+			{:else if notice === 'loading'}
+				<p class="text-muted-foreground text-sm">Loading history…</p>
+			{/if}
+			{#if historyReady && targets.length > 0 && healthPolicyBlocked && selectedHost}
+				<p id="rollback-{entry.name}-blocked" class="text-muted-foreground text-sm">
+					{selectedHost.name}: {imageHealthPolicyBlockReason(selectedHost, hasHealthPolicy)}
+				</p>
+			{/if}
+			{#if historyReady}
+				{#each targets as item (item.digest)}
+					{@const rollingThis = activeFlight === 'rollback' && shownDigest === item.digest}
+					<form method="POST" action={rollbackAction} class="grid gap-1" use:enhance={rollbackEnhance(item.digest)}>
+						<Input type="hidden" name="name" value={entry.name} />
+						<Input type="hidden" name="host_id" value={hostId} />
+						<Input type="hidden" name="workload" value={entry.spec.kind} />
+						<Input type="hidden" name="wait_sec" value={String(waitSec)} />
+						<Input type="hidden" name="digest" value={item.digest} />
+						<div class="flex flex-wrap items-center gap-2">
+							<span class="contents" use:rememberRollback={item.digest}>
+								<Button
+									type="submit"
+									variant="outline"
+									disabled={rollingThis ? undefined : busy || submitting || hostId === '' || containerBlocked || healthPolicyBlocked}
+									aria-describedby={healthPolicyBlocked && !rollingThis ? `rollback-${entry.name}-blocked` : undefined}
+									aria-disabled={rollingThis ? 'true' : undefined}
+									aria-busy={rollingThis ? 'true' : undefined}
+									onclick={(event) => {
+										if (blockInFlightSubmit(rollingThis)) event.preventDefault();
+									}}
+								>
+									{#if rollingThis}
+										<Loader2 class="size-4 motion-safe:animate-spin" />
+										{flightLabel('rollback')}
+									{:else}
+										{item.sameImage ? 'Previous version (same image)' : `Roll back to ${shortDigest(item.digest) ?? item.digest}`}
+									{/if}
+								</Button>
+							</span>
+							{#if !item.sameImage}
+								<span class="font-mono text-sm">{shortDigest(item.digest) ?? item.digest}</span>
+							{/if}
+						</div>
+						{#if item.sameImage}
+							<p class="text-muted-foreground text-sm">Restores the previous container with its earlier files and settings.</p>
+						{/if}
+						{#if activeFlight === 'rollback' && shownDigest === item.digest}
+							<FlightStatus />
+						{/if}
+					</form>
+				{/each}
+			{/if}
+			{#if hostId !== '' && hostLabel !== ''}
+				<div class="mt-2">
+					<ConfirmAction
+						id="remove-image-{entry.name}"
+						action={removeAction}
+						label="Remove"
+						confirmLabel="Remove"
+						disabled={containerBlocked || busy}
+						message="Remove {entry.name} from {hostLabel}?"
+						hidden={[
+							{ name: 'name', value: entry.name },
+							{ name: 'host_id', value: hostId },
+							{ name: 'workload', value: entry.spec.kind },
+							{ name: 'wait_sec', value: String(waitSec) },
+							{ name: 'idempotency_key', value: removeKey }
+						]}
+					/>
+				</div>
+			{/if}
 		</div>
-	{/if}
+	</div>
+	<Sheet.Footer class="bg-popover border-t">
+		<div class="flex flex-wrap items-center gap-2">
+			<Button
+				type="submit"
+				form={deployFormId}
+				bind:ref={deploySubmitEl}
+				disabled={activeFlight === 'deploy' ? undefined : busy || submitting || hostId === '' || containerBlocked || filesBlocked || loggingBlocked || healthPolicyBlocked}
+				aria-disabled={activeFlight === 'deploy' ? 'true' : undefined}
+				aria-busy={activeFlight === 'deploy' ? 'true' : undefined}
+				onclick={(event) => {
+					if (blockInFlightSubmit(activeFlight === 'deploy')) event.preventDefault();
+				}}
+			>
+				{#if activeFlight === 'deploy'}
+					<Loader2 class="size-4 motion-safe:animate-spin" />
+					{flightLabel('deploy')}
+				{:else}
+					{actionLabel}
+				{/if}
+			</Button>
+			{#if cancel}
+				{@render cancel()}
+			{/if}
+		</div>
+		{#if activeFlight === 'deploy'}
+			<FlightStatus note={deployProgressNote(entry.spec.healthcheck)} />
+		{/if}
+	</Sheet.Footer>
 </div>

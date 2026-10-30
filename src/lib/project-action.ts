@@ -69,7 +69,7 @@ export type ImageEditorState = {
 	field: string | null;
 };
 
-/** Deploy dialog. A new `resultId` opens it again. History is the last deploys, newest first. */
+/** Deploy drawer. A new `resultId` opens it again. History is the last deploys, newest first. */
 export type ImageDeployState = {
 	name: string;
 	resultId: string;
@@ -79,7 +79,7 @@ export type ImageDeployState = {
 	outcome: ImageDeploy | null;
 	status: ImageStatus | null;
 	lines: string[];
-	/** Null means the action did not load history, so the dialog keeps the list it has. */
+	/** Null means the action did not load history, so the drawer keeps the list it has. */
 	history: ImageDeploy[] | null;
 	confirmation: PendingConfirmation | null;
 	/** Which call the confirmation continues. Remove stays on the short timeout. */
@@ -87,7 +87,7 @@ export type ImageDeployState = {
 	message: string | null;
 };
 
-/** Permissions dialog. `loaded` is false when the grant list could not be read. */
+/** Permissions drawer. `loaded` is false when the grant list could not be read. */
 export type CatalogPermissionsState = {
 	name: string;
 	grants: CatalogGrant[];

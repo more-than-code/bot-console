@@ -14,21 +14,18 @@
 	import { imagePortText } from '$lib/image-spec';
 	import type { CatalogEditorState, CatalogPermissionsState, ImageDeployState, ImageEditorState } from '$lib/project-action';
 	import { CATALOG_TABLE_ID, type Column } from '$lib/table';
-	import { actionUrlFrom } from '$lib/url';
+	import { actionUrlFrom, permissionsCloseHrefFor, permissionsOpenFields } from '$lib/url';
 	import CatalogDeployDialog from './CatalogDeployDialog.svelte';
 	import CatalogEntryDialog from './CatalogEntryDialog.svelte';
 	import CatalogImageDialog from './CatalogImageDialog.svelte';
 	import CatalogPermissions from './CatalogPermissions.svelte';
 
-	const permissionsCloseHref = $derived.by(() => {
-		const params = new URLSearchParams(page.url.searchParams);
-		params.delete('permissions');
-		for (const key of [...params.keys()]) {
-			if (key.startsWith('/')) params.delete(key);
-		}
-		const qs = params.toString();
-		return qs ? `${page.url.pathname}?${qs}` : page.url.pathname;
-	});
+	const permissionsCloseHref = $derived(permissionsCloseHrefFor(page.url));
+
+	/** The row's Permissions button, where focus returns when its drawer closes or saves. */
+	function permissionsButtonId(entryId: string): string {
+		return `catalog-permissions-${entryId}`;
+	}
 
 	let {
 		canOwner,
@@ -59,7 +56,7 @@
 		imageEditor?: ImageEditorState | null;
 		imageDeploy?: ImageDeployState | null;
 		onImageSaved?: (name: string) => void;
-		/** For the Deploy dialog's "View logs in Services" link. */
+		/** For the Deploy drawer's "View logs in Services" link. */
 		projectId?: string | null;
 	} = $props();
 
@@ -196,10 +193,18 @@
 						/>
 					{/if}
 					{#if canOwner}
-						<form method="GET" action={page.url.pathname}>
-							<Input type="hidden" name="tab" value="catalog" />
-							<Input type="hidden" name="permissions" value={entry.name} />
-							<RowAction type="submit" label="Permissions {entry.name}" icon={ShieldCheck} disabled={rowBusy === entry.name} />
+						<!-- Opens the Permissions drawer. Focus and scroll stay, so the drawer takes focus and closes back to this button. -->
+						<form method="GET" action={page.url.pathname} data-sveltekit-keepfocus data-sveltekit-noscroll>
+							{#each permissionsOpenFields(page.url, entry.name) as field, index (index)}
+								<Input type="hidden" name={field.name} value={field.value} />
+							{/each}
+							<RowAction
+								type="submit"
+								id={permissionsButtonId(entry.id)}
+								label="Permissions {entry.name}"
+								icon={ShieldCheck}
+								disabled={rowBusy === entry.name}
+							/>
 						</form>
 						<ConfirmAction
 							id="delete-catalog-{entry.id}"
@@ -228,6 +233,7 @@
 		message={permissions.message}
 		loaded={permissions.loaded}
 		closeHref={permissionsCloseHref}
+		returnFocusId={permissionEntry ? permissionsButtonId(permissionEntry.id) : null}
 		includeDeploy={permissionEntry?.kind === 'image'}
 	/>
 {/if}
