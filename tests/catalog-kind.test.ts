@@ -84,7 +84,8 @@ const SORTABLE = [
 	['kind', 'Kind'],
 	['command', 'Command'],
 	['run_as', 'Run as'],
-	['port', 'Port']
+	['port', 'Port'],
+	['last_deployed', 'Last deployed']
 ] as const;
 
 function section(query = ''): string {
@@ -259,7 +260,7 @@ test('table filter helpers read, apply, set and clear a namespaced param', () =>
 test('catalog has a Kind column after Name with a badge, tooltip and accessible description', () => {
 	const html = section();
 	const heads = headers(html);
-	assert.equal(heads.length, 6);
+	assert.equal(heads.length, 7);
 	assert.match(heads[0][1], /Name/);
 	assert.match(heads[1][1], /Kind/);
 	assert.match(heads[2][1], /Command/);
@@ -364,7 +365,7 @@ test('filter works with sort and search, and sort links keep the filter and drop
 	assert.deepEqual(rowNames(section('&catalog.kind=program&catalog.q=delta')), ['delta']);
 	const html = section('&catalog.kind=job&catalog.page=2');
 	const hrefs = headers(html).flatMap(([, inner]) => [...inner.matchAll(/aria-label="Sort[^"]*"|href="([^"]+)"[^>]*aria-label="Sort/g)].map((m) => m[1]).filter(Boolean));
-	assert.equal(hrefs.length, 5);
+	assert.equal(hrefs.length, 6);
 	for (const href of hrefs) {
 		assert.ok(href.includes('catalog.kind=job'), href);
 		assert.equal(href.includes('catalog.page'), false, href);
@@ -373,10 +374,10 @@ test('filter works with sort and search, and sort links keep the filter and drop
 
 test('zero matches with a filter keep the header and offer Clear filter; without a filter the empty text stays', () => {
 	const none = section('&catalog.kind=job&catalog.q=bravo');
-	assert.equal(headers(none).length, 6);
+	assert.equal(headers(none).length, 7);
 	assert.match(trigger(none), /aria-label="Filter Kind: Jobs"/);
 	const body = tbody(none);
-	assert.match(body, /<td[^>]*colspan="6"[^>]*>[\s\S]*No entries match this filter\./);
+	assert.match(body, /<td[^>]*colspan="7"[^>]*>[\s\S]*No entries match this filter\./);
 	const clear = body.match(/<a [^>]*href="([^"]+)"[^>]*>Clear filter<\/a>/);
 	assert.ok(clear, 'Clear filter link');
 	assert.equal(clear[1], `/projects/${PROJECT.id}?tab=catalog&catalog.q=bravo`);
@@ -396,8 +397,8 @@ test('every sortable header shows the right aria-hidden icon, aria-sort and name
 		assert.match(inner, new RegExp(`aria-label="Sort by ${label}"`));
 		assert.match(inner, /<svg[^>]*class="[^"]*lucide-arrow-up-down[^"]*text-muted-foreground[^"]*"[^>]*aria-hidden="true"/, label);
 	}
-	assert.doesNotMatch(unsorted[5][1], /<svg|aria-label="Sort/);
-	assert.equal(unsorted[5][0].includes('aria-sort'), false);
+	assert.doesNotMatch(unsorted[6][1], /<svg|aria-label="Sort/);
+	assert.equal(unsorted[6][0].includes('aria-sort'), false);
 
 	for (const dir of ['asc', 'desc'] as const) {
 		for (const [activeIndex, [key, activeLabel]] of SORTABLE.entries()) {
@@ -421,10 +422,10 @@ test('every sortable header shows the right aria-hidden icon, aria-sort and name
 	}
 });
 
-test('Run as and Port are hidden below sm on the header and every cell; no other column is', () => {
+test('Run as, Port and Last deployed are hidden below sm on the header and every cell; no other column is', () => {
 	const html = section();
 	const heads = headers(html).map(([attrs]) => classOf(attrs));
-	const hidden = new Set([3, 4]);
+	const hidden = new Set([3, 4, 5]);
 	for (const [index, cls] of heads.entries()) {
 		if (hidden.has(index)) assert.match(cls, /(^|\s)max-sm:hidden(\s|$)/, `th ${index}`);
 		else assert.doesNotMatch(cls, /max-sm:/, `th ${index}`);
@@ -434,14 +435,17 @@ test('Run as and Port are hidden below sm on the header and every cell; no other
 	assert.equal(rows.length, 5);
 	for (const row of rows) {
 		const cells = [...row.matchAll(/<td\b([^>]*)>/g)].map((match) => classOf(match[1]));
-		assert.equal(cells.length, 6);
+		assert.equal(cells.length, 7);
 		for (const [index, cls] of cells.entries()) {
 			if (hidden.has(index)) assert.match(cls, /(^|\s)max-sm:hidden(\s|$)/, `td ${index}`);
 			else assert.doesNotMatch(cls, /max-sm:/, `td ${index}`);
 		}
 	}
-	// Below sm the actions are a grid of at most four per line.
-	assert.match(html, /<fieldset[^>]*class="[^"]*max-sm:grid max-sm:grid-cols-\[repeat\(4,max-content\)\]/);
+	// The actions are a grid of at most four per line at every width.
+	const fieldset = /<fieldset[^>]*class="([^"]*)"/.exec(html)?.[1] ?? '';
+	assert.match(fieldset, /(^|\s)grid(\s|$)/);
+	assert.match(fieldset, /(^|\s)grid-cols-\[repeat\(4,max-content\)\](\s|$)/);
+	assert.doesNotMatch(fieldset, /max-sm:|flex-wrap/);
 });
 
 type Item = { name: string; size: number; kind: string };

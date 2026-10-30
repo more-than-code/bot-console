@@ -222,6 +222,11 @@ type CatalogEntryBase = {
 	created_at: string;
 	updated_at: string;
 	my_actions: CatalogAction[];
+	/**
+	 * Newest console or MCP deploy (image) or allowed run (program), RFC3339 (api-v1 v1.21).
+	 * Null: never. Absent: unknown, from an older API or a malformed value.
+	 */
+	last_deployed_at?: string | null;
 };
 
 export type ProgramEntry = CatalogEntryBase & {

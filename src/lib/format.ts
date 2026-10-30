@@ -46,6 +46,22 @@ export function formatWhen(iso: string | null, timeZone?: string): string {
 	return dateFormat('when', timeZone || undefined).format(date);
 }
 
+/**
+ * How long ago `iso` was, from `now` (ms): "just now" under a minute (or in the future),
+ * then "5 min ago", "3 h ago", "2 d ago". A missing or unparsable time is `n/a`.
+ */
+export function formatAgo(iso: string | null, now: number = Date.now()): string {
+	if (!iso) return 'n/a';
+	const time = Date.parse(iso);
+	if (!Number.isFinite(time) || !Number.isFinite(now)) return 'n/a';
+	const minutes = Math.floor((now - time) / 60_000);
+	if (minutes < 1) return 'just now';
+	if (minutes < 60) return `${minutes} min ago`;
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) return `${hours} h ago`;
+	return `${Math.floor(hours / 24)} d ago`;
+}
+
 /** `hh:mm:ss`. `timeZone` is an IANA name. Omit it to use the runtime zone. */
 export function formatTime(date: Date, timeZone?: string): string {
 	if (Number.isNaN(date.getTime())) return '';

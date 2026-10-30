@@ -896,7 +896,23 @@ function parseEntryBase(value: Record<string, unknown>): Omit<CatalogEntry, 'kin
 	if (!id || !isUuid(id) || !project_id || !isUuid(project_id) || !name || !CATALOG_NAME.test(name)) return null;
 	if (!spec_hash || !SPEC_HASH.test(spec_hash) || !command_display) return null;
 	if (!created_by || !isUuid(created_by) || !created_at || !updated_at || !my_actions) return null;
-	return { id, project_id, name, spec_hash, command_display, created_by, created_at, updated_at, my_actions };
+	const base = { id, project_id, name, spec_hash, command_display, created_by, created_at, updated_at, my_actions };
+	const last_deployed_at = lastDeployedAt(value);
+	return last_deployed_at === undefined ? base : { ...base, last_deployed_at };
+}
+
+const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * api-v1 v1.21. Null is never deployed. A missing key (older API) or a malformed value is
+ * unknown (undefined); the entry itself is still kept.
+ */
+function lastDeployedAt(value: Record<string, unknown>): string | null | undefined {
+	if (!Object.hasOwn(value, 'last_deployed_at')) return undefined;
+	const raw = value.last_deployed_at;
+	if (raw === null) return null;
+	if (typeof raw !== 'string' || !RFC3339.test(raw) || !Number.isFinite(Date.parse(raw))) return undefined;
+	return raw;
 }
 
 export function parseCatalogEntry(value: unknown): CatalogEntry | null {

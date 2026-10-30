@@ -1,4 +1,5 @@
 import type { CatalogEntry, CatalogPreview, Host } from '$lib/api-types';
+import type { SortDir } from '$lib/table';
 
 export const APPROVAL_WAIT = "waiting for the host owner's approval";
 
@@ -47,6 +48,38 @@ export function catalogKindInfo(entry: { kind: string; spec?: unknown }): { kind
 	if (order < 0) return { kind, label: kind, tip: '', order: CATALOG_KINDS.length };
 	const known = CATALOG_KINDS[order];
 	return { kind, label: known.label, tip: known.tip, order };
+}
+
+/** Catalog column key (and `catalog.sort` value) for Last deployed. */
+export const LAST_DEPLOYED_SORT = 'last_deployed';
+
+/**
+ * Last deployed sort value: the time as UTC ISO text, which sorts in time order whatever offset the
+ * API used. Never (null) and unknown (absent) are null, which sorts last in both directions.
+ */
+export function lastDeployedValue(entry: { last_deployed_at?: string | null }): string | null {
+	if (!entry.last_deployed_at) return null;
+	const time = Date.parse(entry.last_deployed_at);
+	return Number.isFinite(time) ? new Date(time).toISOString() : null;
+}
+
+/**
+ * DataTable defaults for the Catalog tab (spec-catalog-last-deployed §3.2).
+ * When any entry carries `last_deployed_at`: Last deployed, newest first. Never-deployed entries
+ * sort last and keep the API's name order (the sort is stable). An older API without the field
+ * gets no default sort, as before this column: rows stay in the API's name order (Name A–Z).
+ * A `catalog.sort` naming another column without `catalog.dir` stays ascending, as before,
+ * so `catalog.sort=name` is A–Z.
+ */
+export function catalogDefaultSort(
+	entries: readonly { last_deployed_at?: string | null }[],
+	rawSort: string | null,
+	sortableKeys: readonly string[]
+): { sort: string | null; dir: SortDir } {
+	const known = entries.some((entry) => entry.last_deployed_at !== undefined);
+	if (!known) return { sort: null, dir: 'asc' };
+	const otherColumn = rawSort != null && rawSort !== LAST_DEPLOYED_SORT && sortableKeys.includes(rawSort);
+	return { sort: LAST_DEPLOYED_SORT, dir: otherColumn ? 'asc' : 'desc' };
 }
 
 /** Header filter options for the catalog Kind column. */

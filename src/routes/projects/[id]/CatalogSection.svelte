@@ -10,10 +10,19 @@
 	import { Input } from '$lib/components/ui/input';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import type { CatalogEntry, Host, Member } from '$lib/api-types';
-	import { CATALOG_KIND_OPTIONS, catalogKindInfo, catalogKindOf } from '$lib/catalog';
+	import {
+		CATALOG_KIND_OPTIONS,
+		catalogDefaultSort,
+		catalogKindInfo,
+		catalogKindOf,
+		LAST_DEPLOYED_SORT,
+		lastDeployedValue
+	} from '$lib/catalog';
+	import { formatAgo, formatWhen } from '$lib/format';
 	import { imagePortText } from '$lib/image-spec';
 	import type { CatalogEditorState, CatalogPermissionsState, ImageDeployState, ImageEditorState } from '$lib/project-action';
-	import { CATALOG_TABLE_ID, type Column } from '$lib/table';
+	import { CATALOG_TABLE_ID, tableParam, type Column } from '$lib/table';
+	import { timeZoneSource } from '$lib/time-zone';
 	import { actionUrlFrom, permissionsCloseHrefFor, permissionsOpenFields } from '$lib/url';
 	import CatalogDeployDialog from './CatalogDeployDialog.svelte';
 	import CatalogEntryDialog from './CatalogEntryDialog.svelte';
@@ -87,6 +96,14 @@
 			value: (row) => (row.kind === 'image' ? row.spec.user : row.spec.run_as)
 		},
 		{ key: 'port', label: 'Port', sortable: true, hideBelowSm: true, value: (row) => portOf(row) },
+		{
+			key: LAST_DEPLOYED_SORT,
+			label: 'Last deployed',
+			sortable: true,
+			hideBelowSm: true,
+			firstDir: 'desc',
+			value: (row) => lastDeployedValue(row)
+		},
 		{ key: 'actions', label: 'Actions', srLabel: true }
 	];
 
@@ -97,6 +114,18 @@
 		}
 		return entry.spec.port == null ? 'n/a' : String(entry.spec.port);
 	}
+
+	const sortableKeys = columns.filter((column) => column.sortable).map((column) => column.key);
+	const tableDefaults = $derived(
+		catalogDefaultSort(entries, page.url.searchParams.get(tableParam(CATALOG_TABLE_ID, 'sort')), sortableKeys)
+	);
+
+	const zones = timeZoneSource();
+	/** One clock for every row, read again whenever the entries reload. */
+	const now = $derived.by(() => {
+		void entries;
+		return Date.now();
+	});
 
 	const permissionEntry = $derived(permissions ? (entries.find((item) => item.name === permissions.name) ?? null) : null);
 </script>
@@ -119,6 +148,8 @@
 	empty="No catalog entries."
 	rowKey={(row) => row.id}
 	searchLabel="Search name, kind or command"
+	defaultSort={tableDefaults.sort}
+	defaultDir={tableDefaults.dir}
 >
 	{#snippet row(entry)}
 		{@const kind = catalogKindInfo(entry)}
@@ -145,11 +176,33 @@
 			<td class="p-2 align-middle"><CommandText value={entry.command_display} /></td>
 			<td class="p-2 align-middle max-sm:hidden">{entry.kind === 'image' ? entry.spec.user : entry.spec.run_as}</td>
 			<td class="p-2 align-middle font-mono max-sm:hidden">{portOf(entry)}</td>
+			<td class="p-2 align-middle whitespace-nowrap max-sm:hidden" data-last-deployed>
+				{#if entry.last_deployed_at}
+					{@const iso = entry.last_deployed_at}
+					{@const when = formatWhen(iso, zones?.current)}
+					<Tooltip.Provider>
+						<Tooltip.Root>
+							<Tooltip.Trigger>
+								{#snippet child({ props })}
+									<time {...props} datetime={iso} title={when}
+										>{formatAgo(iso, now)}<span class="sr-only">, {when}</span></time
+									>
+								{/snippet}
+							</Tooltip.Trigger>
+							<Tooltip.Content>{when}</Tooltip.Content>
+						</Tooltip.Root>
+					</Tooltip.Provider>
+				{:else if entry.last_deployed_at === null}
+					Never
+				{:else}
+					<span aria-hidden="true">—</span><span class="sr-only">Unknown</span>
+				{/if}
+			</td>
 			<td class="p-2 align-middle whitespace-normal">
-				<!-- Below sm, a grid of at most four icons per line keeps the row short. -->
+				<!-- A grid of at most four icons per line keeps the row short when the table is squeezed. -->
 				<fieldset
 					disabled={rowBusy === entry.name}
-					class="m-0 flex min-w-0 flex-wrap items-center gap-1 border-0 p-0 max-sm:grid max-sm:grid-cols-[repeat(4,max-content)]"
+					class="m-0 grid min-w-0 grid-cols-[repeat(4,max-content)] items-center gap-1 border-0 p-0"
 				>
 					{#if entry.kind === 'image' && entry.my_actions.includes('deploy')}
 						<CatalogDeployDialog
