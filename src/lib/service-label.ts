@@ -55,6 +55,11 @@ export function processServiceHref(projectId: string, hostId: string, serviceNam
 	return `/projects/${projectId}?${params.toString()}`;
 }
 
+/** The same Services link for a catalog entry, with `services.logs` so that row's Logs drawer opens once. */
+export function serviceLogsHref(projectId: string, hostId: string, entry: string): string {
+	return `${processServiceHref(projectId, hostId, entry)}&${new URLSearchParams({ 'services.logs': entry }).toString()}`;
+}
+
 /**
  * Show rename when this project's admin+ can edit the row.
  * Owner admin+ of the host's owning project can edit every row.

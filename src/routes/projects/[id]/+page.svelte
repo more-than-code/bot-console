@@ -163,6 +163,7 @@
 			imageEditor={imageEditor?.mode === 'edit' ? imageEditor : null}
 			imageDeploy={imageDeploy}
 			onImageSaved={toastImageSaved}
+			projectId={data.project.id}
 		/>
 	{:else if scope === 'members'}
 		<MembersSection

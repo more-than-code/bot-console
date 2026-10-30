@@ -43,7 +43,8 @@
 		permissions = null,
 		imageEditor = null,
 		imageDeploy = null,
-		onImageSaved
+		onImageSaved,
+		projectId = null
 	}: {
 		canOwner: boolean;
 		canAdmin?: boolean;
@@ -58,6 +59,8 @@
 		imageEditor?: ImageEditorState | null;
 		imageDeploy?: ImageDeployState | null;
 		onImageSaved?: (name: string) => void;
+		/** For the Deploy dialog's "View logs in Services" link. */
+		projectId?: string | null;
 	} = $props();
 
 	let rowBusy = $state<string | null>(null);
@@ -163,6 +166,7 @@
 							result={imageDeploy?.name === entry.name ? imageDeploy : null}
 							disabled={rowBusy === entry.name}
 							onRowBusy={(busy) => setRowBusy(entry.name, busy)}
+							{projectId}
 						/>
 					{/if}
 					{#if (canOwner || canAdmin) && entry.kind === 'program'}

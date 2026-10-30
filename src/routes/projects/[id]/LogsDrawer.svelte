@@ -27,7 +27,8 @@
 		hostId,
 		hostName,
 		action,
-		tip
+		tip,
+		initialOpen = false
 	}: {
 		entryName: string;
 		entryKind?: 'program' | 'image';
@@ -38,6 +39,8 @@
 		action: string;
 		/** Extra hover sentence on the row button. */
 		tip?: string;
+		/** Open on mount (the Catalog Deploy dialog's "View logs in Services" link). Read once. */
+		initialOpen?: boolean;
 	} = $props();
 
 	const Icon = RUN_ICON.logs;
@@ -48,7 +51,7 @@
 	const linesId = `${ids}-lines`;
 	const zones = timeZoneSource();
 
-	let open = $state(false);
+	let open = $state(untrack(() => initialOpen));
 	let view = $state<LogsView>(emptyLogsView());
 	/** Live's only owner. The switch shows it; `onLive` and the poller's end change it. */
 	let live = $state(false);

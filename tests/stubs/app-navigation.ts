@@ -10,3 +10,10 @@ export function invalidate(): Promise<void> {
 export function invalidateAll(): Promise<void> {
 	return Promise.resolve();
 }
+
+/** Every `replaceState(url)` call, in order. Tests read and clear it. */
+export const replaceStateCalls: string[] = [];
+
+export function replaceState(url: string | URL): void {
+	replaceStateCalls.push(String(url));
+}

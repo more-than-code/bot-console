@@ -20,7 +20,8 @@
 		historyAction,
 		result = null,
 		disabled = false,
-		onRowBusy
+		onRowBusy,
+		projectId = null
 	}: {
 		entry: ImageEntry;
 		hosts: Host[];
@@ -32,6 +33,8 @@
 		result?: ImageDeployState | null;
 		disabled?: boolean;
 		onRowBusy?: (busy: boolean) => void;
+		/** For the "View logs in Services" link. */
+		projectId?: string | null;
 	} = $props();
 
 	let open = $state(untrack(() => result != null));
@@ -97,6 +100,8 @@
 				{result}
 				active={open}
 				{onBusy}
+				{projectId}
+				onViewLogs={() => (open = false)}
 			>
 				{#snippet cancel()}
 					<Dialog.Close type="button" disabled={flight}>Cancel</Dialog.Close>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { enhance } from '$app/forms';
+	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { tick, untrack } from 'svelte';
 	import { MediaQuery } from 'svelte/reactivity';
@@ -27,15 +28,22 @@
 	import { canEditHealthChecks } from '$lib/health-checks';
 	import { renameStartValue, serviceLabel } from '$lib/service-label';
 	import {
+		SERVICE_LOGS_PARAM,
 		SERVICE_SHOW_LABEL,
 		SERVICE_SHOWS,
 		discoveredListenersHref,
 		healthSourceLabel,
 		imageDigestText,
+		serviceLogsEntry,
+		serviceLogsMissingNote,
+		serviceLogsRow,
 		serviceRowStatus,
 		serviceShow,
 		showDeploybotEmpty,
-		showsDockerHealthcheck
+		showsDockerHealthcheck,
+		dropServiceLogs,
+		serviceFilterKey,
+		serviceLogsStep
 	} from '$lib/service-view';
 	import { readSearch, serverHostHiddenFields } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
@@ -146,6 +154,25 @@
 		searching ? [] : hostChosen ? notRunning.filter((pair) => pair.host.id === selectedHost) : notRunning
 	);
 
+	// The Catalog Deploy dialog's "View logs in Services" link (`services.logs`): highlight that row and open its Logs once.
+	const logsEntry = $derived(serviceLogsEntry(page.url.searchParams.get(SERVICE_LOGS_PARAM)));
+	/** The link was used: the row was found and its controls were read. `replaceState` leaves `page.url` as it was. */
+	let logsDone = $state(false);
+	/** The highlighted row and the filters it was chosen under. A new search, host, page or Show drops it. */
+	let selected = $state<{ id: string; filters: string } | null>(null);
+	const filterKey = $derived(serviceFilterKey(page.url.searchParams));
+	let dropTimer: ReturnType<typeof setTimeout> | null = null;
+	const logsRequest = $derived(
+		!logsDone && logsEntry != null && hostChosen && selectedHost ? { entry: logsEntry, hostId: selectedHost } : null
+	);
+	const logsTarget = $derived(logsRequest ? serviceLogsRow(rows, logsRequest, projectId) : null);
+	const currentId = $derived(
+		selected != null && selected.filters === filterKey ? selected.id : (logsTarget?.id ?? null)
+	);
+	const logsMissing = $derived(
+		logsRequest != null && logsTarget == null && message == null ? serviceLogsMissingNote(logsRequest.entry) : null
+	);
+
 	/** Last resolved states. A reload keeps them until the new read answers, so open dialogs stay put. */
 	let states = $state<Record<string, ServiceRuntime> | null>(null);
 
@@ -187,6 +214,32 @@
 
 	$effect(() => {
 		showValue = showFromUrl.show;
+	});
+
+	// Once the row's controls are read (its drawer has mounted open), keep the highlight, scroll to it,
+	// and drop `services.logs` so a reload or Back does not open it again.
+	$effect(() => {
+		const row = logsTarget;
+		const request = logsRequest;
+		if (!browser || request == null) return;
+		const step = serviceLogsStep({ done: logsDone, rowId: row?.id ?? null, controls: row ? controlsFor(row) : null });
+		if (step !== 'open-and-clear' || row == null) return;
+		untrack(() => {
+			selected = { id: row.id, filters: filterKey };
+			logsDone = true;
+			document.getElementById(serviceDomId(row.id))?.scrollIntoView({ block: 'center' });
+			const pathname = page.url.pathname;
+			// A macrotask, so the router has started when this runs during hydration.
+			if (dropTimer != null) clearTimeout(dropTimer);
+			dropTimer = setTimeout(() => {
+				dropTimer = null;
+				dropServiceLogs(new URL(location.href), pathname, request.entry, (href) => replaceState(href, page.state));
+			}, 0);
+		});
+	});
+
+	$effect(() => () => {
+		if (dropTimer != null) clearTimeout(dropTimer);
 	});
 
 	let filterForm = $state<HTMLFormElement | null>(null);
@@ -267,6 +320,9 @@
 
 {#if message}
 	<Notice kind="error">{message}</Notice>
+{/if}
+{#if logsMissing}
+	<p class="text-muted-foreground mb-2 text-sm" role="status" data-logs-missing>{logsMissing}</p>
 {/if}
 {#if probe}
 	<Card.Root class="mb-4" role="status">
@@ -350,8 +406,15 @@
 		{@const digest = imageDigestText(service.image_digest)}
 		{@const digestFailure = digestFailures[service.id]}
 		{@const controls = controlsFor(service)}
-		<tr id={serviceDomId(service.id)}>
-			<td class="p-2 align-middle">
+		{@const isSelected = currentId === service.id}
+		<tr
+			id={serviceDomId(service.id)}
+			class="data-[state=selected]:bg-muted"
+			data-state={isSelected ? 'selected' : undefined}
+			aria-current={isSelected ? 'true' : undefined}
+		>
+			<!-- The selected row also gets a bar on its left edge, so it does not rely on colour alone. -->
+			<td class="p-2 align-middle {isSelected ? 'shadow-[inset_3px_0_0_var(--primary)]' : ''}" data-selected-bar={isSelected ? '' : undefined}>
 				<div class="flex min-w-0 items-center gap-2">
 					<span
 						class="inline-block max-w-48 min-w-0 truncate"
@@ -466,7 +529,14 @@
 	{#if controls === 'checking'}
 		<span class="text-muted-foreground text-sm whitespace-nowrap" data-row-checking>{CHECKING_NOTE}</span>
 	{:else}
-		<ServiceRowActions {controls} hostId={service.host_id} hostName={service.host_name} serviceId={service.id} {runResult} />
+		<ServiceRowActions
+			{controls}
+			hostId={service.host_id}
+			hostName={service.host_name}
+			serviceId={service.id}
+			{runResult}
+			logsOpen={logsTarget?.id === service.id}
+		/>
 	{/if}
 {/snippet}
 {#if entriesMessage}

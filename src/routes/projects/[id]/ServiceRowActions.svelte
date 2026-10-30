@@ -14,7 +14,8 @@
 		hostName,
 		serviceId = null,
 		runResult = null,
-		startOnly = false
+		startOnly = false,
+		logsOpen = false
 	}: {
 		controls: ServiceControls;
 		hostId: string;
@@ -25,6 +26,8 @@
 		runResult?: CatalogRunState | null;
 		/** A program that never ran: Start only, since there are no logs yet. */
 		startOnly?: boolean;
+		/** Open the Logs drawer on mount (see `LogsDrawer` `initialOpen`). */
+		logsOpen?: boolean;
 	} = $props();
 
 	let busy = $state(false);
@@ -93,6 +96,7 @@
 			{hostName}
 			action={actionUrlFrom(page.url, RUN_FORM_ACTION.logs)}
 			tip={logsTip}
+			initialOpen={logsOpen}
 		/>
 	{/if}
 </fieldset>

@@ -30,6 +30,8 @@
 		shortDigest
 	} from '$lib/image-spec';
 	import type { ImageDeployState } from '$lib/project-action';
+	import { serviceLogsHref } from '$lib/service-label';
+	import { onPlainClick } from '$lib/url';
 	import FlightStatus from './FlightStatus.svelte';
 
 	let {
@@ -46,7 +48,9 @@
 		inFlight = null,
 		flightDigest = null,
 		onBusy,
-		cancel
+		cancel,
+		projectId = null,
+		onViewLogs
 	}: {
 		entry: ImageEntry;
 		hosts: Host[];
@@ -65,6 +69,10 @@
 		flightDigest?: string | null;
 		onBusy?: (busy: boolean) => void;
 		cancel?: Snippet;
+		/** A finished deploy or rollback on a host links to this project's Services row and its logs. */
+		projectId?: string | null;
+		/** The link was clicked: the dialog closes while the page navigates. */
+		onViewLogs?: () => void;
 	} = $props();
 
 	const eligible = $derived(hosts.filter((host) => isCatalogHost(host)));
@@ -114,6 +122,12 @@
 	const publishesPublic = $derived(entry.spec.ports.some((port) => port.public));
 	const activeFlight = $derived(inFlight ?? (submitting ? flightAction : null));
 	const busy = $derived(activeFlight != null);
+	// Only a finished deploy or rollback has an `outcome`; remove and a pending confirmation get no link.
+	const logsHref = $derived(
+		projectId && result?.hostId && result.outcome != null && result.confirmation == null
+			? serviceLogsHref(projectId, result.hostId, entry.name)
+			: null
+	);
 	const shownDigest = $derived(activeFlight === 'rollback' ? (rollingDigest ?? flightDigest) : null);
 
 	$effect(() => {
@@ -383,6 +397,16 @@
 	{/if}
 	{#if result && result.lines.length > 0}
 		<pre class="bg-muted max-h-40 overflow-auto rounded-lg p-2 font-mono text-xs whitespace-pre-wrap" aria-label="Deploy log">{result.lines.join('\n')}</pre>
+	{/if}
+	{#if logsHref && !busy}
+		<!-- A plain click closes the dialog; a new-tab click keeps it and its result. Hidden in flight, like Cancel. No hover preload, like the Services tab: its load reads container status from the hosts. -->
+		<a
+			class="text-primary w-fit rounded-sm text-sm underline underline-offset-4 outline-none focus-visible:ring-3 focus-visible:ring-ring"
+			href={logsHref}
+			data-sveltekit-preload-data="off"
+			data-logs-link
+			onclick={onPlainClick(onViewLogs)}>View logs in Services</a
+		>
 	{/if}
 	{#if portLine !== ''}
 		<p class="font-mono text-sm">{portLine}</p>

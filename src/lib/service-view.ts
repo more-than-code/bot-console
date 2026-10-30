@@ -1,4 +1,8 @@
 import type { HealthStatus } from './api-types';
+import { isCatalogName } from './catalog';
+import { SERVICE_LOGS_PARAM } from './url';
+
+export { SERVICE_LOGS_PARAM };
 
 /** URL `show` values. The API names differ for the middle view. */
 export const SERVICE_SHOWS = ['deploybot', 'discovered', 'all'] as const;
@@ -97,4 +101,70 @@ export function discoveredListenersHref(url: URL): string {
 	if (host) params.set('services.host', host);
 	params.set('show', 'discovered');
 	return `${url.pathname}?${params.toString()}`;
+}
+
+/** `services.logs`: a catalog entry name, or null when missing or not a valid name (ignored). */
+export function serviceLogsEntry(raw: string | null | undefined): string | null {
+	if (raw == null) return null;
+	return isCatalogName(raw) ? raw : null;
+}
+
+/** The row `services.logs` points at: that entry on the filtered host, owned by this project. */
+export function serviceLogsRow<Row extends { catalog_entry: string | null; host_id: string; project_id: string | null }>(
+	rows: readonly Row[],
+	request: { entry: string; hostId: string },
+	projectId: string
+): Row | null {
+	return (
+		rows.find(
+			(row) => row.catalog_entry === request.entry && row.host_id === request.hostId && row.project_id === projectId
+		) ?? null
+	);
+}
+
+/** Shown when `services.logs` names an entry with no row on that host yet. */
+export function serviceLogsMissingNote(entry: string): string {
+	return `${entry} isn't listed on this host yet. Refresh in a moment.`;
+}
+
+/** The current URL without `services.logs`; every other param stays. */
+export function withoutServiceLogs(url: URL): string {
+	const params = new URLSearchParams(url.searchParams);
+	params.delete(SERVICE_LOGS_PARAM);
+	const qs = params.toString();
+	return qs ? `${url.pathname}?${qs}` : url.pathname;
+}
+
+/**
+ * What the Services tab does with a `services.logs` request on this render.
+ * `none`: no request, no matching row, or already used. `wait`: the row's state is still being read
+ * (its drawer is not mounted yet). `open-and-clear`: the row's controls are known, so its drawer has
+ * mounted open (when the caller has `logs`); select and scroll to the row and drop the param.
+ */
+export function serviceLogsStep(input: { done: boolean; rowId: string | null; controls: 'checking' | object | null }):
+	| 'none'
+	| 'wait'
+	| 'open-and-clear' {
+	if (input.done || input.rowId == null) return 'none';
+	if (input.controls === 'checking') return 'wait';
+	return 'open-and-clear';
+}
+
+/**
+ * Removes `services.logs` from the address when it still names `entry` on `pathname`.
+ * Returns whether `replace` was called. A throwing `replace` is swallowed: the param then stays.
+ */
+export function dropServiceLogs(current: URL, pathname: string, entry: string, replace: (href: string) => void): boolean {
+	if (current.pathname !== pathname || current.searchParams.get(SERVICE_LOGS_PARAM) !== entry) return false;
+	try {
+		replace(withoutServiceLogs(current));
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** The params that choose which rows show. The row highlight lasts only while they stay the same. */
+export function serviceFilterKey(search: URLSearchParams): string {
+	return ['services.q', 'services.host', 'services.cursor', 'show'].map((name) => search.get(name) ?? '').join('\n');
 }

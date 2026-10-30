@@ -65,7 +65,7 @@ const PAGE_NUMBER = /^[1-9][0-9]*$/;
 /** DataTable id of the project Catalog tab; its search is `catalog.q`. */
 export const CATALOG_TABLE_ID = 'catalog';
 
-export function tableParam(id: string, key: 'q' | 'sort' | 'dir' | 'page' | 'host' | 'cursor' | 'edit'): string {
+export function tableParam(id: string, key: 'q' | 'sort' | 'dir' | 'page' | 'host' | 'cursor' | 'edit' | 'logs'): string {
 	return `${id}.${key}`;
 }
 
@@ -417,7 +417,7 @@ export function serverApiParams(query: ServerTableQuery, limit = DEFAULT_PAGE_SI
 /**
  * Same-page link for a server table.
  * A patch that sets search, sort, direction, or host drops the cursor (and any client page).
- * A cursor-only patch keeps the other params.
+ * A cursor-only patch keeps the other params. The one-shot `<id>.logs` is always dropped.
  */
 export function serverTableHref(
 	url: URL,
@@ -425,6 +425,7 @@ export function serverTableHref(
 	patch: Partial<{ q: string | null; sort: string | null; dir: SortDir | null; host: string | null; cursor: string | null }>
 ): string {
 	const params = new URLSearchParams(url.searchParams);
+	params.delete(tableParam(id, 'logs'));
 	const changesQuery = 'q' in patch || 'sort' in patch || 'dir' in patch || 'host' in patch;
 	const write = (key: 'q' | 'sort' | 'dir' | 'host', value: string | null | undefined) => {
 		const name = tableParam(id, key);
@@ -459,9 +460,12 @@ export function serverSortHref(
 	return serverTableHref(url, id, { sort: column.key, dir });
 }
 
-/** Search keeps sort, direction, and host, and drops `q`, the cursor, and the client page. */
+/**
+ * Search keeps sort, direction, and host, and drops `q`, the cursor, and the client page.
+ * The one-shot `<id>.logs` is never carried on.
+ */
 export function serverSearchHiddenFields(search: URLSearchParams, id: string): Array<{ name: string; value: string }> {
-	const skip = new Set([tableParam(id, 'q'), tableParam(id, 'cursor'), tableParam(id, 'page')]);
+	const skip = new Set([tableParam(id, 'q'), tableParam(id, 'cursor'), tableParam(id, 'page'), tableParam(id, 'logs')]);
 	const fields: Array<{ name: string; value: string }> = [];
 	for (const [name, value] of search) {
 		if (!skip.has(name)) fields.push({ name, value });
@@ -469,9 +473,9 @@ export function serverSearchHiddenFields(search: URLSearchParams, id: string): A
 	return fields;
 }
 
-/** Host filter keeps the other params and drops the host, the cursor, and the client page. */
+/** Host filter keeps the other params and drops the host, the cursor, the client page, and the one-shot `<id>.logs`. */
 export function serverHostHiddenFields(search: URLSearchParams, id: string): Array<{ name: string; value: string }> {
-	const skip = new Set([tableParam(id, 'host'), tableParam(id, 'cursor'), tableParam(id, 'page')]);
+	const skip = new Set([tableParam(id, 'host'), tableParam(id, 'cursor'), tableParam(id, 'page'), tableParam(id, 'logs')]);
 	const fields: Array<{ name: string; value: string }> = [];
 	for (const [name, value] of search) {
 		if (!skip.has(name)) fields.push({ name, value });
