@@ -3,7 +3,7 @@
   "extends": [],
   "skills": {
     "dependencies": {
-      "frontend-engineering": "^0.2.0",
+      "frontend-engineering": "^0.3.0",
       "ui-portability-baseline": "^0.2.0",
       "api-contracts": "^0.1.0",
       "coding-discipline": "^0.3.1",
