@@ -130,11 +130,12 @@ describe('health check empty state', () => {
 		assert.equal(note.includes('{@html'), false);
 	});
 
-	test('the services table passes this project\'s catalog entry and the Docker check to the dialog', () => {
-		const section = readFileSync(new URL('../src/routes/projects/[id]/ServicesSection.svelte', import.meta.url), 'utf8');
+	test('a copy row passes its catalog entry and the Docker check to the dialog', () => {
+		// Copies are always this project's own rows (see groupCopies), so the entry is always this catalog's.
+		const section = readFileSync(new URL('../src/routes/projects/[id]/CatalogCopyRow.svelte', import.meta.url), 'utf8');
 		const tag = section.match(/<HealthChecks\b[\s\S]*?\/>/)?.[0] ?? '';
-		assert.match(tag, /catalogEntry=\{service\.project_id === projectId \? service\.catalog_entry : null\}/);
-		assert.match(tag, /dockerCheck=\{service\.dockerCheck \?\? null\}/);
+		assert.match(tag, /catalogEntry=\{copy\.catalog_entry\}/);
+		assert.match(tag, /dockerCheck=\{copy\.dockerCheck \?\? null\}/);
 		const catalog = readFileSync(new URL('../src/routes/projects/[id]/CatalogSection.svelte', import.meta.url), 'utf8');
 		assert.match(catalog, /id=\{CATALOG_TABLE_ID\}/);
 		assert.equal(CATALOG_TABLE_ID, 'catalog');
@@ -142,8 +143,8 @@ describe('health check empty state', () => {
 });
 
 describe('Docker health note', () => {
-	test('a catalog healthcheck shows the command, timings, and the catalog link', () => {
-		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+	test('a catalog healthcheck shows the command, timings, and the link to its entry', () => {
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 		const html = render(DockerHealthNote, {
 			props: {
 				dockerCheck: { test: ['sh', '-c', 'curl -f http://localhost/<x> || exit 1'], intervalSec: 10, timeoutSec: 2, retries: 4 },
@@ -153,7 +154,8 @@ describe('Docker health note', () => {
 		assert.equal(html.includes('Docker runs (from the catalog entry):'), true);
 		assert.equal(html.includes('<code class="font-mono break-all">sh -c "curl -f http://localhost/&lt;x> || exit 1"</code>'), true);
 		assert.equal(html.includes('<span class="whitespace-nowrap">every 10 s, timeout 2 s, 4 retries</span>'), true);
-		assert.match(html, /<a [^>]*href="\?tab=catalog&amp;catalog\.q=web"[^>]*>Edit the Docker health check in the catalog<\/a>/);
+		assert.match(html, /<a [^>]*href="\?tab=catalog&amp;catalog\.q=web"[^>]*>Edit the Docker health check<\/a>/);
+		assert.equal(html.includes('in the catalog'), false);
 		assert.match(html, /<span class="text-muted-foreground">Changes apply on the next deploy\.<\/span>/);
 	});
 
@@ -161,11 +163,11 @@ describe('Docker health note', () => {
 		const imageDefault = render(DockerHealthNote, { props: { dockerCheck: 'image-default', catalogEntry: 'web' } }).body;
 		assert.equal(imageDefault.includes("Docker uses the image's own HEALTHCHECK.") || imageDefault.includes('Docker uses the image&#39;s own HEALTHCHECK.'), true);
 		assert.equal(imageDefault.includes('Docker runs'), false);
-		assert.equal(imageDefault.includes('Edit the Docker health check in the catalog'), true);
+		assert.equal(imageDefault.includes('>Edit the Docker health check</a>'), true);
 		const unknown = render(DockerHealthNote, { props: { dockerCheck: null, catalogEntry: 'web' } }).body;
 		assert.equal(unknown.includes('Docker runs'), false);
 		assert.equal(unknown.includes('HEALTHCHECK'), false);
-		assert.equal(unknown.includes('Edit the Docker health check in the catalog'), true);
+		assert.equal(unknown.includes('>Edit the Docker health check</a>'), true);
 		const foreign = render(DockerHealthNote, { props: { dockerCheck: null, catalogEntry: null } }).body;
 		assert.equal(foreign.includes('Edit the Docker health check'), false);
 		assert.equal(foreign.includes('Changes apply'), false);
@@ -213,7 +215,7 @@ describe('Docker health note', () => {
 	});
 });
 
-describe('services load with Docker health', { concurrency: false }, () => {
+describe('copies load with Docker health', { concurrency: false }, () => {
 	const originalFetch = globalThis.fetch;
 
 	before(() => {
@@ -238,33 +240,40 @@ describe('services load with Docker health', { concurrency: false }, () => {
 		};
 	}
 
-	async function loadServices(
-		role: 'admin' | 'viewer' = 'admin'
-	): Promise<{ services: ProjectServiceRow[]; servicesMessage: string | null; message: string | null }> {
-		const loaded = await projectLoad(
+	type Loaded = {
+		services: ProjectServiceRow[];
+		copiesMessage: string | null;
+		catalogMessage: string | null;
+		message: string | null;
+	};
+
+	/** The tab's load, with every listed copy in one list (entries in catalog order, copies in host order). */
+	async function loadServices(role: 'admin' | 'viewer' = 'admin'): Promise<Loaded> {
+		const loaded = (await projectLoad(
 			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=services`,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog`,
 				session: TOKEN,
 				user: USER,
 				projects: [{ ...PROJECT, role }],
 				params: { id: PROJECT.id }
 			}).event as never
-		);
-		return loaded as never;
+		)) as { copies: Record<string, ProjectServiceRow[]>; catalog: Array<{ name: string }> } & Omit<Loaded, 'services'>;
+		const services = loaded.catalog.flatMap((entry) => loaded.copies[entry.name] ?? []);
+		return { ...loaded, services };
 	}
 
 	function catalogCalls(calls: FetchCall[]): number {
 		return calls.filter((call) => call.url.pathname === `/v1/projects/${PROJECT.id}/catalog`).length;
 	}
 
-	test('rows without Docker health share the one catalog read and get no Docker check', async () => {
+	test('copies without Docker health share the one catalog read and get no Docker check', async () => {
 		const calls = installFetch(
 			respond(
 				[
 					serviceItem({ health: { ...DOCKER_HEALTH, source: 'check' } }),
-					serviceItem({ id: OTHER_SERVICE_ID, catalog_entry: null })
+					serviceItem({ id: OTHER_SERVICE_ID, host_name: 'pi2', health: null })
 				],
-				() => envelope({ items: [], next_cursor: null })
+				() => envelope({ items: [catalogItem('web', null)], next_cursor: null })
 			)
 		);
 		const data = await loadServices();
@@ -297,30 +306,25 @@ describe('services load with Docker health', { concurrency: false }, () => {
 		assert.equal(call?.url.search, '');
 		assert.deepEqual(data.services[0]?.dockerCheck, { test: ['curl', '-f', 'http://localhost/'], intervalSec: 15, timeoutSec: 3, retries: 2 });
 		assert.equal(data.services[1]?.dockerCheck, 'image-default');
-		assert.equal(data.services[2]?.dockerCheck, null);
-		assert.equal(data.servicesMessage, null);
+		// A row of an entry the catalog does not list is not a copy on this tab.
+		assert.equal(data.services.length, 2);
+		assert.equal(data.copiesMessage, null);
 	});
 
-	test('a failed catalog read leaves the Docker line unknown and shows no error', async () => {
-		const calls = installFetch(respond([serviceItem()], () => envelope(null, 500, 'error', 'boom')));
-		const data = await loadServices();
-		assert.equal(catalogCalls(calls), 1);
-		assert.equal(data.services.length, 1);
-		assert.equal(data.services[0]?.dockerCheck, null);
-		assert.equal(data.servicesMessage, null);
-		assert.equal(data.message, null);
-	});
-
-	test('a 403 or 404 catalog read, or a malformed body, leaves the line unknown like the other loaders', async () => {
+	test('a failed, forbidden, missing or malformed catalog read lists no copies and shows the catalog error', async () => {
 		for (const response of [
+			() => envelope(null, 500, 'error', 'boom'),
 			() => envelope(null, 403, 'forbidden', 'no'),
 			() => envelope(null, 404, 'not_found', 'no'),
 			() => envelope({ entries: 'nope' })
 		]) {
-			installFetch(respond([serviceItem()], response));
+			const calls = installFetch(respond([serviceItem()], response));
 			const data = await loadServices();
-			assert.equal(data.services[0]?.dockerCheck, null);
-			assert.equal(data.servicesMessage, null);
+			assert.equal(catalogCalls(calls), 1);
+			assert.equal(data.services.length, 0);
+			assert.notEqual(data.catalogMessage, null);
+			assert.equal(data.copiesMessage, null);
+			assert.equal(data.message, null);
 		}
 	});
 
@@ -329,7 +333,7 @@ describe('services load with Docker health', { concurrency: false }, () => {
 		await assert.rejects(loadServices(), (err: unknown) => isRedirect(err) && err.status === 303);
 	});
 
-	test('a row from another project gets no Docker check even when this catalog has that name', async () => {
+	test('a row from another project is not a copy even when this catalog has that name', async () => {
 		const calls = installFetch(
 			respond(
 				[serviceItem({ project_id: FOREIGN_PROJECT_ID, project_name: 'Other' })],
@@ -338,7 +342,7 @@ describe('services load with Docker health', { concurrency: false }, () => {
 		);
 		const data = await loadServices();
 		assert.equal(catalogCalls(calls), 1);
-		assert.equal(data.services[0]?.dockerCheck, undefined);
+		assert.equal(data.services.length, 0);
 
 		const mixed = installFetch(
 			respond(
@@ -348,8 +352,8 @@ describe('services load with Docker health', { concurrency: false }, () => {
 		);
 		const both = await loadServices();
 		assert.equal(catalogCalls(mixed), 1);
+		assert.equal(both.services.length, 1);
 		assert.equal(both.services[0]?.dockerCheck, 'image-default');
-		assert.equal(both.services[1]?.dockerCheck, undefined);
 	});
 
 	test('a viewer gets no Docker check from the one catalog read', async () => {

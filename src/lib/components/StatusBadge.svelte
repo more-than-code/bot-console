@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { Badge } from '$lib/components/ui/badge';
 
-	let { status }: { status: string } = $props();
+	/** `text` replaces the shown word; the colour still follows `status`. */
+	let { status, text: shown = null }: { status: string; text?: string | null } = $props();
 
 	const known = [
 		'online',
@@ -65,5 +66,5 @@
 
 <Badge variant="outline" class={tone[text] ?? 'text-status-unknown'}>
 	<span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
-	{label[text] ?? text}
+	{shown ?? label[text] ?? text}
 </Badge>

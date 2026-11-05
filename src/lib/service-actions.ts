@@ -2,7 +2,7 @@ import type { CatalogAction, CatalogEntry, Host, HostStatus, ImageState, ImageSt
 import { hostBlockReason, isCatalogHost } from '$lib/catalog';
 import { shortDigest } from '$lib/image-spec';
 
-/** What the Services tab needs from a catalog entry to act on one of its running copies. */
+/** What a copy row needs from its catalog entry to act on that running copy. */
 export type ServiceEntryRef = {
 	name: string;
 	kind: 'program' | 'image';
@@ -17,7 +17,7 @@ export type ServiceEntryRef = {
 export const MANY_RESTARTS = 5;
 
 export const STATE_UNKNOWN_NOTE = 'State unknown.';
-export const NO_CONTAINER_NOTE = 'No container on this host. Deploy it from the Catalog tab.';
+export const NO_CONTAINER_NOTE = 'No container on this host. Deploy it from its catalog entry.';
 /** Shown in place of the buttons while the row's container status is still being read. */
 export const CHECKING_NOTE = 'checking…';
 
@@ -67,7 +67,7 @@ export const UNKNOWN_RUNTIME: ServiceRuntime = { state: 'unknown', restarts: nul
 export function runtimeFromImageStatus(status: ImageStatus): ServiceRuntime {
 	return {
 		...runtimeFromImageState(status.state, status.restart_count),
-		container: { state: status.state, exitCode: status.exit_code, digest: status.digest, ports: [...status.ports] }
+		container: { state: status.state, exitCode: status.exit_code, digest: status.digest, ports: [...status.ports], startedAt: status.started_at }
 	};
 }
 
@@ -241,7 +241,7 @@ export function entryHostIndex(rows: readonly OwnedRow[]): Record<string, string
 export type NotRunningPair = { entry: ServiceEntryRef; host: Host };
 
 /**
- * A program that never ran on a host has no Services row. Each (program, host that can run it) with no
+ * A program that never ran on a host has no service row. Each (program, host that can run it) with no
  * row gets one here, so Start stays reachable. Images are left out: Deploy creates their first row.
  */
 export function notRunningPairs(

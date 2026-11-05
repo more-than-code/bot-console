@@ -222,7 +222,7 @@ test('the Hosts tab shows the Add a host card to an admin only, and the tokens t
 	assert.match(tokens, /No join tokens\./);
 
 	const server = readFileSync(new URL('../src/routes/projects/[id]/+page.server.ts', import.meta.url), 'utf8');
-	assert.match(server, /tab === 'hosts' \|\| tab === 'services' \|\| tab === 'catalog'\n/);
+	assert.match(server, /tab === 'hosts' \|\| tab === 'catalog'\n/);
 });
 
 test('CommandBlock copies the command and wraps a long line', () => {

@@ -5,8 +5,7 @@ import Tabs from '../src/lib/components/Tabs.svelte';
 
 const items = [
 	{ key: 'hosts', label: 'Hosts', href: '/projects/lab?tab=hosts' },
-	{ key: 'services', label: 'Services', href: '/projects/lab?tab=services' },
-	{ key: 'catalog', label: 'Catalog', href: '/projects/lab?tab=catalog' },
+	{ key: 'catalog', label: 'Catalog & services', href: '/projects/lab?tab=catalog' },
 	{ key: 'members', label: 'Members', href: '/projects/lab?tab=members' },
 	{ key: 'tokens', label: 'Join tokens', href: '/projects/lab?tab=tokens' },
 	{ key: 'settings', label: 'Settings', href: '/projects/lab?tab=settings' }
@@ -16,8 +15,7 @@ test('each project section tab shows an icon after its label', () => {
 	const html = render(Tabs, { props: { items, current: 'catalog', label: 'Project sections' } }).body;
 	const icons = [
 		['Hosts', 'lucide-server'],
-		['Services', 'lucide-boxes'],
-		['Catalog', 'lucide-library'],
+		['Catalog &amp; services', 'lucide-library'],
 		['Members', 'lucide-users'],
 		['Join tokens', 'lucide-key-round'],
 		['Settings', 'lucide-settings']

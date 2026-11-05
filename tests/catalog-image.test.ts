@@ -39,7 +39,6 @@ import CatalogRunResult from '../src/routes/projects/[id]/CatalogRunResult.svelt
 import CatalogPermissionsForm from '../src/routes/projects/[id]/CatalogPermissionsForm.svelte';
 import CatalogSection from '../src/routes/projects/[id]/CatalogSection.svelte';
 import ProjectPage from '../src/routes/projects/[id]/+page.svelte';
-import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import SettingsSection from '../src/routes/projects/[id]/SettingsSection.svelte';
 import FileViewBody from '../src/routes/projects/[id]/FileViewBody.svelte';
 import ProjectFileForm from '../src/routes/projects/[id]/ProjectFileForm.svelte';
@@ -58,6 +57,7 @@ import { parse } from 'svelte/compiler';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
 import { assertDrawerForm } from './drawer-assert.ts';
 import { setPageUrl } from './stubs/app-state.ts';
+import { renderCopies } from './copies.ts';
 
 
 const closeSnippet = createRawSnippet(() => ({ render: () => '<button type="button">Close</button>' }));
@@ -752,12 +752,10 @@ describe('catalog images', { concurrency: false }, () => {
 				members: []
 			}
 		}).body;
-		const cells = [...section.matchAll(/<td class="p-2 align-middle font-mono[^"]*">([^<]*)<\/td>/g)].map((match) => match[1]);
-		assert.deepEqual(cells, ['8080:80 public, 9090:90', '9090:90', '3031']);
+		// The entry row has no Port column any more (spec §10): ports show on copies and in the Deploy drawer.
+		assert.equal(section.includes('8080:80 public'), false);
 		assert.equal(section.includes('Publishes on all of the host'), false);
-		const sectionSource = readFileSync(new URL('../src/routes/projects/[id]/CatalogSection.svelte', import.meta.url), 'utf8');
 		const deploySource = readFileSync(new URL('../src/routes/projects/[id]/CatalogDeployForm.svelte', import.meta.url), 'utf8');
-		assert.match(sectionSource, /imagePortText\(port\)/);
 		assert.match(deploySource, /imagePortText\(port\)/);
 
 		function deployHtml(entry: ImageEntry): string {
@@ -1088,7 +1086,7 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.equal(section[0]?.attrs.includes('onImageSaved'), true);
 		assert.notEqual(pageSource.indexOf('onSaved={toastImageSaved}'), -1);
 		assert.notEqual(pageSource.indexOf('onImageSaved={toastImageSaved}'), -1);
-		const edit = inlineAttributes(readSource('../src/routes/projects/[id]/CatalogSection.svelte')).filter(
+		const edit = inlineAttributes(readSource('../src/routes/projects/[id]/CatalogEntryRow.svelte')).filter(
 			(item) => item.name === 'CatalogImageDialog'
 		);
 		assert.equal(edit.length, 1);
@@ -1426,7 +1424,7 @@ describe('catalog images', { concurrency: false }, () => {
 		const run = readFileSync(new URL('../src/routes/projects/[id]/CatalogRunDialog.svelte', import.meta.url), 'utf8');
 		const deploy = readFileSync(new URL('../src/routes/projects/[id]/CatalogDeployDialog.svelte', import.meta.url), 'utf8');
 		const row = readFileSync(new URL('../src/lib/components/RowAction.svelte', import.meta.url), 'utf8');
-		assert.match(section, /controls\.stateAction === 'run' && controls\.entryKind === 'image'\) return IMAGE_RUN_TIP/);
+		assert.match(section, /state\.stateAction === 'run' && state\.entryKind === 'image'\) return IMAGE_RUN_TIP/);
 		assert.match(run, /label="\{label\} \{entryName\} on \{hostName\}" \{tip\}/);
 		assert.match(deploy, /label="Deploy \{entry\.name\}" tip=\{IMAGE_DEPLOY_TIP\}/);
 		assert.match(row, /const hover = \$derived\(blockedReason \? `\$\{label\}\. \$\{blockedReason\}` : tip \? `\$\{label\}\. \$\{tip\}` : label\)/);
@@ -1505,15 +1503,14 @@ describe('catalog images', { concurrency: false }, () => {
 
 	test('the delete confirmation names what keeps running for each entry kind', () => {
 		// The dialog body renders only when open, so check the source as dialog-open.test.ts does.
-		const section = readFileSync(new URL('../src/routes/projects/[id]/CatalogSection.svelte', import.meta.url), 'utf8');
+		const section = readFileSync(new URL('../src/routes/projects/[id]/CatalogEntryRow.svelte', import.meta.url), 'utf8');
 		assert.match(
 			section,
 			/entry\.kind === 'image'\s*\?\s*`Delete \$\{entry\.name\}\? Its containers keep running on their hosts\.`\s*:\s*`Delete \$\{entry\.name\}\? Running units are not stopped\.`/
 		);
 	});
 
-	test('an owned container row shows its name and the digest icon', () => {
-		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+	test('an owned container copy shows its name and the digest icon', () => {
 		const row: ProjectServiceRow = {
 			id: '00000000-0000-4000-8000-0000000000bb',
 			name: 'port-80',
@@ -1536,74 +1533,26 @@ describe('catalog images', { concurrency: false }, () => {
 			checks: [],
 			checksMessage: null
 		};
-		const owned = render(ServicesSection, {
-			props: {
-				projectId: PROJECT.id,
-				projectName: 'Lab',
-				hosts: [host()],
-				canAdmin: false,
-				rows: [row],
-				total: 1,
-				prevCursor: null,
-				nextCursor: null,
-				omitted: 0,
-				message: null,
-				probe: null,
-				probeServiceId: null,
-				renameServiceId: null,
-				typedName: null
-			}
-		}).body;
+		const owned = renderCopies({ rows: [row], entries: [imageEntry([])], hosts: [host()] });
 		assert.equal(owned.includes('web-1'), true);
 		assert.equal(owned.includes('Web'), true);
 		const full = digest('a');
 		assert.equal(owned.includes(`aria-label="Image digest ${full}"`), true);
 		assert.equal(owned.includes(`title="${full}"`), true);
-		assert.equal(owned.split(full).join('').includes(shortDigest(full) ?? ''), false);
+		// The Digest column shows the short digest in mono, with the copy icon for the full digest.
+		assert.match(owned, new RegExp(`data-digest="">${shortDigest(full)}<`));
 		const unnamed = { ...row, display_name: null };
-		const once = render(ServicesSection, {
-			props: {
-				projectId: PROJECT.id,
-				projectName: 'Lab',
-				hosts: [host()],
-				canAdmin: false,
-				rows: [unnamed],
-				total: 1,
-				prevCursor: null,
-				nextCursor: null,
-				omitted: 0,
-				message: null,
-				probe: null,
-				probeServiceId: null,
-				renameServiceId: null,
-				typedName: null
-			}
-		}).body;
-		// With no rename the label is the container name, shown once.
-		assert.equal(once.replace(/ title="[^"]*"/g, '').split('web-1').length - 1, 1);
-		assert.equal(once.includes('title="web-1"'), true);
+		const once = renderCopies({ rows: [unnamed], entries: [imageEntry([])], hosts: [host()] });
+		// With no rename the label is the container name, shown once, muted under the host.
+		const copyAt = once.indexOf(`id="service-${row.id}"`);
+		const copyHtml = once.slice(copyAt, once.indexOf('</tr>', copyAt));
+		assert.equal(copyHtml.replace(/ (title|aria-label)="[^"]*"/g, '').split('web-1').length - 1, 1);
+		assert.equal(copyHtml.includes('title="web-1"'), true);
 		assert.equal(once.includes(`aria-label="Image digest ${digest('a')}"`), true);
-		assert.equal(once.split(digest('a')).join('').includes(shortDigest(digest('a')) ?? ''), false);
+		// A discovered row is not a copy, so it is not shown at all.
 		const discovered = { ...row, source: 'discovered' as const, display_name: null, catalog_entry: null, image_digest: null };
-		const found = render(ServicesSection, {
-			props: {
-				projectId: PROJECT.id,
-				projectName: 'Lab',
-				hosts: [host()],
-				canAdmin: false,
-				rows: [discovered],
-				total: 1,
-				prevCursor: null,
-				nextCursor: null,
-				omitted: 0,
-				message: null,
-				probe: null,
-				probeServiceId: null,
-				renameServiceId: null,
-				typedName: null
-			}
-		}).body;
-		assert.equal(found.includes('web-1'), true);
+		const found = renderCopies({ rows: [discovered], entries: [imageEntry([])], hosts: [host()] });
+		assert.equal(found.includes('web-1'), false);
 		assert.equal(found.includes('port 80'), false);
 	});
 

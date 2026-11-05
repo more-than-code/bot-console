@@ -1,12 +1,14 @@
-import { SERVER_SEARCH_MAX } from './table';
+import { CATALOG_LOGS_PARAM } from './url';
 
 const PORT_NAME = /^port-(\d+)$/;
 
-/** `services.q` is capped at the API maximum, counted in Unicode code points. */
-function capServiceQuery(value: string): string {
+/** A link's `catalog.q` is capped at 100 Unicode code points. */
+const LINK_SEARCH_MAX = 100;
+
+function capSearch(value: string): string {
 	const points = [...value];
-	if (points.length <= SERVER_SEARCH_MAX) return value;
-	return points.slice(0, SERVER_SEARCH_MAX).join('');
+	if (points.length <= LINK_SEARCH_MAX) return value;
+	return points.slice(0, LINK_SEARCH_MAX).join('');
 }
 
 /**
@@ -45,19 +47,19 @@ export function renameStartValue(service: {
 	return '';
 }
 
-/** Project Services tab for this host, filtered to the discovered service name. */
-export function processServiceHref(projectId: string, hostId: string, serviceName: string): string {
+/** The project's Catalog & services tab, narrowed to this host and searched for the catalog entry. */
+export function processServiceHref(projectId: string, hostId: string, entry: string): string {
 	const params = new URLSearchParams({
-		tab: 'services',
-		'services.host': hostId,
-		'services.q': capServiceQuery(serviceName)
+		tab: 'catalog',
+		'catalog.host': hostId,
+		'catalog.q': capSearch(entry)
 	});
 	return `/projects/${projectId}?${params.toString()}`;
 }
 
-/** The same Services link for a catalog entry, with `services.logs` so that row's Logs drawer opens once. */
+/** The same link with `catalog.logs`, so that copy's Logs drawer opens once. */
 export function serviceLogsHref(projectId: string, hostId: string, entry: string): string {
-	return `${processServiceHref(projectId, hostId, entry)}&${new URLSearchParams({ 'services.logs': entry }).toString()}`;
+	return `${processServiceHref(projectId, hostId, entry)}&${new URLSearchParams({ [CATALOG_LOGS_PARAM]: entry }).toString()}`;
 }
 
 /**

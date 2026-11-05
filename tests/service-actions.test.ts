@@ -3,10 +3,11 @@ import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
-import type { CatalogAction, Host, HostStatus, ProjectServiceRow, ServiceRuntime } from '../src/lib/api-types.ts';
+import type { CatalogAction, CatalogEntry, Host, HostStatus, ProjectServiceRow, ServiceRuntime } from '../src/lib/api-types.ts';
 import type { CatalogRunState } from '../src/lib/project-action.ts';
 import { formatWhen } from '../src/lib/format.ts';
 import { runResultTitle } from '../src/lib/run-actions.ts';
+import { COPIES_CAPPED_NOTE } from '../src/lib/catalog-copies.ts';
 import { statusTooltipText } from '../src/lib/service-view.ts';
 import {
 	NO_CONTAINER_NOTE,
@@ -26,10 +27,9 @@ import {
 } from '../src/lib/service-actions.ts';
 import CatalogRunResult from '../src/routes/projects/[id]/CatalogRunResult.svelte';
 import RuntimeBadge from '../src/routes/projects/[id]/RuntimeBadge.svelte';
-import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import { load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER, type FetchCall } from './harness.ts';
-import { setPageUrl } from './stubs/app-state.ts';
+import { imageCatalogEntry, programCatalogEntry, renderCopies } from './copies.ts';
 
 const HOST_ID = '00000000-0000-4000-8000-0000000000aa';
 const OTHER_HOST = '00000000-0000-4000-8000-0000000000ab';
@@ -255,29 +255,14 @@ test('the not-running list covers programs on hosts that can run them and have n
 	);
 });
 
-describe('services rows', () => {
+describe('copy rows', () => {
+	function catalogOf(ref: ServiceEntryRef): CatalogEntry {
+		return ref.kind === 'image' ? imageCatalogEntry(ref.name, ref.my_actions) : programCatalogEntry(ref.name, ref.my_actions);
+	}
+
+	/** The tab with these entries (as the catalog lists them) and these service rows grouped under them. */
 	function renderSection(rows: ProjectServiceRow[], entries: ServiceEntryRef[], extra: Record<string, unknown> = {}): string {
-		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
-		return render(ServicesSection, {
-			props: {
-				projectId: PROJECT.id,
-				projectName: 'Lab',
-				hosts: [host()],
-				canAdmin: false,
-				rows,
-				total: rows.length,
-				prevCursor: null,
-				nextCursor: null,
-				omitted: 0,
-				message: null,
-				probe: null,
-				probeServiceId: null,
-				renameServiceId: null,
-				typedName: null,
-				entries,
-				...extra
-			}
-		}).body;
+		return renderCopies({ rows, entries: entries.map(catalogOf), hosts: [host()], ...extra });
 	}
 
 	function labels(html: string): string[] {
@@ -351,7 +336,7 @@ describe('services rows', () => {
 		assert.match(missing, new RegExp(`>${NO_CONTAINER_NOTE.replaceAll('.', '\\.')}<`));
 	});
 
-	test('no grant means no button, and discovered or foreign rows have none', () => {
+	test('no grant means no button, and discovered or foreign rows are not listed', () => {
 		assert.deepEqual(actions(renderSection([row({ runtime: running })], [image(['logs'])])), ['Logs web on pi1']);
 		const none = renderSection(
 			[
@@ -361,7 +346,12 @@ describe('services rows', () => {
 			[image()]
 		);
 		assert.deepEqual(actions(none), []);
-		assert.deepEqual(actions(renderSection([row({ runtime: running })], [])), []);
+		assert.equal(none.includes('data-copy='), false);
+		assert.equal(none.includes('nginx'), false);
+		// A copy of an entry with no grant is listed, without buttons.
+		const quiet = renderSection([row({ runtime: running })], [image([])]);
+		assert.equal(quiet.includes(`id="service-${SERVICE_ID}"`), true);
+		assert.deepEqual(actions(quiet), []);
 	});
 
 	test('the status badge of an owned row is a focusable button described by the live details', () => {
@@ -376,11 +366,12 @@ describe('services rows', () => {
 			ports: [80]
 		});
 		const html = renderSection([row({ runtime: live })], [image()]);
-		const tag = html.match(/<button\b[^>]*aria-describedby="([^"]+)"[^>]*>(?:(?!<\/button>)[\s\S])*text-status-unknown/)?.[0] ?? '';
+		const tag = html.match(/<button\b[^>]*aria-describedby="([^"]+)"[^>]*>(?:(?!<\/button>)[\s\S])*text-status-up/)?.[0] ?? '';
 		assert.notEqual(tag, '');
 		const id = tag.match(/aria-describedby="([^"]+)"/)?.[1] ?? '';
 		const seen = formatWhen('2026-10-14T12:00:00Z');
-		assert.match(html, new RegExp(`id="${id}"[^>]*>Docker running, 0 restarts, ports 80\\. Last seen ${escape(seen)}\\.<`));
+		// Running with no health source: the tooltip says there is no health check (status badge rule 3).
+		assert.match(html, new RegExp(`id="${id}"[^>]*>Docker running, 0 restarts, ports 80\\. No health check\\. Last seen ${escape(seen)}\\.<`));
 	});
 
 	/** The badge button's description text for the only row, or '' when the badge has none. */
@@ -401,28 +392,28 @@ describe('services rows', () => {
 			renderSection([row({ kind: 'systemd', catalog_entry: 'api', container_name: null, runtime: { state: 'running', restarts: null } })], [program()])
 		);
 		assert.equal(program_, `Program running. Last seen ${seen}.`);
-		// Discovered row with a Docker health source: the source, then Last seen.
-		const discovered = badgeDescription(
-			renderSection(
-				[row({ source: 'discovered', catalog_entry: null, health: { status: 'up', source: 'docker' } as ProjectServiceRow['health'] })],
-				[image()]
-			)
+		// A copy with no grant and a Docker health source: the source, then Last seen.
+		const docker = badgeDescription(
+			renderSection([row({ health: { status: 'up', source: 'docker' } as ProjectServiceRow['health'] })], [image([])])
 		);
-		assert.equal(discovered, `Docker health check. Last seen ${seen}.`);
-		// Gone row: no health source, Last seen is the useful part.
-		const gone = badgeDescription(
-			renderSection([row({ source: 'discovered', catalog_entry: null, gone_at: '2026-10-14T13:00:00Z' })], [image()])
-		);
+		// No grant, so no read: the health it reports decides (up is Running), with its source.
+		assert.equal(docker, `Docker health check. Last seen ${seen}.`);
+		// Gone copy: no health source, Last seen is the useful part.
+		const gone = badgeDescription(renderSection([row({ gone_at: '2026-10-14T13:00:00Z' })], [image([])]));
 		assert.equal(gone, `Last seen ${seen}.`);
-		// A container whose state is still being read has no live details yet.
-		assert.equal(badgeDescription(renderSection([row()], [image()])), `Last seen ${seen}.`);
+		// A container whose state is still being read shows a spinner, never "unknown".
+		const reading = renderSection([row()], [image()]);
+		assert.equal(badgeDescription(reading), '');
+		assert.match(reading, /data-state-loading/);
+		assert.equal(/text-status-unknown/.test(reading.slice(reading.indexOf('data-copy='))), false);
 	});
 
 	test('a row with no details, no source and no last-seen time shows a plain badge', () => {
-		const html = renderSection([row({ source: 'discovered', catalog_entry: null, last_seen_at: null })], [image()]);
+		// A reported program without a grant: Running, with nothing to add.
+		const html = renderSection([row({ kind: 'systemd', container_name: null, last_seen_at: null })], [image([])]);
 		assert.equal(badgeDescription(html), '');
 		assert.equal(/aria-describedby/.test(html), false);
-		assert.match(html, /text-status-unknown/);
+		assert.match(html, /text-status-up/);
 		// The badge on its own: a trigger button only when there is text to show.
 		const withText = render(RuntimeBadge, { props: { status: 'up', detail: '', lastSeen: '2026-10-14T12:00:00Z' } }).body;
 		assert.equal(withText.includes('data-tooltip-trigger'), true);
@@ -454,18 +445,19 @@ describe('services rows', () => {
 		assert.match(html, /data-row-checking[^>]*>checking…</);
 	});
 
-	test('narrow and wide layouts render exactly one control set per row', () => {
-		for (const layout of ['narrow', 'wide'] as const) {
-			const html = renderSection(
-				[row({ runtime: running }), row({ id: OTHER_SERVICE, host_id: OTHER_HOST, host_name: 'pi2', runtime: running })],
-				[image()],
-				{ layout }
-			);
-			for (const hostName of ['pi1', 'pi2']) {
-				assert.equal(actions(html).filter((label) => label === `Stop web on ${hostName}`).length, 1, `${layout} ${hostName}`);
-				assert.equal(actions(html).filter((label) => label === `Logs web on ${hostName}`).length, 1, `${layout} ${hostName}`);
-			}
+	test('each copy renders exactly one control set, in host-name order under its entry', () => {
+		const html = renderSection(
+			[row({ id: OTHER_SERVICE, host_id: OTHER_HOST, host_name: 'pi2', runtime: running }), row({ runtime: running })],
+			[image()]
+		);
+		for (const hostName of ['pi1', 'pi2']) {
+			assert.equal(actions(html).filter((label) => label === `Stop web on ${hostName}`).length, 1, hostName);
+			assert.equal(actions(html).filter((label) => label === `Logs web on ${hostName}`).length, 1, hostName);
 		}
+		const entryAt = html.indexOf('data-entry="web"');
+		assert.ok(entryAt >= 0);
+		assert.ok(entryAt < html.indexOf(`id="service-${SERVICE_ID}"`));
+		assert.ok(html.indexOf(`id="service-${SERVICE_ID}"`) < html.indexOf(`id="service-${OTHER_SERVICE}"`));
 	});
 
 	test('a Start result on a row that now runs opens on Stop and shows the result view', () => {
@@ -501,41 +493,43 @@ describe('services rows', () => {
 		assert.deepEqual(tags.map((tag) => tag.includes('aria-expanded="true"')), [false, true]);
 	});
 
-	test('a program that never ran gets a not-running item with Start only', () => {
+	test('a program that never ran gets a not-running child with Start only', () => {
 		const pair: NotRunningPair = { entry: program(), host: host(OTHER_HOST, 'pi2') };
 		const html = renderSection([], [program()], { notRunning: [pair] });
-		assert.match(html, /Catalog programs not running yet/);
-		assert.match(stripTitles(html), /api on <a[^>]*>pi2<\/a>/);
+		assert.match(html, new RegExp(`<tr[^>]*data-not-running="api ${OTHER_HOST}"`));
+		const idleAt = html.indexOf('data-not-running=');
+		const idle = stripTitles(html.slice(html.lastIndexOf('<tr', idleAt), html.indexOf('</tr>', idleAt)));
+		assert.match(idle, /<a[^>]*>pi2<\/a>/);
+		assert.match(idle, /Not started/);
+		assert.equal(idle.includes('not running yet'), false);
+		// Collapsed (the page default): the services row is in the page but hidden until its entry opens.
+		assert.match(renderSection([], [program()], { notRunning: [pair], collapsed: true }), /<tr id="services-[^"]*" hidden/);
+		// Start sits in the Actions cell, in the entry row's icon grid; the other slots stay empty.
+		assert.match(idle, /<td class="px-2 py-1.5 align-middle text-right">(?:<!--[^>]*-->)*<fieldset class="m-0 ml-auto grid w-max min-w-0 grid-cols-\[repeat\(4,1\.75rem\)\]/);
+		assert.equal([...idle.matchAll(/data-empty-slot/g)].length >= 2, true);
 		assert.deepEqual(actions(html), ['Start api on pi2']);
+		assert.ok(html.indexOf('data-entry="api"') < html.indexOf('data-not-running='));
 		const unknown = renderSection([], [program()], { notRunningKnown: false });
-		assert.match(unknown, /Programs that never ran on a host could not be listed\./);
-		assert.equal(renderSection([], [program()]).includes('Catalog programs not running yet'), false);
-		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services&services.q=api`);
-		const searching = render(ServicesSection, {
-			props: {
-				projectId: PROJECT.id,
-				projectName: 'Lab',
-				hosts: [host()],
-				canAdmin: false,
-				rows: [],
-				total: 0,
-				prevCursor: null,
-				nextCursor: null,
-				omitted: 0,
-				message: null,
-				probe: null,
-				probeServiceId: null,
-				renameServiceId: null,
-				typedName: null,
-				entries: [program()],
-				notRunning: [pair]
-			}
-		}).body;
-		assert.equal(searching.includes('Catalog programs not running yet'), false);
+		assert.match(unknown, /Hosts a program never ran on could not be listed\./);
+		// No eligible host and no copy: the program has no child line.
+		const bare = renderSection([], [program()]);
+		assert.equal(bare.includes('data-not-running'), false);
+		assert.match(bare, /Not deployed/);
+		// A search that finds the entry keeps its children.
+		const searching = renderSection([], [program()], { notRunning: [pair], url: `http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=api` });
+		assert.deepEqual(actions(searching), ['Start api on pi2']);
+	});
+
+	test('an image entry with no copy says Not deployed in its summary, unless the copies could not be read', () => {
+		const html = renderSection([], [image()]);
+		assert.match(html, /<td class="p-2 align-middle max-sm:hidden" data-summary="">[\s\S]*Not deployed/);
+		assert.equal(html.includes('data-toggle'), false);
+		assert.equal(renderSection([row({ runtime: running })], [image()]).includes('Not deployed'), false);
+		assert.equal(renderSection([], [image()], { copiesComplete: false }).includes('Not deployed'), false);
 	});
 });
 
-describe('services load for row actions', { concurrency: false }, () => {
+describe('copies load for row actions', { concurrency: false }, () => {
 	const originalFetch = globalThis.fetch;
 
 	before(() => {
@@ -629,8 +623,7 @@ describe('services load for row actions', { concurrency: false }, () => {
 			if (path === `/v1/projects/${PROJECT.id}/hosts`) return envelope({ items: [apiHost(HOST_ID, 'pi1'), apiHost(OTHER_HOST, 'pi2')], next_cursor: null });
 			if (path === `/v1/projects/${PROJECT.id}/catalog`) return envelope({ items: options.catalog, next_cursor: null });
 			if (path === `/v1/projects/${PROJECT.id}/services`) {
-				if (call.url.searchParams.get('limit') === '200') return options.index ? options.index() : envelope(page(options.items));
-				return envelope(page(options.items));
+				return options.index ? options.index() : envelope(page(options.items));
 			}
 			if (path.endsWith('/status')) {
 				return envelope({
@@ -648,7 +641,7 @@ describe('services load for row actions', { concurrency: false }, () => {
 		});
 		const data = (await projectLoad(
 			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=services`,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog`,
 				session: TOKEN,
 				user: USER,
 				projects: [PROJECT],
@@ -665,15 +658,16 @@ describe('services load for row actions', { concurrency: false }, () => {
 		assert.equal(status[0]?.url.pathname, `/v1/projects/${PROJECT.id}/catalog/web/status`);
 		assert.equal(status[0]?.method, 'POST');
 		assert.equal(status[0]?.body, JSON.stringify({ host_id: HOST_ID }));
-		// The state is streamed: the row has none yet, the promise maps its service id to it.
-		const rows = data.services as ProjectServiceRow[];
+		// The state is streamed: the copy has none yet, the promise maps its service id to it.
+		const rows = (data.copies as Record<string, ProjectServiceRow[]>).web ?? [];
+		assert.equal(rows.length, 1);
 		assert.equal(rows[0]?.runtime, undefined);
-		assert.deepEqual(await (data.serviceStates as Promise<Record<string, ServiceRuntime>>), { [SERVICE_ID]: { state: 'stopped', restarts: 3, container: { state: 'exited', exitCode: null, digest: null, ports: [] } } });
-		assert.equal((data.serviceEntries as ServiceEntryRef[])[0]?.name, 'web');
-		assert.equal(data.serviceEntriesMessage, null);
+		assert.deepEqual(await (data.serviceStates as Promise<Record<string, ServiceRuntime>>), { [SERVICE_ID]: { state: 'stopped', restarts: 3, container: { state: 'exited', exitCode: null, digest: null, ports: [], startedAt: null } } });
+		assert.equal(data.copiesMessage, null);
+		assert.equal(data.copiesComplete, true);
 	});
 
-	test('a gone container is read too; programs, offline hosts and other projects are not', async () => {
+	test('a gone container is read too; programs and offline hosts are not; other projects and discovered rows are dropped', async () => {
 		const { data, calls } = await load({
 			items: [
 				serviceItem({ id: '00000000-0000-4000-8000-0000000000b1', kind: 'systemd', catalog_entry: 'api', name: 'api', gone_at: '2026-10-14T00:00:00Z' }),
@@ -686,15 +680,12 @@ describe('services load for row actions', { concurrency: false }, () => {
 		});
 		const states = await (data.serviceStates as Promise<Record<string, ServiceRuntime>>);
 		assert.equal(calls.filter((call) => call.url.pathname.endsWith('/status')).length, 1);
-		assert.deepEqual(states, { '00000000-0000-4000-8000-0000000000b2': { state: 'running', restarts: 3, container: { state: 'running', exitCode: null, digest: null, ports: [] } } });
-		const runtimes = (data.services as ProjectServiceRow[]).map((item) => item.runtime);
-		assert.deepEqual(runtimes, [
-			{ state: 'stopped', restarts: null },
-			undefined,
-			{ state: 'unknown', restarts: null },
-			undefined,
-			undefined
-		]);
+		assert.deepEqual(states, { '00000000-0000-4000-8000-0000000000b2': { state: 'running', restarts: 3, container: { state: 'running', exitCode: null, digest: null, ports: [], startedAt: null } } });
+		const copies = data.copies as Record<string, ProjectServiceRow[]>;
+		assert.deepEqual(Object.keys(copies).sort(), ['api', 'web']);
+		assert.deepEqual(copies.api?.map((item) => item.runtime), [{ state: 'stopped', restarts: null }]);
+		assert.deepEqual(copies.web?.map((item) => item.id), ['00000000-0000-4000-8000-0000000000b2', '00000000-0000-4000-8000-0000000000b3']);
+		assert.deepEqual(copies.web?.map((item) => item.runtime), [undefined, { state: 'unknown', restarts: null }]);
 	});
 
 	test('two rows of one copy share one status read', async () => {
@@ -712,25 +703,39 @@ describe('services load for row actions', { concurrency: false }, () => {
 			items: [serviceItem({ kind: 'systemd', catalog_entry: 'api', name: 'api', gone_at: '2026-10-14T00:00:00Z' })],
 			catalog: [catalogItem('api', 'program')]
 		});
-		const index = calls.find((call) => call.url.pathname.endsWith('/services') && call.url.searchParams.get('limit') === '200');
-		assert.equal(index?.url.searchParams.get('view'), 'deploybot');
+		const reads = calls.filter((call) => call.url.pathname.endsWith('/services'));
+		assert.equal(reads.length, 1);
+		assert.equal(reads[0]?.url.searchParams.get('view'), 'deploybot');
+		assert.equal(reads[0]?.url.searchParams.get('include'), 'health_checks');
+		assert.equal(reads[0]?.url.searchParams.get('limit'), '200');
 		const pairs = data.notRunning as NotRunningPair[];
 		assert.deepEqual(pairs.map((pair) => `${pair.entry.name}@${pair.host.name}`), ['api@pi2']);
 		assert.equal(data.notRunningKnown, true);
 
+		// Five full pages and still more: the copies read stops, says so, and the not-running list is unknown.
 		const partial = await load({
 			items: [],
-			catalog: [catalogItem('api', 'program')],
+			catalog: [catalogItem('api', 'program'), catalogItem('web', 'image')],
 			index: () => envelope(page([serviceItem()], 'more'))
 		});
+		const pages = partial.calls.filter((call) => call.url.pathname.endsWith('/services'));
+		assert.equal(pages.length, 5);
+		assert.equal(pages[0]?.url.searchParams.has('cursor'), false);
+		assert.equal(pages[1]?.url.searchParams.get('cursor'), 'more');
 		assert.equal(partial.data.notRunningKnown, false);
 		assert.deepEqual(partial.data.notRunning, []);
+		assert.equal(partial.data.copiesMessage, COPIES_CAPPED_NOTE);
+		// Every page repeated the same row: it is listed once.
+		assert.equal(((partial.data.copies as Record<string, ProjectServiceRow[]>).web ?? []).length, 1);
+		assert.equal(partial.data.copiesComplete, false);
 
+		// Images only: the one services read still runs, since it lists the copies.
 		const imagesOnly = await load({ items: [], catalog: [catalogItem('web', 'image')] });
-		assert.equal(imagesOnly.calls.some((call) => call.url.pathname.endsWith('/services') && call.url.searchParams.get('limit') === '200'), false);
+		assert.equal(imagesOnly.calls.filter((call) => call.url.pathname.endsWith('/services')).length, 1);
+		assert.equal(imagesOnly.data.notRunningKnown, true);
 	});
 
-	test('a failed catalog read leaves rows without actions and says so', async () => {
+	test('a failed catalog read lists no copies and reads no states', async () => {
 		const calls = installFetch((call: FetchCall) => {
 			const path = call.url.pathname;
 			if (path === `/v1/projects/${PROJECT.id}`) return envelope(PROJECT);
@@ -740,7 +745,7 @@ describe('services load for row actions', { concurrency: false }, () => {
 		});
 		const data = (await projectLoad(
 			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=services`,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog`,
 				session: TOKEN,
 				user: USER,
 				projects: [PROJECT],
@@ -749,8 +754,8 @@ describe('services load for row actions', { concurrency: false }, () => {
 		)) as Record<string, unknown>;
 		assert.deepEqual(await (data.serviceStates as Promise<unknown>), {});
 		assert.equal(calls.some((call) => call.url.pathname.endsWith('/status')), false);
-		assert.equal((data.services as ProjectServiceRow[])[0]?.runtime, undefined);
-		assert.match(String(data.serviceEntriesMessage), /could not be read/);
-		assert.equal(data.servicesMessage, null);
+		assert.deepEqual(data.copies, {});
+		assert.notEqual(data.catalogMessage, null);
+		assert.equal(data.copiesMessage, null);
 	});
 });

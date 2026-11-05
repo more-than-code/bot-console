@@ -155,11 +155,11 @@ describe('Catalog drawers', () => {
 		assert.match(classOf(log), /\bfocus-visible:ring-3\b/);
 		const formTag = /<form[^>]*action="\?\/catalogDeploy"[^>]*>/.exec(html)?.[0] ?? '';
 		// The View logs link sits on the outcome line, before the log, so the footer never covers it.
-		const linkAt = html.indexOf('View logs in Services');
+		const linkAt = html.indexOf('>View logs</a>');
 		const statusAt = html.indexOf('role="status"');
 		assert.ok(statusAt !== -1 && statusAt < linkAt && linkAt < html.indexOf('aria-label="Deploy log"'), 'link after the outcome, before the log');
 		const statusBox = html.slice(statusAt, html.indexOf('</div>', statusAt));
-		assert.equal(statusBox.includes('View logs in Services'), false, 'the link is not inside the live region');
+		assert.equal(statusBox.includes('View logs'), false, 'the link is not inside the live region');
 		const bodyAt = html.indexOf('data-slot="deploy-body"');
 		const historyAt = html.indexOf('>History<');
 		const footerAt = html.indexOf('data-slot="sheet-footer"');
@@ -179,7 +179,7 @@ describe('Catalog drawers', () => {
 		assert.notEqual(formId, '');
 		const submit = /<button[^>]*type="submit"[^>]*>/.exec(html.slice(footerAt))?.[0] ?? '';
 		assert.match(submit, new RegExp(`form="${formId}"`));
-		assert.equal(html.includes('View logs in Services'), true);
+		assert.equal(html.includes('>View logs</a>'), true);
 	});
 
 	test('without a log there is no log box and the footer is still there', () => {

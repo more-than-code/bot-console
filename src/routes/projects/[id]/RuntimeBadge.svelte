@@ -1,4 +1,5 @@
 <script lang="ts">
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as Tooltip from '$lib/components/ui/tooltip';
@@ -9,7 +10,9 @@
 		status,
 		detail,
 		hint = null,
-		lastSeen = null
+		lastSeen = null,
+		text: shown = null,
+		loading = false
 	}: {
 		status: string;
 		/** Live details for this copy (see `runtimeDetail`), or empty when there are none. */
@@ -18,6 +21,10 @@
 		hint?: string | null;
 		/** The row's `last_seen_at`, shown in the viewer's time zone like `LocalTime`. */
 		lastSeen?: string | null;
+		/** The word on the badge (Running, Unhealthy, …); the colour follows `status`. */
+		text?: string | null;
+		/** The state is still being read: a small spinner instead of a badge, never "unknown". */
+		loading?: boolean;
 	} = $props();
 
 	const zones = timeZoneSource();
@@ -27,8 +34,13 @@
 	let open = $state(false);
 </script>
 
-{#if text === ''}
-	<StatusBadge {status} />
+{#if loading}
+	<span class="text-muted-foreground inline-flex items-center" data-state-loading>
+		<LoaderCircle class="size-4 motion-safe:animate-spin" aria-hidden="true" />
+		<span class="sr-only">Reading the state…</span>
+	</span>
+{:else if text === ''}
+	<StatusBadge {status} text={shown} />
 {:else}
 	<!-- A button: hover and keyboard focus open the details, a click or tap toggles them, and screen readers get them as its description. Outside click and Escape close them. -->
 	<Tooltip.Provider>
@@ -43,7 +55,7 @@
 						aria-describedby={detailId}
 						onclick={() => (open = !open)}
 					>
-						<StatusBadge {status} />
+						<StatusBadge {status} text={shown} />
 					</Button>
 				{/snippet}
 			</Tooltip.Trigger>

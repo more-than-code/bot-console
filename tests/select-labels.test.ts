@@ -4,9 +4,9 @@ import { render } from 'svelte/server';
 import type { Member } from '../src/lib/api-types.ts';
 import MembersSection from '../src/routes/projects/[id]/MembersSection.svelte';
 import AddMemberForm from '../src/routes/projects/[id]/AddMemberForm.svelte';
-import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import { PROJECT, USER } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
+import { renderCopies } from './copies.ts';
 
 function decode(value: string): string {
 	return value.replaceAll('&amp;', '&').replaceAll('&quot;', '"').replaceAll('&#39;', "'");
@@ -48,28 +48,8 @@ function accessibleName(html: string, id: string): string {
 const BEA = '00000000-0000-4000-8000-000000000002';
 
 test('the host filter select is named Host', () => {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
-	const html = decode(
-		render(ServicesSection, {
-			props: {
-				projectId: PROJECT.id,
-				projectName: 'Lab',
-				hosts: [],
-				canAdmin: false,
-				rows: [],
-				total: 0,
-				prevCursor: null,
-				nextCursor: null,
-				omitted: 0,
-				message: null,
-				probe: null,
-				probeServiceId: null,
-				renameServiceId: null,
-				typedName: null
-			}
-		}).body
-	);
-	assert.equal(accessibleName(html, 'services-host'), 'Host');
+	const html = decode(renderCopies({ rows: [], entries: [], hosts: [] }));
+	assert.equal(accessibleName(html, 'catalog-host'), 'Host');
 });
 
 test('member selects expose their visible labels', () => {

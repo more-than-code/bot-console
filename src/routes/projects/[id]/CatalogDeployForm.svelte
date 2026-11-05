@@ -70,7 +70,7 @@
 		flightDigest?: string | null;
 		onBusy?: (busy: boolean) => void;
 		cancel?: Snippet;
-		/** A finished deploy or rollback on a host links to this project's Services row and its logs. */
+		/** A finished deploy or rollback on a host links to that copy on this tab, with its logs open. */
 		projectId?: string | null;
 		/** The link was clicked: the drawer closes while the page navigates. */
 		onViewLogs?: () => void;
@@ -400,13 +400,13 @@
 						<span class="text-sm">{result.outcome.exit_code == null ? 'exit none' : `exit ${result.outcome.exit_code}`}</span>
 					</div>
 				{#if logsHref && !busy}
-					<!-- On the outcome line, above the log, so it is always in view. A plain click closes the drawer; a new-tab click keeps it and its result. Hidden in flight, like Cancel. No hover preload, like the Services tab: its load reads container status from the hosts. -->
+					<!-- On the outcome line, above the log, so it is always in view. A plain click closes the drawer; a new-tab click keeps it and its result. Hidden in flight, like Cancel. No hover preload: the tab's load reads container status from the hosts. -->
 					<a
 						class="text-primary w-fit rounded-sm text-sm underline underline-offset-4 outline-none focus-visible:ring-3 focus-visible:ring-ring"
 						href={logsHref}
 						data-sveltekit-preload-data="off"
 						data-logs-link
-						onclick={onPlainClick(onViewLogs)}>View logs in Services</a
+						onclick={onPlainClick(onViewLogs)}>View logs</a
 					>
 				{/if}
 				</div>

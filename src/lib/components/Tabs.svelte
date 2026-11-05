@@ -1,5 +1,4 @@
 <script lang="ts">
-	import Boxes from '@lucide/svelte/icons/boxes';
 	import Cpu from '@lucide/svelte/icons/cpu';
 	import FolderKanban from '@lucide/svelte/icons/folder-kanban';
 	import KeyRound from '@lucide/svelte/icons/key-round';
@@ -22,8 +21,7 @@
 
 	const icons: Record<string, Component> = {
 		Hosts: Server,
-		Services: Boxes,
-		Catalog: Library,
+		'Catalog & services': Library,
 		Processes: Cpu,
 		Members: Users,
 		'Join tokens': KeyRound,

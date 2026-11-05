@@ -31,7 +31,7 @@ import { setPageUrl } from './stubs/app-state.ts';
 const HOST_ID = '00000000-0000-4000-8000-000000000020';
 const SERVICE_ID = '00000000-0000-4000-8000-000000000030';
 const ORIGIN = 'http://console.example';
-const ACTION = `?tab=services&/catalogLogs`;
+const ACTION = `?tab=catalog&/catalogLogs`;
 
 function source(name: string): string {
 	return readFileSync(new URL(`../src/routes/projects/[id]/${name}`, import.meta.url), 'utf8');
@@ -356,7 +356,7 @@ function runState(overrides: Partial<CatalogRunState>): CatalogRunState {
 }
 
 function linesResult(lines: string[]): ActionResult {
-	return { type: 'success', status: 200, data: { scope: 'services', catalogAction: runState({ logs: { container: 'c', lines, truncated: false } }) } };
+	return { type: 'success', status: 200, data: { scope: 'catalog', catalogAction: runState({ logs: { container: 'c', lines, truncated: false } }) } };
 }
 
 function loader(honourAbort = true) {
@@ -603,7 +603,7 @@ describe('Logs drawer', () => {
 	};
 
 	test('Logs on a row opens the drawer with no confirm step; Run, Stop and Restart keep their dialogs', () => {
-		setPageUrl(`${ORIGIN}/projects/${PROJECT.id}?tab=services`);
+		setPageUrl(`${ORIGIN}/projects/${PROJECT.id}?tab=catalog`);
 		const html = render(ServiceRowActions, { props: { controls, hostId: HOST_ID, hostName: 'pi1', serviceId: SERVICE_ID } }).body;
 		assert.match(html, /data-logs-slot/);
 		assert.equal(html.includes('data-run-slot="logs"'), false);
@@ -661,7 +661,7 @@ describe('Logs drawer', () => {
 		const calls = installFetch(() => envelope({ container: 'deploybot-lab-web', lines: ['\u001B[32mok\u001B[0m\tdone'], truncated: false }));
 		const result = await projectActions.catalogLogs(
 			fakeEvent({
-				url: `${ORIGIN}/projects/${PROJECT.id}?tab=services&/catalogLogs`,
+				url: `${ORIGIN}/projects/${PROJECT.id}?tab=catalog&/catalogLogs`,
 				session: TOKEN,
 				user: USER,
 				projects: [PROJECT],
@@ -677,7 +677,7 @@ describe('Logs drawer', () => {
 
 	function logsEvent(form: Record<string, string>) {
 		return fakeEvent({
-			url: `${ORIGIN}/projects/${PROJECT.id}?tab=services&/catalogLogs`,
+			url: `${ORIGIN}/projects/${PROJECT.id}?tab=catalog&/catalogLogs`,
 			session: TOKEN,
 			user: USER,
 			projects: [PROJECT],

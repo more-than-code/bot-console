@@ -64,3 +64,8 @@ export function logsInfoLine(state: { live: boolean; updated: string | null }): 
 	const updated = state.updated ? `Updated ${state.updated}.` : '';
 	return state.live ? `${LIVE_NOTE}. ${updated}`.trim() : updated;
 }
+
+/** The Logs drawer's open state when its `initialOpen` request is read: a request opens it, nothing closes it. */
+export function openOnRequest(open: boolean, requested: boolean): boolean {
+	return requested || open;
+}

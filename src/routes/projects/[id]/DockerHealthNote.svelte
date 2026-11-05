@@ -28,8 +28,12 @@
 	{/if}
 	{#if catalogEntry}
 		<p>
-			<a class="text-primary underline underline-offset-4" href={catalogEntryHref(catalogEntry)} onclick={() => onNavigate?.()}
-				>Edit the Docker health check in the catalog</a
+			<a
+				class="text-primary underline underline-offset-4"
+				href={catalogEntryHref(catalogEntry)}
+				data-sveltekit-preload-data="off"
+				onclick={() => onNavigate?.()}
+				>Edit the Docker health check</a
 			>
 			<span class="text-muted-foreground">Changes apply on the next deploy.</span>
 		</p>

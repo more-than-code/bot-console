@@ -144,7 +144,7 @@ describe('host page', { concurrency: false }, () => {
 			(err: unknown) =>
 				isRedirect(err) &&
 				err.status === 303 &&
-				err.location === `/projects/${PROJECT.id}?tab=services&services.host=${HOST_ID}`
+				err.location === `/projects/${PROJECT.id}?tab=catalog&catalog.host=${HOST_ID}`
 		);
 		assert.equal(serviceCalls.some((call) => call.url.pathname.endsWith('/metrics')), false);
 		assert.equal(serviceCalls.some((call) => call.url.pathname.endsWith('/processes')), false);
@@ -180,8 +180,9 @@ describe('host page', { concurrency: false }, () => {
 						items: [
 							{
 								id: SERVICE_ID,
-								name: 'api',
-								source: 'discovered',
+								name: 'deploybot-lab-api.service',
+								source: 'owned',
+								catalog_entry: 'api',
 								kind: 'process',
 								ports: [8080],
 								health: null,
@@ -205,7 +206,7 @@ describe('host page', { concurrency: false }, () => {
 		assert.equal(processes.calls.some((call) => call.url.pathname.endsWith('/services')), true);
 		assert.equal(
 			processes.data.serviceLinks[SERVICE_ID]?.href,
-			`/projects/${PROJECT.id}?tab=services&services.host=${HOST_ID}&services.q=api`
+			`/projects/${PROJECT.id}?tab=catalog&catalog.host=${HOST_ID}&catalog.q=api`
 		);
 
 		const fallback = await loadHost(`http://console.example/hosts/${HOST_ID}?tab=processes&sort=nope`, (call) => {
@@ -276,13 +277,13 @@ describe('host page', { concurrency: false }, () => {
 	test('breadcrumbs and the service anchor are wired to the project name and service id', () => {
 		const hostPage = readFileSync(new URL('../src/routes/hosts/[id]/+page.svelte', import.meta.url), 'utf8');
 		const projectPage = readFileSync(new URL('../src/routes/projects/[id]/+page.svelte', import.meta.url), 'utf8');
-		const services = readFileSync(new URL('../src/routes/projects/[id]/ServicesSection.svelte', import.meta.url), 'utf8');
+		const services = readFileSync(new URL('../src/routes/projects/[id]/CatalogCopyRow.svelte', import.meta.url), 'utf8');
 		const processes = readFileSync(new URL('../src/routes/hosts/[id]/ProcessesTab.svelte', import.meta.url), 'utf8');
 		assert.match(hostPage, /PageHeader|Breadcrumbs|aria-label="Breadcrumb"/);
 		assert.match(hostPage, /data\.projectName/);
 		assert.match(projectPage, /PageHeader|Breadcrumbs/);
 		assert.match(projectPage, /data\.project\.name/);
-		assert.match(services, /serviceDomId\(service\.id\)/);
+		assert.match(services, /serviceDomId\(copy\.id\)/);
 		assert.match(processes, /serviceLinks\[row\.service_id\]\?\.href/);
 		assert.match(processes, /row\.process_name/);
 		assert.doesNotMatch(processes, /serviceTabHref/);
@@ -295,30 +296,32 @@ describe('host page', { concurrency: false }, () => {
 		}
 	});
 
-	test('a probe result stays on the project services tab and a snapshot keeps range=7d', async () => {
-		const servicesTab = readFileSync(new URL('../src/routes/projects/[id]/ServicesSection.svelte', import.meta.url), 'utf8');
+	test('a probe result stays on the Catalog & services tab and a snapshot keeps range=7d', async () => {
+		const servicesTab = readFileSync(new URL('../src/routes/projects/[id]/CatalogSection.svelte', import.meta.url), 'utf8');
+		const copyRow = readFileSync(new URL('../src/routes/projects/[id]/CatalogCopyRow.svelte', import.meta.url), 'utf8');
 		const projectPage = readFileSync(new URL('../src/routes/projects/[id]/+page.svelte', import.meta.url), 'utf8');
 		const overviewTab = readFileSync(new URL('../src/routes/hosts/[id]/OverviewTab.svelte', import.meta.url), 'utf8');
 		const hostPage = readFileSync(new URL('../src/routes/hosts/[id]/+page.svelte', import.meta.url), 'utf8');
 		const hostsSection = readFileSync(new URL('../src/routes/projects/[id]/HostsSection.svelte', import.meta.url), 'utf8');
-		assert.match(servicesTab, /actionUrlFrom\(page\.url, 'probe'\)/);
+		assert.match(copyRow, /actionUrlFrom\(page\.url, 'probe'\)/);
 		assert.match(servicesTab, /\{#if probe\}/);
 		assert.match(overviewTab, /actionUrlFrom\(page\.url, 'snapshot'\)/);
 		assert.match(overviewTab, /\{#if snapshot\}/);
 		assert.match(hostsSection, /ConfirmAction/);
 		assert.match(hostsSection, /actionUrlFrom\(page\.url, 'revokeCredential'\)/);
-		assert.match(projectPage, /scope === 'services'/);
+		assert.match(projectPage, /scope === 'catalog'/);
+		assert.doesNotMatch(projectPage, /'services'/);
 		assert.match(hostPage, /data\.tab === 'overview'[\s\S]*snapshot=\{form\?\.snapshot/);
 		assert.doesNotMatch(hostPage, /ServicesTab/);
 
 		const probeAction = actionUrlFrom(
-			new URL(`http://console.example/projects/${PROJECT.id}?tab=services&services.q=api&services.cursor=abc`),
+			new URL(`http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=api&catalog.page=2`),
 			'probe'
 		);
-		assert.equal(probeAction, '?tab=services&services.q=api&services.cursor=abc&/probe');
+		assert.equal(probeAction, '?tab=catalog&catalog.q=api&catalog.page=2&/probe');
 		const probeUrl = new URL(`http://console.example/projects/${PROJECT.id}${probeAction}`);
-		assert.equal(probeUrl.searchParams.get('tab'), 'services');
-		assert.equal(probeUrl.searchParams.get('services.q'), 'api');
+		assert.equal(probeUrl.searchParams.get('tab'), 'catalog');
+		assert.equal(probeUrl.searchParams.get('catalog.q'), 'api');
 		assert.equal(probeUrl.searchParams.has('/probe'), true);
 		installFetch((call) => {
 			if (call.url.pathname.endsWith('/probe')) {
@@ -339,7 +342,7 @@ describe('host page', { concurrency: false }, () => {
 		assert.equal(isActionFailure(probe), false);
 		if (!probe || isActionFailure(probe)) assert.fail('expected a probe result');
 		assert.equal(probe.probe?.result, 'success');
-		assert.equal(probe.scope, 'services');
+		assert.equal(probe.scope, 'catalog');
 		const moved = installFetch((call) => {
 			if (call.url.pathname === `/v1/hosts/${HOST_ID}`) return envelope(HOST);
 			return envelope(null, 500, 'error', 'unexpected');

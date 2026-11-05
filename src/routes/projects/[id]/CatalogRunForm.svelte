@@ -23,9 +23,9 @@
 	}: {
 		kind: CatalogRunKind;
 		entryName: string;
-		/** The Services row's host. There is no host choice. */
+		/** The copy row's host. There is no host choice. */
 		hostId: string;
-		/** The Services row, so only that row shows the result. Null for a not-running item. */
+		/** The copy row's service, so only that copy shows the result. Null for a not-running item. */
 		serviceId?: string | null;
 		action: string;
 		entryKind?: 'program' | 'image';

@@ -238,7 +238,7 @@ function readGrants(form: FormData, members: Member[]): { grants: CatalogGrant[]
 	return { grants, message };
 }
 
-/** Where a result goes: the entry, its host, and the Services row (null for a not-running item). */
+/** Where a result goes: the entry, its host, and the copy's service row (null for a not-running item). */
 type RunTarget = { name: string; hostId: string; serviceId: string | null };
 
 function runResult(
@@ -251,9 +251,9 @@ function runResult(
 	return { ...target, kind, resultId: randomUUID(), status, logs, message };
 }
 
-/** Run, stop, restart and logs are posted from a Services row, so the result goes back there. */
+/** Run, stop, restart and logs are posted from a copy row, so the result goes back there. */
 function runFailure(event: RequestEvent, status: number, target: RunTarget, kind: CatalogRunKind, message: string) {
-	return fail(status, present(event, { scope: 'services' as const, catalogAction: runResult(target, kind, null, null, message) }));
+	return fail(status, present(event, { scope: 'catalog' as const, catalogAction: runResult(target, kind, null, null, message) }));
 }
 
 async function saveEntry(event: RequestEvent, mode: 'create' | 'edit') {
@@ -316,11 +316,11 @@ async function catalogAct(event: RequestEvent, kind: CatalogRunKind) {
 		if (kind === 'logs') {
 			const logs = image ? parseImageLogs(payload) : parseProgramLogs(payload);
 			if (!logs) return runFailure(event, 502, target, kind, UNEXPECTED);
-			return present(event, { scope: 'services' as const, catalogAction: runResult(target, kind, null, logs, null) });
+			return present(event, { scope: 'catalog' as const, catalogAction: runResult(target, kind, null, logs, null) });
 		}
 		const status = image ? parseImageStatus(payload) : parseProgramStatus(payload);
 		if (!status) return runFailure(event, 502, target, kind, UNEXPECTED);
-		return present(event, { scope: 'services' as const, catalogAction: runResult(target, kind, status, null, null) });
+		return present(event, { scope: 'catalog' as const, catalogAction: runResult(target, kind, status, null, null) });
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
 		return runFailure(event, apiStatus(err), target, kind, apiMessage(err));

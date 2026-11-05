@@ -4,7 +4,7 @@ import { after, before, describe, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
 import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
-import type { CatalogGrant, Host, Member, ProgramEntry, ProjectServiceRow } from '../src/lib/api-types.ts';
+import type { CatalogGrant, Host, Member, ProgramEntry } from '../src/lib/api-types.ts';
 import {
 	APPROVAL_WAIT,
 	hoistPreviewEnv,
@@ -26,7 +26,6 @@ import CatalogRunForm from '../src/routes/projects/[id]/CatalogRunForm.svelte';
 import CatalogRunResult from '../src/routes/projects/[id]/CatalogRunResult.svelte';
 import CatalogSection from '../src/routes/projects/[id]/CatalogSection.svelte';
 import ProjectPage from '../src/routes/projects/[id]/+page.svelte';
-import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import { actions as projectActions, load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
 import {
 	parseApproval,
@@ -39,8 +38,10 @@ import {
 } from '../src/lib/server/shape.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
 import { assertDrawerForm, assertDrawerSource } from './drawer-assert.ts';
-import { permissionsCloseHrefFor, permissionsCloseTarget, permissionsOpenFields, permissionsRequested } from '../src/lib/url.ts';
+import { permissionsCloseHrefFor, permissionsCloseTarget, permissionsOpenFields, permissionsOpenHref, permissionsRequested } from '../src/lib/url.ts';
+import { entryMenuItems } from '../src/lib/row-menu.ts';
 import { setPageUrl } from './stubs/app-state.ts';
+import { COPY_ID, copyRow, renderCopies } from './copies.ts';
 
 
 const closeSnippet = createRawSnippet(() => ({ render: () => '<button type="button">Close</button>' }));
@@ -179,8 +180,16 @@ describe('catalog', { concurrency: false }, () => {
 		const ownerLabels = labels(owner);
 		assert.equal(ownerLabels.includes('Run web'), false);
 		assert.equal(ownerLabels.includes('Edit web'), true);
-		assert.equal(ownerLabels.includes('Permissions web'), true);
-		assert.equal(ownerLabels.includes('Delete web'), true);
+		// Permissions and Delete live in the ⋯ menu, owner only (its items render when it opens).
+		assert.equal(ownerLabels.includes('More actions for web'), true);
+		assert.deepEqual(
+			entryMenuItems({ name: 'web', deploy: false, edit: true, owner: true }).map((item) => item.label),
+			['Edit web', 'Permissions web', 'Delete web']
+		);
+		assert.deepEqual(
+			entryMenuItems({ name: 'web', deploy: false, edit: true, owner: false }).map((item) => item.label),
+			['Edit web']
+		);
 		assert.equal(ownerLabels.includes('Stop web'), false);
 		assert.equal(ownerLabels.includes('Logs web'), false);
 	});
@@ -205,7 +214,7 @@ describe('catalog', { concurrency: false }, () => {
 		assert.equal(calls[0]?.body, JSON.stringify({ host_id: HOST_ID, idempotency_key: KEY }));
 		// The result goes back to the Services row on that host.
 		const ranData = ran as { scope: string; catalogAction: CatalogRunState };
-		assert.equal(ranData.scope, 'services');
+		assert.equal(ranData.scope, 'catalog');
 		assert.equal(ranData.catalogAction.hostId, HOST_ID);
 		assert.equal(ranData.catalogAction.name, 'web');
 
@@ -456,22 +465,18 @@ describe('catalog', { concurrency: false }, () => {
 		assert.equal(skipped.length, 0);
 	});
 
-	test('a service that came from the catalog shows a catalog badge', () => {
-		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
-		const marked = decode(render(ServicesSection, { props: serviceProps('web') }).body);
-		assert.equal(marked.includes('>catalog<'), true);
-		const plain = decode(render(ServicesSection, { props: serviceProps(null) }).body);
-		assert.equal(plain.includes('>catalog<'), false);
+	test('a copy sits under its entry with no catalog badge, since every copy comes from the catalog', () => {
+		const body = decode(renderCopies({ rows: [copyRow()], entries: [entry(['logs'])] }));
+		assert.equal(body.includes(`id="service-${COPY_ID}"`), true);
+		assert.equal(body.includes('>catalog<'), false);
 	});
 
-	test('the services filters apply when a select changes, with no Apply button', () => {
-		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
-		const body = decode(render(ServicesSection, { props: serviceProps(null) }).body);
+	test('the host filter applies when the select changes, with no Apply button', () => {
+		const body = decode(renderCopies({ rows: [copyRow()], entries: [entry(['logs'])] }));
 		assert.equal(body.includes('>Apply<'), false);
 		// The change handler runs only in the browser, so check its wiring in the source.
-		const section = readFileSync(new URL('../src/routes/projects/[id]/ServicesSection.svelte', import.meta.url), 'utf8');
-		assert.match(section, /bind:value=\{hostValue\} onValueChange=\{applyFilters\}/);
-		assert.match(section, /bind:value=\{showValue\} onValueChange=\{applyFilters\}/);
+		const section = readFileSync(new URL('../src/routes/projects/[id]/CatalogSection.svelte', import.meta.url), 'utf8');
+		assert.match(section, /bind:value=\{hostValue\} onValueChange=\{applyHost\}/);
 		assert.match(section, /await tick\(\);\s*filterForm\?\.requestSubmit\(\);/);
 	});
 
@@ -486,7 +491,7 @@ describe('catalog', { concurrency: false }, () => {
 		assert.equal(admin.includes('Edit web'), true);
 		assert.equal(admin.includes('Delete web'), false);
 		assert.equal(admin.includes('Permissions web'), false);
-		assert.equal(admin.includes('>Catalog<'), true);
+		assert.equal(admin.includes('>Catalog &amp; services<'), true);
 	});
 
 	test('catalog payloads fail closed', () => {
@@ -733,28 +738,16 @@ describe('catalog', { concurrency: false }, () => {
 				props: { canOwner: true, entries: [entry(['run'])], omitted: 0, truncated: false, message: null, hosts: [host()], members: [member()] }
 			}).body
 		);
-		const opener = /<form method="GET"[^>]*>([\s\S]*?)<\/form>/.exec(section);
-		assert.ok(opener);
-		assert.match(opener[0], /data-sveltekit-keepfocus/);
-		assert.match(opener[0], /data-sveltekit-noscroll/);
-		const fields = [...opener[1].matchAll(/<input[^>]*type="hidden"[^>]*>/g)].map((match) => [
-			/name="([^"]*)"/.exec(match[0])?.[1],
-			/value="([^"]*)"/.exec(match[0])?.[1]
-		]);
-		assert.deepEqual(fields, [
-			['tab', 'catalog'],
-			['catalog.q', 'we'],
-			['catalog.sort', 'name'],
-			['permissions', 'web']
-		]);
-		assert.match(opener[1], new RegExp(`<button[^>]*id="catalog-permissions-${ENTRY_ID}"[^>]*aria-label="Permissions web"`));
-		const opened = new URL(`http://console.example/projects/${PROJECT.id}`);
-		for (const [name, value] of fields) opened.searchParams.append(name ?? '', value ?? '');
+		// The ⋯ menu's Permissions item navigates (keeping focus and scroll) to this URL; focus returns to the ⋯ button.
+		assert.match(section, new RegExp(`<button[^>]*id="catalog-menu-${ENTRY_ID}"[^>]*aria-label="More actions for web"`));
+		const href = permissionsOpenHref(new URL(tableUrl), 'web');
+		assert.equal(href, `/projects/${PROJECT.id}?tab=catalog&catalog.q=we&catalog.sort=name&permissions=web`);
+		const opened = new URL(href, 'http://console.example');
 		assert.equal(permissionsRequested(opened), true);
 		assert.equal(permissionsCloseHrefFor(opened), `/projects/${PROJECT.id}?tab=catalog&catalog.q=we&catalog.sort=name`);
 
-		// From another tab or another row's drawer, the opener moves to Catalog and names this row.
-		assert.deepEqual(permissionsOpenFields(new URL(`http://console.example/projects/${PROJECT.id}?tab=services&permissions=old`), 'web'), [
+		// From another tab or another row's drawer, the opener moves to Catalog & services and names this row.
+		assert.deepEqual(permissionsOpenFields(new URL(`http://console.example/projects/${PROJECT.id}?tab=members&permissions=old`), 'web'), [
 			{ name: 'tab', value: 'catalog' },
 			{ name: 'permissions', value: 'web' }
 		]);
@@ -1027,56 +1020,14 @@ function projectData(canOwner: boolean) {
 		catalogTruncated: false,
 		catalogMessage: null,
 		permissions: null,
-		services: [],
-		servicesTotal: 0,
-		servicesPrev: null,
-		servicesNext: null,
-		servicesOmitted: 0,
-		servicesMessage: null
+		copies: {},
+		copiesComplete: true,
+		copiesOmitted: 0,
+		copiesMessage: null,
+		notRunning: [],
+		notRunningKnown: true
 	};
 }
-
-function serviceProps(catalogEntry: string | null) {
-	const row: ProjectServiceRow = {
-		id: SERVICE_ID,
-		name: 'web',
-		source: 'owned',
-		kind: 'process',
-		ports: [3031],
-		health: null,
-		last_seen_at: null,
-		gone_at: null,
-		display_name: null,
-		owner_user: 'joe',
-		project_id: PROJECT.id,
-		host_id: HOST_ID,
-		host_name: 'pi1',
-		host_status: 'online',
-		project_name: 'Lab',
-		catalog_entry: catalogEntry,
-		checks: [],
-		checksMessage: null,
-		container_name: null,
-		image_digest: null
-	};
-	return {
-		projectId: PROJECT.id,
-		projectName: 'Lab',
-		hosts: [host()],
-		canAdmin: false,
-		rows: [row],
-		total: 1,
-		prevCursor: null,
-		nextCursor: null,
-		omitted: 0,
-		message: null,
-		probe: null,
-		probeServiceId: null,
-		renameServiceId: null,
-		typedName: null
-	};
-}
-
 
 function selectValueText(html: string): string[] {
 	return [...html.matchAll(/data-slot="select-value"[^>]*>([\s\S]*?)<\/span>/g)].map((match) =>
@@ -1085,7 +1036,7 @@ function selectValueText(html: string): string[] {
 }
 
 test('the run dialog names the row host, not its id, and posts that host', () => {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 	const props = { kind: 'stop' as const, entryName: 'web', hostId: HOST_ID, action: '?/catalogStop' };
 	const html = render(CatalogRunForm, { props }).body;
 	assert.equal(html.includes('role="radio"'), false);

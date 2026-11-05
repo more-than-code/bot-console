@@ -64,7 +64,7 @@ export function lastDeployedValue(entry: { last_deployed_at?: string | null }): 
 }
 
 /**
- * DataTable defaults for the Catalog tab (spec-catalog-last-deployed §3.2).
+ * DataTable defaults for the Catalog & services tab (spec-catalog-last-deployed §3.2).
  * When any entry carries `last_deployed_at`: Last deployed, newest first. Never-deployed entries
  * sort last and keep the API's name order (the sort is stable). An older API without the field
  * gets no default sort, as before this column: rows stay in the API's name order (Name A–Z).

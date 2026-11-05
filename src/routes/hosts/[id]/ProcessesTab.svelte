@@ -32,7 +32,8 @@
 	{@const text = processServiceText(row, serviceLinks)}
 	{@const href = row.service_id ? (serviceLinks[row.service_id]?.href ?? null) : null}
 	{#if href}
-		<a class="text-primary underline-offset-4 hover:underline" href={href}>{text}</a>
+		<!-- No hover preload: the Catalog & services load reads container status from the hosts. -->
+		<a class="text-primary underline-offset-4 hover:underline" href={href} data-sveltekit-preload-data="off">{text}</a>
 	{:else}
 		{text}
 	{/if}

@@ -43,17 +43,18 @@ test('rename is offered to an admin of this project when the host owner is unkno
 	);
 });
 
-test('a process service link caps services.q at 100 code points', () => {
+test('a process service link goes to the entry on Catalog & services and caps catalog.q at 100 code points', () => {
 	const host = '00000000-0000-4000-8000-0000000000aa';
+	assert.equal(processServiceHref(PROJECT, host, 'web'), `/projects/${PROJECT}?tab=catalog&catalog.host=${host}&catalog.q=web`);
 	const exact = 'a'.repeat(100);
 	const exactHref = new URL(processServiceHref(PROJECT, host, exact), 'http://console.example');
-	assert.equal(exactHref.searchParams.get('services.q'), exact);
+	assert.equal(exactHref.searchParams.get('catalog.q'), exact);
 	const over = new URL(processServiceHref(PROJECT, host, 'a'.repeat(101)), 'http://console.example');
-	assert.equal(over.searchParams.get('services.q'), exact);
+	assert.equal(over.searchParams.get('catalog.q'), exact);
 	const emoji = '😀'.repeat(100);
 	const emojiHref = new URL(processServiceHref(PROJECT, host, `${emoji}z`), 'http://console.example');
-	assert.equal(emojiHref.searchParams.get('services.q'), emoji);
-	assert.equal([...(emojiHref.searchParams.get('services.q') ?? '')].length, 100);
+	assert.equal(emojiHref.searchParams.get('catalog.q'), emoji);
+	assert.equal([...(emojiHref.searchParams.get('catalog.q') ?? '')].length, 100);
 });
 
 test('the rename field starts from the display name, or a container\'s container name', () => {

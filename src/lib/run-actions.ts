@@ -5,7 +5,7 @@ import Square from '@lucide/svelte/icons/square';
 import { APPROVAL_WAIT } from '$lib/catalog';
 import type { CatalogRunKind, CatalogRunState } from '$lib/project-action';
 
-/** Button and form label for each catalog action on a Services row. `run` is shown as Start. */
+/** Button and form label for each catalog action on a copy row. `run` is shown as Start. */
 export const RUN_LABEL: Record<CatalogRunKind, string> = {
 	run: 'Start',
 	stop: 'Stop',
@@ -37,4 +37,12 @@ export function runResultTitle(state: CatalogRunState, fallbackName: string): st
 	if (state.message === APPROVAL_WAIT) return `${RUN_LABEL[state.kind]} ${name}: waiting for approval`;
 	if (state.message) return `${RUN_LABEL[state.kind]} ${name} failed`;
 	return `${RUN_DONE[state.kind]} ${name}`;
+}
+
+/**
+ * What a start, stop or restart dialog shows when it opens: a fresh form when the user opens it (its icon
+ * or the row's ⋯ menu), the new result when a result opens it.
+ */
+export function shownOnOpen<T>(reason: 'user' | 'result', result: T | null): T | null {
+	return reason === 'result' ? result : null;
 }

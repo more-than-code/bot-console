@@ -292,7 +292,7 @@ test('the Hosts tab load depends on project:enrol before any early return', asyn
 		['?tab=hosts', ['project:enrol']],
 		['', ['project:enrol']],
 		['?tab=tokens', []],
-		['?tab=services', []]
+		['?tab=catalog', []]
 	] as const) {
 		const { event } = fakeEvent({
 			url: `http://console.example/projects/${PROJECT.id}${query}`,

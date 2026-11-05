@@ -98,15 +98,14 @@ describe('success toasts', () => {
 		const page = read('src/routes/projects/[id]/+page.svelte');
 		assert.notEqual(page.indexOf('onSaved={toastImageSaved}'), -1, 'create image dialog');
 		assert.notEqual(page.indexOf('onImageSaved={toastImageSaved}'), -1, 'catalog section');
-		assert.notEqual(page.indexOf('onHealthSaved={toastHealthSaved}'), -1, 'services section');
+		assert.notEqual(page.indexOf('onHealthSaved={toastHealthSaved}'), -1, 'copy rows');
 		const health = read('src/routes/projects/[id]/HealthChecks.svelte');
 		assert.equal(health.includes('onSaved?.(null)'), false);
 		assert.notEqual(health.indexOf('if (next.announce != null) onSaved?.(next.announce);'), -1);
 		// The inline success lines are gone. Errors stay inline.
 		for (const file of [
 			'src/routes/projects/[id]/CatalogSection.svelte',
-			'src/routes/projects/[id]/MembersSection.svelte',
-			'src/routes/projects/[id]/ServicesSection.svelte'
+			'src/routes/projects/[id]/MembersSection.svelte'
 		]) {
 			const source = read(file);
 			assert.equal(source.includes('kind="success"'), false, file);

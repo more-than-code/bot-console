@@ -11,12 +11,12 @@ import RuntimeBadge from '../src/routes/projects/[id]/RuntimeBadge.svelte';
 import CatalogImageForm from '../src/routes/projects/[id]/CatalogImageForm.svelte';
 import CatalogSection from '../src/routes/projects/[id]/CatalogSection.svelte';
 import HealthChecks from '../src/routes/projects/[id]/HealthChecks.svelte';
-import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import SettingsSection from '../src/routes/projects/[id]/SettingsSection.svelte';
 import { initialEnvSetPanel, toggleEnvSet } from '../src/routes/projects/[id]/env-set-panel.ts';
 import { actions as projectActions, load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
+import { renderCopies } from './copies.ts';
 
 const SECRET = 'super-secret-value-99';
 const PLAIN = 'visible-plain-value-99';
@@ -908,7 +908,6 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 		assert.match(checkBadge, /class="sr-only">Deploybot check\.</);
 		assert.equal(render(RuntimeBadge, { props: { status: 'up', detail: '' } }).body.includes('Docker health check'), false);
 
-		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
 		const health: Health = { status: 'up', last_checked_at: '2026-10-14T00:00:00Z', latency_ms: null, source: 'docker' };
 		const row: ProjectServiceRow = {
 			id: SERVICE_ID,
@@ -926,30 +925,19 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 			host_name: 'pi1',
 			host_status: 'online',
 			project_name: 'Lab',
-			catalog_entry: null,
+			catalog_entry: 'web',
 			container_name: 'web-1',
 			image_digest: null,
 			checks: [],
-			checksMessage: null
+			checksMessage: null,
+			runtime: { state: 'running', restarts: 0 }
 		};
-		const services = render(ServicesSection, {
-			props: {
-				projectId: PROJECT.id,
-				projectName: 'Lab',
-				hosts: [{ id: HOST_ID, name: 'pi1', relation: 'owner', share_level: null } as Host],
-				canAdmin: true,
-				rows: [row],
-				total: 1,
-				prevCursor: null,
-				nextCursor: null,
-				omitted: 0,
-				message: null,
-				probe: null,
-				probeServiceId: null,
-				renameServiceId: null,
-				typedName: null
-			}
-		}).body;
+		const services = renderCopies({
+			rows: [row],
+			entries: [imageEntry(null)],
+			hosts: [{ id: HOST_ID, name: 'pi1', relation: 'owner', share_level: null } as Host],
+			canAdmin: true
+		});
 		assert.equal(services.includes('Docker health check'), true);
 
 		const dialog = render(HealthChecks, {

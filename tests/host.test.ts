@@ -7,13 +7,7 @@ import {
 	PROCESS_COLUMNS,
 	processColumns,
 	processRequestSort,
-	SERVICE_COLUMNS,
-	SERVICE_DEFAULT_DIR,
-	SERVICE_DEFAULT_SORT,
-	serviceColumns,
-	serviceDomId,
-	showProjectColumn,
-	smallestPort
+	serviceDomId
 } from '../src/lib/host-view.ts';
 import { processServiceHref } from '../src/lib/service-label.ts';
 import { parseRange, rangeWindow, RANGES } from '../src/lib/ranges.ts';
@@ -115,33 +109,6 @@ test('process search matches pid, process, user, and command', () => {
 	assert.match(processes, /defaultDir="desc"/);
 });
 
-test('project service columns are server-sorted and ports is not a sort', () => {
-	assert.deepEqual(
-		SERVICE_COLUMNS.filter((column) => column.sortable).map((column) => column.key),
-		['name', 'host', 'kind', 'status']
-	);
-	assert.equal(
-		SERVICE_COLUMNS.find((column) => column.key === 'ports')?.sortable,
-		undefined
-	);
-	assert.equal(SERVICE_COLUMNS.some((column) => column.key === 'last_seen'), false);
-	assert.equal(SERVICE_DEFAULT_SORT, 'name');
-	assert.equal(SERVICE_DEFAULT_DIR, 'asc');
-	assert.equal(smallestPort([8080, 80]), 80);
-	assert.equal(smallestPort([]), null);
-	assert.deepEqual(
-		serviceColumns(true).map((column) => column.key),
-		['name', 'host', 'project', 'kind', 'ports', 'status', 'actions', 'checks']
-	);
-	assert.equal(showProjectColumn('Lab', [{ project_name: 'Lab' }]), false);
-	assert.equal(showProjectColumn('Lab', [{ project_name: 'Lab' }, { project_name: 'Other' }]), true);
-	const services = readFileSync(new URL('../src/routes/projects/[id]/ServicesSection.svelte', import.meta.url), 'utf8');
-	assert.match(services, /serviceColumns\(showProject\)/);
-	assert.match(services, /server=\{\{ total/);
-	assert.match(services, /defaultSort=\{SERVICE_DEFAULT_SORT\}/);
-	assert.match(services, /defaultDir=\{SERVICE_DEFAULT_DIR\}/);
-});
-
 test('process API sort follows the table column and falls back to cpu', () => {
 	assert.equal(processRequestSort(new URLSearchParams('sort=memory')), 'memory');
 	assert.equal(processRequestSort(new URLSearchParams('sort=nope')), 'cpu');
@@ -151,14 +118,14 @@ test('process API sort follows the table column and falls back to cpu', () => {
 	assert.equal(processRequestSort(new URLSearchParams('')), 'cpu');
 });
 
-test('a process service link targets the owning project services tab', () => {
+test('a process service link targets the owning project\'s Catalog & services tab', () => {
 	const id = '00000000-0000-4000-8000-0000000000bb';
 	const project = '00000000-0000-4000-8000-000000000010';
 	const host = '00000000-0000-4000-8000-0000000000aa';
 	assert.equal(serviceDomId(id), `service-${id}`);
 	assert.equal(
 		processServiceHref(project, host, 'api'),
-		`/projects/${project}?tab=services&services.host=${host}&services.q=api`
+		`/projects/${project}?tab=catalog&catalog.host=${host}&catalog.q=api`
 	);
 });
 

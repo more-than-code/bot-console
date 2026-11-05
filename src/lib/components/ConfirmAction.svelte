@@ -3,11 +3,11 @@
 	import ShieldOff from '@lucide/svelte/icons/shield-off';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import UserMinus from '@lucide/svelte/icons/user-minus';
-	import { tick, type Component } from 'svelte';
+	import { tick, untrack, type Component } from 'svelte';
 	import ConfirmForm from '$lib/components/ConfirmForm.svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import { confirmIsDestructive } from '$lib/confirm';
-	import { confirmSettle } from '$lib/dialog-open';
+	import { confirmSettle, focusFallbackAfterClose } from '$lib/dialog-open';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { buttonVariants } from '$lib/components/ui/button';
 
@@ -31,7 +31,10 @@
 		messageClass = '',
 		icon = null,
 		failureFocusId = null,
-		onSuccess
+		onSuccess,
+		openRequest = 0,
+		fallbackFocusId = null,
+		showTrigger = true
 	}: {
 		id: string;
 		action: string;
@@ -57,9 +60,29 @@
 		 * component (a row action), so the caller moves focus itself.
 		 */
 		onSuccess?: (form: FormData) => void | Promise<void>;
+		/** A new value (a counter) opens it: the row's "⋯" menu asks for it. */
+		openRequest?: number;
+		/** Where focus goes when it closes and its own trigger is hidden or absent (the menu button). */
+		fallbackFocusId?: string | null;
+		/** False: no trigger of its own (a menu item opens it). */
+		showTrigger?: boolean;
 	} = $props();
 
 	let open = $state(false);
+	// The row's "⋯" menu opens this by changing `openRequest`; closing returns focus to that menu button.
+	let requestSeen = untrack(() => openRequest);
+	$effect(() => {
+		const request = openRequest;
+		if (request === requestSeen) return;
+		requestSeen = request;
+		untrack(() => (open = true));
+	});
+	let openBefore = untrack(() => open);
+	$effect(() => {
+		const now = open;
+		if (openBefore && !now) focusFallbackAfterClose(untrack(() => fallbackFocusId));
+		openBefore = now;
+	});
 	let sawFailure = $state(false);
 	let typed = $state('');
 	// Set when a failure closes the dialog: its close focus goes to the notice instead of the trigger.
@@ -105,7 +128,9 @@
 </script>
 
 <AlertDialog.Root bind:open>
-	{#if rowLabel}
+	{#if !showTrigger}
+		<!-- Opened by a menu item. -->
+	{:else if rowLabel}
 		<RowAction label={rowLabel} icon={Icon} {destructive} {disabled}>
 			{#snippet trigger(props)}
 				<AlertDialog.Trigger {...props}>

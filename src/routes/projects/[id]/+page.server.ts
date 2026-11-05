@@ -1,6 +1,7 @@
 import { error, fail, isHttpError, isRedirect, redirect } from '@sveltejs/kit';
-import type { CatalogEntry, EnvSet, Host, Invite, JoinToken, Member, ProjectFile, ProjectService, ProjectServiceRow, Registry, ServiceRuntime } from '$lib/api-types';
+import type { CatalogEntry, EnvSet, Host, Invite, JoinToken, Member, ProjectFile, ProjectServiceRow, Registry, ServiceRuntime } from '$lib/api-types';
 import { catalogForCaller, isCatalogName } from '$lib/catalog';
+import { COPIES_CAPPED_NOTE, COPIES_MAX_PAGES, COPIES_PAGE_LIMIT, groupCopies, STATUS_READ_LIMIT } from '$lib/catalog-copies';
 import {
 	HEALTH_CHECK_LIMIT,
 	HEALTH_NEEDS_CONFIRMATION,
@@ -14,8 +15,6 @@ import {
 	probeRequestBody,
 	validateHealthChecks
 } from '$lib/health-checks';
-import { SERVICE_DEFAULT_DIR, SERVICE_DEFAULT_SORT, serviceColumns, serviceHostReachable } from '$lib/host-view';
-import { serviceShow } from '$lib/service-view';
 import {
 	entryHostIndex,
 	entryRef,
@@ -88,8 +87,7 @@ import {
 	parseServicePage
 } from '$lib/server/shape';
 import { cleanDisplayName, cleanEmail, cleanExpiry, cleanHint, cleanName, cleanRole, isUuid } from '$lib/server/validate';
-import { readServerTableQuery, serverApiParams } from '$lib/table';
-import { backTo } from '$lib/url';
+import { backTo, servicesTabTarget } from '$lib/url';
 import type { Actions, PageServerLoad, RequestEvent } from './$types';
 
 function projectId(params: { id?: string }): string {
@@ -105,200 +103,190 @@ function tabOf(value: string | null, canAdmin: boolean): ProjectScope {
 	if (value === 'settings') return canAdmin ? 'settings' : 'hosts';
 	if (value === 'tokens') return canAdmin ? 'tokens' : 'hosts';
 	if (value === 'members') return 'members';
-	if (value === 'services') return 'services';
-	if (value === 'catalog') return 'catalog';
+	// `services` is the old Services tab, now part of Catalog & services.
+	if (value === 'catalog' || value === 'services') return 'catalog';
 	return 'hosts';
 }
 
-const SERVICES_LIMIT = 25;
-const HOST_UNREACHABLE = 'That host is not available for this project.';
-const CURSOR_DROPPED = 'That page link is not valid.';
-
-type ServicesLoad = {
-	services: ProjectServiceRow[];
-	servicesTotal: number;
-	servicesPrev: string | null;
-	servicesNext: string | null;
-	servicesOmitted: number;
-	servicesMessage: string | null;
-	/** This project's catalog entries the caller has a grant on, for the row actions. */
-	serviceEntries: ServiceEntryRef[];
-	/** Set when the catalog could not be read, so rows have no actions. */
-	serviceEntriesMessage: string | null;
+type CopiesLoad = {
+	/** Running copies by catalog entry name, in host-name order (see `groupCopies`). */
+	copies: Record<string, ProjectServiceRow[]>;
+	/**
+	 * True only when every services page was read and every row parsed. "Not deployed yet." needs it,
+	 * so a failed, capped or partly unreadable list never claims an entry has no copy.
+	 */
+	copiesComplete: boolean;
+	copiesOmitted: number;
+	copiesMessage: string | null;
+	/** More container copies than `STATUS_READ_LIMIT`: the rest show an unknown state. */
+	statusCapped: boolean;
 	/** Programs that never ran on a host that can run them. */
 	notRunning: NotRunningPair[];
 	/** False when the services index needed for `notRunning` could not be read whole. */
 	notRunningKnown: boolean;
 	/**
 	 * Service id to container state, read with catalog status after the page renders (streamed).
-	 * Rows waiting for it show "checking…". Never rejects.
+	 * Copies waiting for it show "checking…". Never rejects.
 	 */
 	serviceStates: Promise<Record<string, ServiceRuntime>>;
 };
 
-const noServices: ServicesLoad = {
-	services: [],
-	servicesTotal: 0,
-	servicesPrev: null,
-	servicesNext: null,
-	servicesOmitted: 0,
-	servicesMessage: null,
-	serviceEntries: [],
-	serviceEntriesMessage: null,
+const noCopies: CopiesLoad = {
+	copies: {},
+	copiesComplete: true,
+	copiesOmitted: 0,
+	copiesMessage: null,
+	statusCapped: false,
 	notRunning: [],
 	notRunningKnown: true,
 	serviceStates: Promise.resolve({})
 };
 
-const CATALOG_ACTIONS_UNREAD = 'Start, Stop, Restart, Logs and Status are not available: the catalog could not be read.';
-/** A status read that takes longer leaves the row's state unknown. */
+/** A status read that takes longer leaves the copy's state unknown. */
 const STATUS_TIMEOUT_MS = 8_000;
 /** At most this many status reads at once per page load. */
 const STATUS_CONCURRENCY = 4;
 
-/** First catalog page, read once for the row actions and the Docker health line. Null when it could not be read. */
-async function loadServiceCatalog(event: RequestEvent, projectId: string): Promise<CatalogEntry[] | null> {
-	try {
-		return parseCatalogList(await apiFetch(event, `/v1/projects/${projectId}/catalog`))?.items ?? null;
-	} catch (err) {
-		if (isRedirect(err) || isHttpError(err)) throw err;
-		return null;
-	}
-}
 
-/** The services page plus what its row actions need. The page and the not-running list load together. */
-async function loadProjectServices(
-	event: RequestEvent,
-	projectId: string,
-	hosts: Host[],
-	catalog: CatalogEntry[] | null,
-	canAdmin: boolean
-): Promise<ServicesLoad> {
-	const entries = (catalog ?? []).map(entryRef).filter((entry) => entry.my_actions.length > 0);
-	const [rows, notRunning] = await Promise.all([
-		loadServiceRows(event, projectId, hosts, catalog, entries, canAdmin),
-		loadNotRunning(event, projectId, entries, hosts)
-	]);
-	return { ...rows, ...notRunning, serviceEntries: entries, serviceEntriesMessage: catalog ? null : CATALOG_ACTIONS_UNREAD };
-}
-
-type ServiceRowsLoad = Omit<ServicesLoad, 'serviceEntries' | 'serviceEntriesMessage' | 'notRunning' | 'notRunningKnown'>;
-
-const noServiceRows: ServiceRowsLoad = {
-	services: [],
-	servicesTotal: 0,
-	servicesPrev: null,
-	servicesNext: null,
-	servicesOmitted: 0,
-	servicesMessage: null,
-	serviceStates: Promise.resolve({})
+type CopyRowsRead = {
+	/** Every parsed row of this project, before grouping. */
+	rows: ProjectServiceRow[];
+	omitted: number;
+	/** Every page was read and every row parsed. */
+	complete: boolean;
+	/** More pages than `COPIES_MAX_PAGES`. */
+	capped: boolean;
+	message: string | null;
 };
 
-async function loadServiceRows(
-	event: RequestEvent,
-	projectId: string,
-	hosts: Host[],
-	catalog: CatalogEntry[] | null,
-	entries: ServiceEntryRef[],
-	canAdmin: boolean
-): Promise<ServiceRowsLoad> {
-	const reachableHostIds = new Set(hosts.filter(serviceHostReachable).map((host) => host.id));
-	const query = readServerTableQuery(event.url.searchParams, 'services', serviceColumns(false), {
-		sort: SERVICE_DEFAULT_SORT,
-		dir: SERVICE_DEFAULT_DIR
-	});
-	if (query.qTooLong) {
-		return { ...noServiceRows, servicesMessage: 'Search must be at most 100 characters.' };
-	}
-	const hostUnreachable = query.hostRejected || (query.host != null && !reachableHostIds.has(query.host));
-	const apiQuery = hostUnreachable ? { ...query, host: null } : query;
-	const notices: string[] = [];
-	if (hostUnreachable) notices.push(HOST_UNREACHABLE);
-	if (query.cursorDropped) notices.push(CURSOR_DROPPED);
+/**
+ * This project's Deploybot services with their health checks (api-v1 v1.18), following `next_cursor` for
+ * at most `COPIES_MAX_PAGES` pages of `COPIES_PAGE_LIMIT`.
+ */
+async function readCopyRows(event: RequestEvent, projectId: string): Promise<CopyRowsRead> {
+	const rows: ProjectServiceRow[] = [];
+	// Cursor pages can repeat a row (offset paging while services change): keep the first.
+	const seen = new Set<string>();
+	let omitted = 0;
+	let cursor: string | null = null;
 	try {
-		const params = serverApiParams(apiQuery, SERVICES_LIMIT);
-		params.set('view', serviceShow(event.url.searchParams.get('show')).view);
-		params.set('include', 'health_checks');
-		const payload = await apiFetch(event, `/v1/projects/${projectId}/services?${params.toString()}`);
-		const page = parseServicePage(payload);
-		if (!page) return { ...noServiceRows, servicesMessage: 'The API returned an unexpected response.' };
-		let omitted = 0;
-		const services: ProjectServiceRow[] = [];
-		for (const item of page.raw) {
-			const row = parseProjectService(item);
-			if (!row) {
-				omitted += 1;
-				continue;
+		for (let pageNo = 0; pageNo < COPIES_MAX_PAGES; pageNo += 1) {
+			const params = new URLSearchParams({ view: 'deploybot', include: 'health_checks', limit: String(COPIES_PAGE_LIMIT) });
+			if (cursor != null) params.set('cursor', cursor);
+			const page = parseServicePage(await apiFetch(event, `/v1/projects/${projectId}/services?${params.toString()}`));
+			if (!page) return { rows, omitted, complete: false, capped: false, message: 'The API returned an unexpected response.' };
+			for (const item of page.raw) {
+				// Another project's service on this project's hosts is never a copy here, so it cannot
+				// count as left out (and so cannot hide the "not running yet" rows), even when malformed.
+				if (isRecord(item) && typeof item.project_id === 'string' && item.project_id !== projectId) continue;
+				const row = parseProjectService(item);
+				if (!row) {
+					omitted += 1;
+					continue;
+				}
+				if (row.project_id !== projectId || seen.has(row.id)) continue;
+				seen.add(row.id);
+				// api-v1 v1.18: checks come with the list row; an older API omits the key.
+				if (!isRecord(item) || !Object.hasOwn(item, 'health_checks')) {
+					rows.push({ ...row, checks: [], checksMessage: CHECKS_NEED_API });
+					continue;
+				}
+				const checks = parseHealthChecks(item.health_checks);
+				rows.push({ ...row, checks: checks ?? [], checksMessage: checks ? null : UNREAD_HEALTH_CHECKS });
 			}
-			// api-v1 v1.18: checks come with the list row; an older API omits the key.
-			if (!isRecord(item) || !Object.hasOwn(item, 'health_checks')) {
-				services.push({ ...row, checks: [], checksMessage: CHECKS_NEED_API });
-				continue;
-			}
-			const checks = parseHealthChecks(item.health_checks);
-			services.push({ ...row, checks: checks ?? [], checksMessage: checks ? null : UNREAD_HEALTH_CHECKS });
+			cursor = page.nextCursor;
+			if (cursor == null) return { rows, omitted, complete: omitted === 0, capped: false, message: null };
 		}
-		const checked = canAdmin ? withDockerChecks(projectId, services, catalog) : services;
-		const withState = withRuntime(event, projectId, checked, entries);
-		return {
-			services: withState.rows,
-			serviceStates: withState.states,
-			servicesTotal: page.total,
-			servicesPrev: page.prevCursor,
-			servicesNext: page.nextCursor,
-			servicesOmitted: omitted,
-			servicesMessage: notices.length > 0 ? notices.join(' ') : null
-		};
+		return { rows, omitted, complete: false, capped: true, message: COPIES_CAPPED_NOTE };
 	} catch (err) {
 		if (isRedirect(err) || isHttpError(err)) throw err;
-		return { ...noServiceRows, servicesMessage: loadFailure(err).message };
+		return { rows: [], omitted: 0, complete: false, capped: false, message: loadFailure(err).message };
 	}
-}
-
-/** A row from another project on a shared host names that project's catalog, not this one. */
-function needsDockerCheck(row: ProjectServiceRow, projectId: string): boolean {
-	return row.health?.source === 'docker' && row.catalog_entry != null && row.project_id === projectId;
 }
 
 /**
- * Admin only (the dialog's edit gate), for rows of this project that report Docker health for a catalog
- * entry. The catalog is the services tab's one read (first page only, on purpose: an entry beyond it
- * leaves dockerCheck null). A failed read leaves those rows unknown.
+ * The running copies of the listed entries, grouped by entry, plus the programs that never ran on a host
+ * and the streamed container states. Needs the host list and the catalog, so it waits for both.
  */
-function withDockerChecks(projectId: string, services: ProjectServiceRow[], catalog: CatalogEntry[] | null): ProjectServiceRow[] {
-	if (!services.some((row) => needsDockerCheck(row, projectId))) return services;
-	const entries = catalog ? new Map(catalog.map((entry) => [entry.name, entry])) : null;
-	return services.map((row) =>
-		needsDockerCheck(row, projectId) ? { ...row, dockerCheck: dockerCheckFromEntry(entries?.get(row.catalog_entry ?? '')) } : row
+async function loadCopies(
+	event: RequestEvent,
+	projectId: string,
+	hosts: Host[],
+	catalog: CatalogEntry[],
+	read: CopyRowsRead,
+	canAdmin: boolean
+): Promise<CopiesLoad> {
+	const failed = read.message != null && !read.capped;
+	if (failed) return { ...noCopies, copiesComplete: false, notRunningKnown: false, copiesMessage: read.message };
+	const entries = catalog.map(entryRef).filter((entry) => entry.my_actions.length > 0);
+	const listed = groupCopies(read.rows, projectId, catalog);
+	// Entry order, then host order: the status read cap keeps the first ones.
+	const flat = catalog.flatMap((entry) => listed[entry.name] ?? []);
+	const checked = canAdmin ? withDockerChecks(flat, catalog) : flat;
+	const withState = withRuntime(event, projectId, checked, entries);
+	const byId = new Map(withState.rows.map((row) => [row.id, row]));
+	const copies: Record<string, ProjectServiceRow[]> = {};
+	for (const [name, rows] of Object.entries(listed)) copies[name] = rows.map((row) => byId.get(row.id) ?? row);
+	return {
+		copies,
+		copiesComplete: read.complete,
+		copiesOmitted: read.omitted,
+		copiesMessage: read.message,
+		statusCapped: withState.capped,
+		notRunning: read.complete ? notRunningPairs(entries, hosts, entryHostIndex(read.rows)) : [],
+		notRunningKnown: read.complete || !entries.some((entry) => entry.kind === 'program' && entry.my_actions.includes('run')),
+		serviceStates: withState.states
+	};
+}
+
+/**
+ * Admin only (the dialog's edit gate), for copies that report Docker health. The catalog is the tab's
+ * one read (first page only, on purpose: an entry beyond it is not listed). A failed read lists no copies.
+ */
+function withDockerChecks(copies: ProjectServiceRow[], catalog: CatalogEntry[]): ProjectServiceRow[] {
+	if (!copies.some((row) => row.health?.source === 'docker')) return copies;
+	const entries = new Map(catalog.map((entry) => [entry.name, entry]));
+	return copies.map((row) =>
+		row.health?.source === 'docker' ? { ...row, dockerCheck: dockerCheckFromEntry(entries.get(row.catalog_entry ?? '')) } : row
 	);
 }
 
 /**
- * Each row of this project's catalog entry gets its state. Programs are known from the row. The services
- * list does not say whether a container is running, so each owned container on an online host is read
- * with catalog status (not audited): once per (entry, host), at most four at a time, and streamed so the
- * page does not wait for slow hosts.
+ * Each copy of an entry the caller has a grant on gets its state. Programs are known from the row. The
+ * services list does not say whether a container is running, so each owned container on an online host is
+ * read with catalog status (not audited): once per (entry, host), at most four at a time, and streamed so
+ * the page does not wait for slow hosts. Past `STATUS_READ_LIMIT` copies a container is not read and its
+ * state is unknown.
  */
 function withRuntime(
 	event: RequestEvent,
 	projectId: string,
 	services: ProjectServiceRow[],
 	entries: ServiceEntryRef[]
-): { rows: ProjectServiceRow[]; states: Promise<Record<string, ServiceRuntime>> } {
+): { rows: ProjectServiceRow[]; states: Promise<Record<string, ServiceRuntime>>; capped: boolean } {
 	const read = statusReader((entry, hostId) => containerRuntime(event, projectId, entry, hostId), STATUS_CONCURRENCY);
 	const pending: Array<Promise<[string, ServiceRuntime]>> = [];
+	let reads = 0;
+	let capped = false;
 	const rows = services.map((row) => {
 		const entry = ownerEntry(row, projectId, entries);
 		if (entry == null) return row;
 		if (!needsContainerStatus(row, entry)) return { ...row, runtime: runtimeFromRow(row) };
+		if (reads >= STATUS_READ_LIMIT) {
+			capped = true;
+			return { ...row, runtime: UNKNOWN_RUNTIME };
+		}
+		reads += 1;
 		pending.push(read(entry.name, row.host_id).then((runtime) => [row.id, runtime]));
 		return row;
 	});
-	return { rows, states: Promise.all(pending).then((pairs) => present(event, Object.fromEntries(pairs))) };
+	return { rows, states: Promise.all(pending).then((pairs) => present(event, Object.fromEntries(pairs))), capped };
 }
 
 /** Never rejects: it runs after the page is sent, where a redirect can no longer happen. */
 async function containerRuntime(event: RequestEvent, projectId: string, entry: string, hostId: string): Promise<ServiceRuntime> {
+	// A read still queued when the browser has gone away is not sent.
+	if (event.request.signal?.aborted) return UNKNOWN_RUNTIME;
 	try {
 		const payload = await apiFetch(
 			event,
@@ -310,37 +298,6 @@ async function containerRuntime(event: RequestEvent, projectId: string, entry: s
 		return status ? runtimeFromImageStatus(status) : UNKNOWN_RUNTIME;
 	} catch {
 		return UNKNOWN_RUNTIME;
-	}
-}
-
-/**
- * Only when some program entry can be started: one services page (`view=deploybot`, up to 200 rows)
- * tells which hosts already have a row for it. A failure, a dropped row, or a further page leaves the
- * list unknown.
- */
-async function loadNotRunning(
-	event: RequestEvent,
-	projectId: string,
-	entries: ServiceEntryRef[],
-	hosts: Host[]
-): Promise<{ notRunning: NotRunningPair[]; notRunningKnown: boolean }> {
-	if (!entries.some((entry) => entry.kind === 'program' && entry.my_actions.includes('run'))) {
-		return { notRunning: [], notRunningKnown: true };
-	}
-	const unknown = { notRunning: [], notRunningKnown: false };
-	try {
-		const page = parseServicePage(await apiFetch(event, `/v1/projects/${projectId}/services?view=deploybot&limit=200`));
-		if (!page || page.nextCursor != null) return unknown;
-		const rows: ProjectService[] = [];
-		for (const item of page.raw) {
-			const row = parseProjectService(item);
-			if (!row) return unknown;
-			if (row.project_id === projectId) rows.push(row);
-		}
-		return { notRunning: notRunningPairs(entries, hosts, entryHostIndex(rows)), notRunningKnown: true };
-	} catch (err) {
-		if (isRedirect(err) || isHttpError(err)) throw err;
-		return unknown;
 	}
 }
 
@@ -377,11 +334,14 @@ const empty = {
 	filesMessage: null as string | null,
 	registries: [] as Registry[],
 	registriesMessage: null as string | null,
-	...noServices
+	...noCopies
 };
 
 export const load: PageServerLoad = async (event) => {
 	requireUser(event);
+	// Old Services tab links (bookmarks, other pages) land on Catalog & services with their params mapped.
+	const legacy = servicesTabTarget(event.url);
+	if (legacy && event.request.method === 'GET') redirect(303, legacy);
 	// The Hosts tab's created-token card polls this key while it waits for the new host.
 	if (tabOf(event.url.searchParams.get('tab'), true) === 'hosts') event.depends('project:enrol');
 	const id = projectId(event.params);
@@ -401,25 +361,29 @@ export const load: PageServerLoad = async (event) => {
 	const tab = tabOf(event.url.searchParams.get('tab'), canAdmin);
 
 	// Each tab loads only what it shows, and independent calls run together.
-	// The services tab waits for the host list and the catalog, because its row actions need both.
+	// The copies on the Catalog & services tab wait for the host list and the catalog, because grouping and
+	// the row actions need both.
 	const hostsLoad =
-		tab === 'hosts' || tab === 'services' || tab === 'catalog'
+		tab === 'hosts' || tab === 'catalog'
 			? loadList(event, `/v1/projects/${id}/hosts`, parseHost)
 			: Promise.resolve(emptyList<Host>());
-	const servicesLoad =
-		tab === 'services'
-			? Promise.all([hostsLoad, loadServiceCatalog(event, id)]).then(([list, catalog]) =>
-					loadProjectServices(event, id, list.items, catalog, canAdmin)
+	const catalogRead = tab === 'catalog' ? loadCatalog(event, id, canOwner) : Promise.resolve(null);
+	const copiesLoad =
+		tab === 'catalog'
+			? Promise.all([hostsLoad, catalogRead, readCopyRows(event, id)]).then(([list, listed, read]) =>
+					listed && listed.catalogMessage == null
+						? loadCopies(event, id, list.items, listed.catalog, read, canAdmin)
+						: noCopies
 				)
-			: Promise.resolve(noServices);
-	const [hostList, memberList, tokenList, inviteList, services, catalogLoad, settings] = await Promise.all([
+			: Promise.resolve(noCopies);
+	const [hostList, memberList, tokenList, inviteList, copiesData, catalogLoad, settings] = await Promise.all([
 		hostsLoad,
 		tab === 'members' || tab === 'catalog' ? loadList(event, `/v1/projects/${id}/members`, parseMember) : emptyList<Member>(),
 		// The Hosts tab reads them only to see whether a newly created token was used.
 		(tab === 'tokens' || tab === 'hosts') && canAdmin ? loadList(event, `/v1/projects/${id}/join-tokens`, parseJoinToken) : emptyList<JoinToken>(),
 		tab === 'members' && canAdmin ? loadList(event, `/v1/projects/${id}/invites`, parseInvite) : emptyList<Invite>(),
-		servicesLoad,
-		tab === 'catalog' ? loadCatalog(event, id, canOwner) : null,
+		copiesLoad,
+		catalogRead,
 		tab === 'settings' && canAdmin ? loadProjectSettings(event, id) : null
 	]);
 
@@ -452,7 +416,7 @@ export const load: PageServerLoad = async (event) => {
 	const registriesMessage = settings?.registriesMessage ?? null;
 
 	// The streamed states stay a promise: present() would turn it into a plain object.
-	const { serviceStates, ...serviceData } = services;
+	const { serviceStates, ...copyData } = copiesData;
 	return {
 		...present(event, {
 			project,
@@ -488,7 +452,7 @@ export const load: PageServerLoad = async (event) => {
 			filesMessage,
 			registries,
 			registriesMessage,
-			...serviceData
+			...copyData
 		}),
 		serviceStates
 	};
@@ -568,7 +532,7 @@ function inviteFailure(event: RequestEvent, err: unknown) {
 }
 
 function keptName(event: RequestEvent, serviceId: string, typed: string, status: number, message: string) {
-	return fail(status, present(event, { scope: 'services', message, renameServiceId: serviceId, displayName: typed }));
+	return fail(status, present(event, { scope: 'catalog', message, renameServiceId: serviceId, displayName: typed }));
 }
 
 function healthFieldFailure(
@@ -581,7 +545,7 @@ function healthFieldFailure(
 ) {
 	// Field text stays in the dialog. `message` would also become the section banner.
 	return fail(status, present(event, {
-		scope: 'services' as const,
+		scope: 'catalog' as const,
 		healthServiceId: serviceId,
 		healthField: field,
 		healthIndex: index,
@@ -599,7 +563,7 @@ function editorProbeFailure(
 	field: string | null
 ) {
 	return fail(status, present(event, {
-		scope: 'services' as const,
+		scope: 'catalog' as const,
 		editorProbe: true,
 		probeServiceId: serviceId,
 		probeIndex: index,
@@ -627,7 +591,7 @@ function shapePorts(port: string): number[] {
 }
 
 async function replaceHealthChecks(event: RequestEvent, serviceId: string, form: FormData) {
-	if (!isUuid(serviceId)) return invalid(event, 'services', 'That service is not valid.');
+	if (!isUuid(serviceId)) return invalid(event, 'catalog', 'That service is not valid.');
 	const read = draftsFromForm(form);
 	if (!read.ok) return healthFieldFailure(event, serviceId, 400, read.field, read.index, read.message);
 	try {
@@ -655,12 +619,12 @@ async function replaceHealthChecks(event: RequestEvent, serviceId: string, form:
 		if (err instanceof ApiError) {
 			return healthFieldFailure(event, serviceId, err.status, 'form', null, err.msg);
 		}
-		return actionFailure(event, err, 'services');
+		return actionFailure(event, err, 'catalog');
 	}
 }
 
 async function renameService(event: RequestEvent, serviceId: string, form: FormData) {
-	if (!isUuid(serviceId)) return invalid(event, 'services', 'That service is not valid.');
+	if (!isUuid(serviceId)) return invalid(event, 'catalog', 'That service is not valid.');
 	const typed = formText(form, 'display_name');
 	const clearing = formText(form, 'clear') === '1';
 	let body: { display_name: string | null };
@@ -681,7 +645,7 @@ async function renameService(event: RequestEvent, serviceId: string, form: FormD
 		if (err instanceof ApiError && (err.code === 'conflict' || err.code === 'bad_request' || err.code === 'forbidden')) {
 			return keptName(event, serviceId, typed, err.status, err.msg);
 		}
-		return actionFailure(event, err, 'services');
+		return actionFailure(event, err, 'catalog');
 	}
 }
 
@@ -912,12 +876,12 @@ export const actions: Actions = {
 		const serviceId = formText(form, 'service_id');
 		const checkId = formText(form, 'check_id');
 		if (!isUuid(serviceId)) {
-			return fail(400, present(event, { scope: 'services', message: 'That health check is not valid.' }));
+			return fail(400, present(event, { scope: 'catalog', message: 'That health check is not valid.' }));
 		}
 		// Saved rows still post only check_id. The editor posts protocol, port, and path.
 		if (checkId !== '') {
 			if (!isUuid(checkId)) {
-				return fail(400, present(event, { scope: 'services', message: 'That health check is not valid.' }));
+				return fail(400, present(event, { scope: 'catalog', message: 'That health check is not valid.' }));
 			}
 			try {
 				const probe = parseProbe(
@@ -926,14 +890,14 @@ export const actions: Actions = {
 						body: JSON.stringify({ check_id: checkId })
 					})
 				);
-				if (!probe) return fail(502, present(event, { scope: 'services', message: 'The API returned an unexpected response.' }));
-				return present(event, { scope: 'services' as const, probe, probeServiceId: serviceId });
+				if (!probe) return fail(502, present(event, { scope: 'catalog', message: 'The API returned an unexpected response.' }));
+				return present(event, { scope: 'catalog' as const, probe, probeServiceId: serviceId });
 			} catch (err) {
-				return actionFailure(event, err, 'services');
+				return actionFailure(event, err, 'catalog');
 			}
 		}
 		if (formText(form, 'protocol') === '') {
-			return fail(400, present(event, { scope: 'services', message: 'That health check is not valid.' }));
+			return fail(400, present(event, { scope: 'catalog', message: 'That health check is not valid.' }));
 		}
 		const protocol = formText(form, 'protocol');
 		const port = formText(form, 'port');
@@ -957,7 +921,7 @@ export const actions: Actions = {
 			);
 			if (!probe) return editorProbeFailure(event, serviceId, 502, index, 'The API returned an unexpected response.', null);
 			return present(event, {
-				scope: 'services' as const,
+				scope: 'catalog' as const,
 				probe,
 				probeServiceId: serviceId,
 				editorProbe: true,

@@ -63,7 +63,7 @@ function tbody(html: string): string {
 }
 
 function rowNames(html: string): string[] {
-	return [...tbody(html).matchAll(/<tr[^>]*>\s*<td class="p-2 align-middle">([^<]+)<\/td>/g)].map((match) => match[1]);
+	return [...tbody(html).matchAll(/<tr data-entry="([^"]+)"/g)].map((match) => match[1]);
 }
 
 /** Inner HTML of each row's Last deployed cell, in table order. */
@@ -127,25 +127,25 @@ test('catalogDefaultSort: Last deployed newest first, ascending for another expl
 	assert.deepEqual(catalogDefaultSort([], null, SORTABLE_KEYS), { sort: null, dir: 'asc' });
 });
 
-test('the Last deployed column follows Port, is sortable newest first and hidden below sm', () => {
+test('the Last deployed column follows Services, is sortable newest first and hidden below sm', () => {
 	const html = section([entry('b1', 'alpha', iso(Date.now() - HOUR))]);
 	const heads = headers(html);
-	assert.match(heads[4][1], /Port/);
+	assert.match(heads[4][1], /Services/);
 	assert.match(heads[5][1], /Last deployed/);
 	assert.match(heads[5][0], /(^|\s)max-sm:hidden(\s|"|$)/);
 	assert.doesNotMatch(heads[5][0], /text-right/);
 	// Default sort is this column, descending.
 	assert.match(heads[5][0], /aria-sort="descending"/);
 	assert.match(heads[5][1], /aria-label="Sorted by Last deployed"/);
-	assert.match(heads[0][0], /aria-sort="none"/);
+	assert.match(heads[1][0], /aria-sort="none"/);
 	// Clicking Name starts ascending; the active Last deployed header toggles to ascending.
-	assert.match(heads[0][1], /href="[^"]*catalog\.sort=name&catalog\.dir=asc"/);
+	assert.match(heads[1][1], /href="[^"]*catalog\.sort=name&catalog\.dir=asc"/);
 	assert.match(heads[5][1], /href="[^"]*catalog\.sort=last_deployed&catalog\.dir=asc"/);
 	const byName = headers(section([entry('b1', 'alpha', iso(Date.now() - HOUR))], '&catalog.sort=name&catalog.dir=asc'));
 	assert.match(byName[5][1], /href="[^"]*catalog\.sort=last_deployed&catalog\.dir=desc"/);
 });
 
-test('cells show relative time with the absolute time as tooltip, Never for null, and a dash when unknown', () => {
+test('cells show relative time with the absolute time as tooltip, Never for null, and blank when unknown', () => {
 	const deployedAt = iso(Date.now() - 3 * HOUR - 10 * MINUTE);
 	const html = section([entry('c1', 'alpha', deployedAt), entry('c2', 'bravo', null), entry('c3', 'charlie')]);
 	const [deployed, never, unknown] = lastCells(html);
@@ -155,7 +155,7 @@ test('cells show relative time with the absolute time as tooltip, Never for null
 	assert.match(deployed, /3 h ago<span class="sr-only">, /);
 	assert.ok(deployed.includes(`<span class="sr-only">, ${when}</span>`), deployed);
 	assert.equal(never, 'Never');
-	assert.match(unknown, /<span aria-hidden="true">—<\/span><span class="sr-only">Unknown<\/span>/);
+	assert.equal(unknown.replace(/<!--[^>]*-->/g, '').trim(), '');
 	assert.match(lastCells(section([entry('c4', 'delta', iso(Date.now()))]))[0], /just now/);
 	for (const cell of [...tbody(html).matchAll(/<td ([^>]*data-last-deployed[^>]*)>/g)]) {
 		assert.match(cell[1], /max-sm:hidden/);
@@ -191,15 +191,15 @@ test('default order is newest Last deployed first, never-deployed last in name o
 	assert.deepEqual(rowNames(section(entries, '&catalog.sort=name&catalog.dir=desc')), ['foxtrot', 'echo', 'delta', 'charlie', 'bravo', 'alpha']);
 });
 
-test('an older API without the field keeps Name A–Z and shows a dash, with no error', () => {
+test('an older API without the field keeps Name A–Z and leaves the cell blank, with no error', () => {
 	const entries = [entry('e1', 'alpha'), entry('e2', 'bravo'), entry('e3', 'charlie')];
 	const html = section(entries);
 	assert.deepEqual(rowNames(html), ['alpha', 'bravo', 'charlie']);
 	assert.deepEqual(
 		lastCells(html).map((cell) => cell.replace(/<[^>]+>/g, '')),
-		['—Unknown', '—Unknown', '—Unknown']
+		['', '', '']
 	);
 	const heads = headers(html);
-	for (const [attrs] of heads.slice(0, 6)) assert.match(attrs, /aria-sort="none"/);
+	for (const index of [1, 2, 3, 5]) assert.match(heads[index][0], /aria-sort="none"/);
 	assert.deepEqual(rowNames(section(entries, '&catalog.sort=name&catalog.dir=desc')), ['charlie', 'bravo', 'alpha']);
 });

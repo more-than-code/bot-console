@@ -2,6 +2,7 @@
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Plus from '@lucide/svelte/icons/plus';
 	import { untrack } from 'svelte';
+	import { focusFallbackAfterClose } from '$lib/dialog-open';
 	import { buttonVariants } from '$lib/components/ui/button';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import RowAction from '$lib/components/RowAction.svelte';
@@ -17,7 +18,9 @@
 		parseAction,
 		revealed = false,
 		editor = null,
-		disabled = false
+		disabled = false,
+		openRequest = 0,
+		fallbackFocusId = null
 	}: {
 		mode: 'create' | 'edit';
 		entry?: ProgramEntry | null;
@@ -27,9 +30,27 @@
 		revealed?: boolean;
 		editor?: CatalogEditorState | null;
 		disabled?: boolean;
+		/** A new value (a counter) opens it: the row's "⋯" menu asks for it (below `sm`, where its icon is hidden). */
+		openRequest?: number;
+		/** Where focus goes when it closes and its own trigger is hidden (the menu button). */
+		fallbackFocusId?: string | null;
 	} = $props();
 
 	let open = $state(untrack(() => revealed));
+	// The row's "⋯" menu opens this by changing `openRequest`; closing returns focus to that menu button.
+	let requestSeen = untrack(() => openRequest);
+	$effect(() => {
+		const request = openRequest;
+		if (request === requestSeen) return;
+		requestSeen = request;
+		untrack(() => (open = true));
+	});
+	let openBefore = untrack(() => open);
+	$effect(() => {
+		const now = open;
+		if (openBefore && !now) focusFallbackAfterClose(untrack(() => fallbackFocusId));
+		openBefore = now;
+	});
 	let sawReveal = $state(untrack(() => revealed));
 
 	$effect(() => {

@@ -15,7 +15,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import * as Select from '$lib/components/ui/select';
-	import { formDialogOutcome } from '$lib/dialog-open';
+	import { focusFallbackAfterClose, formDialogOutcome } from '$lib/dialog-open';
 	import { formatLatency } from '$lib/format';
 	import DockerHealthNote from './DockerHealthNote.svelte';
 	import {
@@ -62,7 +62,10 @@
 		probeIndex = null,
 		probeMessage = null,
 		showProbe = false,
-		onSaved
+		onSaved,
+		openRequest = 0,
+		fallbackFocusId = null,
+		showTrigger = true
 	}: {
 		action: string;
 		probeAction: string;
@@ -86,9 +89,29 @@
 		probeMessage?: string | null;
 		showProbe?: boolean;
 		onSaved?: (serviceId: string) => void;
+		/** A new value (a counter) opens it: the row's "⋯" menu asks for it. */
+		openRequest?: number;
+		/** Where focus goes when it closes and its own trigger is hidden or absent (the menu button). */
+		fallbackFocusId?: string | null;
+		/** False: no icon of its own (it opens from a menu). */
+		showTrigger?: boolean;
 	} = $props();
 
 	let open = $state(untrack(() => failed));
+	// The row's "⋯" menu opens this by changing `openRequest`; closing returns focus to that menu button.
+	let requestSeen = untrack(() => openRequest);
+	$effect(() => {
+		const request = openRequest;
+		if (request === requestSeen) return;
+		requestSeen = request;
+		untrack(() => (open = true));
+	});
+	let openBefore = untrack(() => open);
+	$effect(() => {
+		const now = open;
+		if (openBefore && !now) focusFallbackAfterClose(untrack(() => fallbackFocusId));
+		openBefore = now;
+	});
 	let wasOpen = $state(false);
 	let drafts = $state<CheckDraft[]>(untrack(() => draftFromChecks(checks)));
 	let issues = $state<CheckIssue[]>([]);
@@ -247,16 +270,20 @@
 </script>
 
 {#if unread}
-	<RowAction label={UNREAD_HEALTH_CHECKS} icon={HeartPulse} disabled />
+	{#if showTrigger}
+		<RowAction label={UNREAD_HEALTH_CHECKS} icon={HeartPulse} disabled />
+	{/if}
 {:else}
 <Dialog.Root bind:open onOpenChangeComplete={finishClose}>
-	<RowAction label="Health checks {rowLabel}" icon={HeartPulse}>
-		{#snippet trigger(props)}
-			<Dialog.Trigger {...props}>
-				<HeartPulse class="size-4" />
-			</Dialog.Trigger>
-		{/snippet}
-	</RowAction>
+	{#if showTrigger}
+		<RowAction label="Health checks {rowLabel}" icon={HeartPulse}>
+			{#snippet trigger(props)}
+				<Dialog.Trigger {...props}>
+					<HeartPulse class="size-4" />
+				</Dialog.Trigger>
+			{/snippet}
+		</RowAction>
+	{/if}
 	<Dialog.Content class="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-xl">
 		<Dialog.Header class="shrink-0 pr-8">
 			<Dialog.Title>Health checks</Dialog.Title>

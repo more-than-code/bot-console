@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { clearOpenStorage, visitStorage } from '$lib/catalog-open';
 	import { page } from '$app/state';
 	import { onMount, untrack } from 'svelte';
 	import AppWindow from '@lucide/svelte/icons/app-window';
@@ -103,7 +104,8 @@
 								</DropdownMenu.Item>
 							</DropdownMenu.Content>
 						</DropdownMenu.Root>
-						<form class="shrink-0" method="POST" action="/signout" use:enhance>
+						<!-- Signing out also forgets which catalog entries were open in this tab. -->
+						<form class="shrink-0" method="POST" action="/signout" use:enhance onsubmit={() => clearOpenStorage(visitStorage())}>
 							<Button type="submit" variant="outline" size="sm"><LogOut class="size-4" />Sign out</Button>
 						</form>
 					</div>

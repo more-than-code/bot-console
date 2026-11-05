@@ -22,7 +22,7 @@ export type Column<Row> = {
 	firstDir?: SortDir;
 	/** Hidden below the `sm` breakpoint: the header gets `max-sm:hidden`; the row snippet must put it on the cell too. */
 	hideBelowSm?: boolean;
-	/** Header filter menu. Client mode only: it narrows the rows the page already has. */
+	/** Header filter menu: it narrows the rows the page already has. */
 	filter?: ColumnFilter<Row>;
 };
 
@@ -62,10 +62,10 @@ export type PageWindow<Row> = {
 
 const PAGE_NUMBER = /^[1-9][0-9]*$/;
 
-/** DataTable id of the project Catalog tab; its search is `catalog.q`. */
+/** DataTable id of the project Catalog & services tab; its search is `catalog.q`. */
 export const CATALOG_TABLE_ID = 'catalog';
 
-export function tableParam(id: string, key: 'q' | 'sort' | 'dir' | 'page' | 'host' | 'cursor' | 'edit' | 'logs'): string {
+export function tableParam(id: string, key: 'q' | 'sort' | 'dir' | 'page' | 'host' | 'edit' | 'logs'): string {
 	return `${id}.${key}`;
 }
 
@@ -238,9 +238,10 @@ export function filterRows<Row>(rows: readonly Row[], columns: readonly Column<R
 	return rows.filter((row) => checks.every((check) => check.read(row) === check.value));
 }
 
-/** Sets or (with null) clears one filter param and resets the page. Other params are kept. */
+/** Sets or (with null) clears one filter param and resets the page. Other params are kept, except the one-shot `<id>.logs`. */
 export function filterHref(url: URL, id: string, param: string, value: string | null): string {
 	const params = new URLSearchParams(url.searchParams);
+	params.delete(tableParam(id, 'logs'));
 	const name = filterParam(id, param);
 	if (value == null || value === '') params.delete(name);
 	else params.set(name, value);
@@ -256,7 +257,7 @@ export function pagerVisible(total: number, pageSize: number, q: string): boolea
 
 /**
  * Same-page link. A null patch value deletes that namespaced param.
- * Page 1 is omitted. Params for other tables are left alone.
+ * Page 1 is omitted. Params for other tables are left alone. The one-shot `<id>.logs` is never carried on.
  */
 export function tableHref(
 	url: URL,
@@ -264,6 +265,7 @@ export function tableHref(
 	patch: Partial<{ q: string | null; sort: string | null; dir: SortDir | null; page: number | null }>
 ): string {
 	const params = new URLSearchParams(url.searchParams);
+	params.delete(tableParam(id, 'logs'));
 	const write = (key: 'q' | 'sort' | 'dir' | 'page', value: string | number | null | undefined) => {
 		const name = tableParam(id, key);
 		if (value == null || value === '' || (key === 'page' && (value === 1 || value === '1'))) params.delete(name);
@@ -292,12 +294,12 @@ export function sortHref(
 	return tableHref(url, id, { sort: column.key, dir, page: null });
 }
 
-/** Search keeps the other params, including this table's sort and direction, and drops its q and page. */
+/** Search keeps the other params, including this table's sort and direction, and drops its q, page and `<id>.logs`. */
 export function searchHiddenFields(
 	search: URLSearchParams,
 	id: string
 ): Array<{ name: string; value: string }> {
-	const skip = new Set([tableParam(id, 'q'), tableParam(id, 'page')]);
+	const skip = new Set([tableParam(id, 'q'), tableParam(id, 'page'), tableParam(id, 'logs')]);
 	const fields: Array<{ name: string; value: string }> = [];
 	for (const [name, value] of search) {
 		if (!skip.has(name)) fields.push({ name, value });
@@ -315,157 +317,51 @@ export function ariaSort(
 	return query.dir === 'asc' ? 'ascending' : 'descending';
 }
 
-/** API `q` cap for the project services list. Longer searches are refused before the call. */
-export const SERVER_SEARCH_MAX = 100;
-
-/** Opaque cursors longer than this are dropped. The project list uses the same cap. */
-export const SERVER_CURSOR_MAX = 512;
-
-const SERVER_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SERVER_CONTROL = /[\u0000-\u001F\u007F]/;
-
-export type ServerTableQuery = {
-	q: string;
-	sort: string;
-	dir: SortDir;
-	host: string | null;
-	cursor: string | null;
-	/**
-	 * Trimmed `q` is longer than the API allows, or it contains NUL.
-	 * The caller must not send it and must not treat it as an empty search.
-	 */
-	qTooLong: boolean;
-	/** A non-empty host value was present and was not a UUID. */
-	hostRejected: boolean;
-	/** A cursor was present and rejected (too long or a control character). */
-	cursorDropped: boolean;
-};
-
-export type ServerTable = {
-	total: number;
-	prevCursor: string | null;
-	nextCursor: string | null;
-};
-
-function readServerCursor(raw: string | null): { cursor: string | null; dropped: boolean } {
-	if (raw == null || raw === '') return { cursor: null, dropped: false };
-	if (raw.length > SERVER_CURSOR_MAX || SERVER_CONTROL.test(raw)) return { cursor: null, dropped: true };
-	return { cursor: raw, dropped: false };
-}
-
-/**
- * Namespaced server-table params: `<id>.q`, `<id>.sort`, `<id>.dir`, `<id>.host`, `<id>.cursor`.
- * An unknown sort falls back to the default and drops a paired direction.
- * A column's `firstDir` applies when that column is selected and `dir` is absent.
- * A non-empty host that is not a UUID sets `hostRejected` and is not a host id.
- * A bad cursor is dropped and `cursorDropped` is set.
- * `q` is judged on the raw trimmed value, before `readSearch` can blank NUL or a value over its own cap.
- */
-export function readServerTableQuery<Row>(
+/** The rows a client table shows now: after its filters, search, sort and paging. */
+export function visibleRows<Row>(
+	rows: readonly Row[],
+	columns: readonly Column<Row>[],
 	search: URLSearchParams,
 	id: string,
-	columns: readonly Column<Row>[],
-	defaults: { sort: string; dir: SortDir }
-): ServerTableQuery {
-	const sortableKey = (key: string | null): key is string =>
-		key != null && columns.some((column) => column.sortable === true && column.key === key);
-	const fallback = sortableKey(defaults.sort) ? defaults.sort : (columns.find((column) => column.sortable)?.key ?? defaults.sort);
-	const rawSort = search.get(tableParam(id, 'sort'));
-	const rawDir = search.get(tableParam(id, 'dir'));
-	const dirIsValid = rawDir === 'asc' || rawDir === 'desc';
-	const sortMissing = rawSort == null || rawSort === '';
-	let sort = fallback;
-	let dir = defaults.dir;
-	if (!sortMissing && sortableKey(rawSort)) {
-		sort = rawSort;
-		const column = columns.find((item) => item.key === sort);
-		dir = dirIsValid ? rawDir : (column?.firstDir ?? defaults.dir);
-	} else if (sortMissing && dirIsValid) {
-		dir = rawDir;
-	}
-	const rawQ = search.get(tableParam(id, 'q'));
-	const trimmedQ = rawQ == null ? '' : rawQ.trim();
-	const qTooLong = trimmedQ.includes('\0') || trimmedQ.length > SERVER_SEARCH_MAX;
-	const q = qTooLong ? '' : readSearch(rawQ);
-	const hostRaw = search.get(tableParam(id, 'host'))?.trim() ?? '';
-	const hostIsUuid = SERVER_UUID.test(hostRaw);
-	const cursor = readServerCursor(search.get(tableParam(id, 'cursor')));
-	return {
-		q,
-		sort,
-		dir,
-		host: hostIsUuid ? hostRaw : null,
-		cursor: cursor.cursor,
-		qTooLong,
-		hostRejected: hostRaw !== '' && !hostIsUuid,
-		cursorDropped: cursor.dropped
-	};
-}
-
-/** Query string for the project services API. `q` over the cap is omitted. */
-export function serverApiParams(query: ServerTableQuery, limit = DEFAULT_PAGE_SIZE): URLSearchParams {
-	const params = new URLSearchParams();
-	if (query.q && !query.qTooLong) params.set('q', query.q);
-	if (query.host) params.set('host_id', query.host);
-	params.set('sort', query.sort);
-	params.set('dir', query.dir);
-	params.set('limit', String(limit));
-	if (query.cursor) params.set('cursor', query.cursor);
-	return params;
+	defaults: { sort: string | null; dir: SortDir },
+	pageSize: number
+): Row[] {
+	const query = readTableQuery(search, id, columns, defaults);
+	return applyTable(filterRows(rows, columns, readFilters(search, id, columns)), columns, query, pageSize).rows;
 }
 
 /**
- * Same-page link for a server table.
- * A patch that sets search, sort, direction, or host drops the cursor (and any client page).
- * A cursor-only patch keeps the other params. The one-shot `<id>.logs` is always dropped.
+ * Which page of a client table shows the first row that `match` finds (after its filters, search and
+ * sort), and which page is shown now. `page` is null when the filters or the search hide that row.
  */
-export function serverTableHref(
-	url: URL,
+export function rowPage<Row>(
+	rows: readonly Row[],
+	columns: readonly Column<Row>[],
+	search: URLSearchParams,
 	id: string,
-	patch: Partial<{ q: string | null; sort: string | null; dir: SortDir | null; host: string | null; cursor: string | null }>
-): string {
+	defaults: { sort: string | null; dir: SortDir },
+	pageSize: number,
+	match: (row: Row) => boolean
+): { page: number | null; current: number } {
+	const query = readTableQuery(search, id, columns, defaults);
+	const filtered = filterRows(rows, columns, readFilters(search, id, columns));
+	const current = applyTable(filtered, columns, query, pageSize).page;
+	const index = sortRows(searchRows(filtered, columns, query.q), columns, query.sort, query.dir).findIndex(match);
+	return { page: index < 0 ? null : Math.floor(index / pageSize) + 1, current };
+}
+
+/** The same page of the table on another page number. Unlike `tableHref`, every other param stays. */
+export function pageHrefKeepingAll(url: URL, id: string, page: number): string {
 	const params = new URLSearchParams(url.searchParams);
-	params.delete(tableParam(id, 'logs'));
-	const changesQuery = 'q' in patch || 'sort' in patch || 'dir' in patch || 'host' in patch;
-	const write = (key: 'q' | 'sort' | 'dir' | 'host', value: string | null | undefined) => {
-		const name = tableParam(id, key);
-		if (value == null || value === '') params.delete(name);
-		else params.set(name, value);
-	};
-	if ('q' in patch) write('q', patch.q);
-	if ('sort' in patch) write('sort', patch.sort);
-	if ('dir' in patch) write('dir', patch.dir);
-	if ('host' in patch) write('host', patch.host);
-	if (changesQuery) {
-		params.delete(tableParam(id, 'cursor'));
-		params.delete(tableParam(id, 'page'));
-	} else if ('cursor' in patch) {
-		const name = tableParam(id, 'cursor');
-		if (patch.cursor == null || patch.cursor === '') params.delete(name);
-		else params.set(name, patch.cursor);
-	}
+	if (page <= 1) params.delete(tableParam(id, 'page'));
+	else params.set(tableParam(id, 'page'), String(page));
 	const qs = params.toString();
 	return qs ? `${url.pathname}?${qs}` : url.pathname;
 }
 
-/** First click uses `firstDir`. The active column toggles. The cursor is dropped. */
-export function serverSortHref(
-	url: URL,
-	id: string,
-	column: { key: string; firstDir?: SortDir },
-	query: { sort: string | null; dir: SortDir }
-): string {
-	const opening: SortDir = column.firstDir === 'desc' ? 'desc' : 'asc';
-	const dir: SortDir = query.sort === column.key ? (query.dir === 'asc' ? 'desc' : 'asc') : opening;
-	return serverTableHref(url, id, { sort: column.key, dir });
-}
-
-/**
- * Search keeps sort, direction, and host, and drops `q`, the cursor, and the client page.
- * The one-shot `<id>.logs` is never carried on.
- */
-export function serverSearchHiddenFields(search: URLSearchParams, id: string): Array<{ name: string; value: string }> {
-	const skip = new Set([tableParam(id, 'q'), tableParam(id, 'cursor'), tableParam(id, 'page'), tableParam(id, 'logs')]);
+/** Host filter keeps the other params and drops the host, the page, and the one-shot `<id>.logs`. */
+export function hostFilterHiddenFields(search: URLSearchParams, id: string): Array<{ name: string; value: string }> {
+	const skip = new Set([tableParam(id, 'host'), tableParam(id, 'page'), tableParam(id, 'logs')]);
 	const fields: Array<{ name: string; value: string }> = [];
 	for (const [name, value] of search) {
 		if (!skip.has(name)) fields.push({ name, value });
@@ -473,53 +369,9 @@ export function serverSearchHiddenFields(search: URLSearchParams, id: string): A
 	return fields;
 }
 
-/** Host filter keeps the other params and drops the host, the cursor, the client page, and the one-shot `<id>.logs`. */
-export function serverHostHiddenFields(search: URLSearchParams, id: string): Array<{ name: string; value: string }> {
-	const skip = new Set([tableParam(id, 'host'), tableParam(id, 'cursor'), tableParam(id, 'page'), tableParam(id, 'logs')]);
-	const fields: Array<{ name: string; value: string }> = [];
-	for (const [name, value] of search) {
-		if (!skip.has(name)) fields.push({ name, value });
-	}
-	return fields;
-}
-
-/**
- * Item numbers for one server page.
- * The cursor is opaque, so the start index is known on the first page (no prev cursor)
- * and the last page (no next cursor). A middle page leaves `from` at 0.
- */
-export function serverPageBounds(
-	total: number,
-	count: number,
-	prevCursor: string | null,
-	nextCursor: string | null
-): { from: number; to: number; total: number } {
-	const safeTotal = Number.isSafeInteger(total) && total > 0 ? total : 0;
-	const safeCount = Number.isSafeInteger(count) && count > 0 ? Math.min(count, safeTotal) : 0;
-	if (safeTotal === 0 || safeCount === 0) return { from: 0, to: 0, total: safeTotal };
-	if (prevCursor == null) return { from: 1, to: safeCount, total: safeTotal };
-	if (nextCursor == null) {
-		const from = Math.max(1, safeTotal - safeCount + 1);
-		return { from, to: safeTotal, total: safeTotal };
-	}
-	return { from: 0, to: safeCount, total: safeTotal };
-}
-
-/** `Showing a–b of total`. A middle page, whose offset is unknown, is `Showing n of total`. */
-export function serverPagerText(from: number, to: number, total: number): string {
+/** `Showing a–b of total`. */
+export function pagerText(from: number, to: number, total: number): string {
 	if (from > 0) return `Showing ${from}\u2013${to} of ${total}`;
 	if (to > 0) return `Showing ${to} of ${total}`;
 	return `Showing 0\u2013${0} of ${total}`;
-}
-
-/** A search, another page, or more rows than this response needs the pager. */
-export function serverPagerVisible(
-	total: number,
-	count: number,
-	q: string,
-	prevCursor: string | null,
-	nextCursor: string | null
-): boolean {
-	if (total <= 0) return false;
-	return q !== '' || prevCursor != null || nextCursor != null || total > count;
 }

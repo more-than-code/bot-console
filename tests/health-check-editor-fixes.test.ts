@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { after, before, describe, mock, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
-import { render } from 'svelte/server';
 import type { Host, ProbeView, ProjectServiceRow } from '../src/lib/api-types.ts';
 import {
 	HEALTH_CLOSE_FALLBACK_MS,
@@ -25,10 +24,10 @@ import {
 	validateHealthChecks,
 	type CheckDraft
 } from '../src/lib/health-checks.ts';
-import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import { actions as projectActions } from '../src/routes/projects/[id]/+page.server.ts';
 import { containsToken, envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
-import { setPageUrl } from './stubs/app-state.ts';
+import { programCatalogEntry, renderCopies } from './copies.ts';
+import { copyMenuItems } from '../src/lib/row-menu.ts';
 
 const HOST_ID = '00000000-0000-4000-8000-0000000000aa';
 const SERVICE_ID = '00000000-0000-4000-8000-0000000000bb';
@@ -80,7 +79,7 @@ function serviceRow(overrides: Partial<ProjectServiceRow> = {}): ProjectServiceR
 	return {
 		id: SERVICE_ID,
 		name: 'port-80',
-		source: 'discovered',
+		source: 'owned',
 		kind: 'process',
 		ports: [80, 443],
 		health: { status: 'up', last_checked_at: '2026-10-14T00:00:00Z', latency_ms: 4, source: null },
@@ -95,34 +94,22 @@ function serviceRow(overrides: Partial<ProjectServiceRow> = {}): ProjectServiceR
 		project_name: 'Lab',
 		checks: [{ id: CHECK_ID, protocol: 'http', port: 80, path: '/health', enabled: true }],
 		checksMessage: null,
-		catalog_entry: null,
+		catalog_entry: 'widget',
 		container_name: null,
 		image_digest: null,
 		...overrides
 	};
 }
 
+/** The Catalog & services tab with entry `widget` and this copy under it. */
 function renderServices(extra: Record<string, unknown> = {}, row: ProjectServiceRow = serviceRow()) {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
-	return render(ServicesSection, {
-		props: {
-			projectId: PROJECT.id,
-			projectName: 'Lab',
-			hosts: [HOST],
-			canAdmin: true,
-			rows: [row],
-			total: 1,
-			prevCursor: null,
-			nextCursor: null,
-			omitted: 0,
-			message: null,
-			probe: null,
-			probeServiceId: null,
-			renameServiceId: null,
-			typedName: null,
-			...extra
-		}
-	}).body.replaceAll('&amp;', '&').replaceAll('&quot;', '"');
+	return renderCopies({
+		rows: [row],
+		entries: [programCatalogEntry('widget', ['logs'])],
+		hosts: [HOST],
+		canAdmin: true,
+		...extra
+	}).replaceAll('&amp;', '&').replaceAll('&quot;', '"');
 }
 
 function formFrom(drafts: readonly CheckDraft[]): Record<string, string[]> {
@@ -186,7 +173,7 @@ function replacedDraft(): CheckDraft[] {
 
 function saveEvent(form: Record<string, string | readonly string[]>) {
 	return fakeEvent({
-		url: `http://console.example/projects/${PROJECT.id}?tab=services&/saveHealthChecks`,
+		url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/saveHealthChecks`,
 		session: TOKEN,
 		user: USER,
 		projects: [PROJECT],
@@ -197,7 +184,7 @@ function saveEvent(form: Record<string, string | readonly string[]>) {
 
 function probeEvent(form: Record<string, string | readonly string[]>) {
 	return fakeEvent({
-		url: `http://console.example/projects/${PROJECT.id}?tab=services&/probe`,
+		url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/probe`,
 		session: TOKEN,
 		user: USER,
 		projects: [PROJECT],
@@ -427,11 +414,15 @@ describe('health check editor fixes', () => {
 
 	test('an unread row disables Health checks and does not offer Save', () => {
 		const html = renderServices({}, serviceRow({ checks: [], checksMessage: 'The API is unavailable.' }));
-		assert.match(html, /disabled[^>]*aria-label="Health checks could not be read\."/);
-		assert.equal(html.includes(`title="${UNREAD_HEALTH_CHECKS}"`), true);
+		// The ⋯ menu's Health checks item is disabled and says why.
+		const [health] = copyMenuItems({ entry: 'widget', host: 'pi1', state: null, restart: false, logs: false, health: { disabledReason: UNREAD_HEALTH_CHECKS }, rename: true, label: 'Widget' });
+		assert.equal(health?.key, 'health');
+		assert.equal(health?.disabledReason, UNREAD_HEALTH_CHECKS);
+		assert.match(html, /aria-label="More actions for Widget on pi1"/);
 		assert.equal(html.includes('name="hc_protocol"'), false);
 		assert.equal(html.includes('>Save<'), false);
-		assert.equal(html.includes('The API is unavailable.'), true);
+		// The checks are not listed in the services table any more (only in the dialog).
+		assert.equal(html.includes('The API is unavailable.'), false);
 		const viewer = renderServices({ canAdmin: false }, serviceRow({ checks: [], checksMessage: UNREAD_HEALTH_CHECKS }));
 		assert.equal(viewer.includes(`title="${UNREAD_HEALTH_CHECKS}"`), false);
 	});

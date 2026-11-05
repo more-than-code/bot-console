@@ -13,7 +13,6 @@
 	import HostsSection from './HostsSection.svelte';
 	import { page } from '$app/state';
 	import MembersSection from './MembersSection.svelte';
-	import ServicesSection from './ServicesSection.svelte';
 	import SettingsSection from './SettingsSection.svelte';
 	import TokensSection from './TokensSection.svelte';
 
@@ -28,7 +27,7 @@
 	const rename = $derived(servicesRenameView(action));
 	const healthEditor = $derived(servicesHealthView(action));
 	const catalogEditor = $derived(action?.scope === 'catalog' ? (action.catalogEditor ?? null) : null);
-	const serviceRun = $derived(action?.scope === 'services' ? (action.catalogAction ?? null) : null);
+	const serviceRun = $derived(action?.scope === 'catalog' ? (action.catalogAction ?? null) : null);
 	const imageEditor = $derived(action?.scope === 'catalog' ? (action.imageEditor ?? null) : null);
 	const imageDeploy = $derived(action?.scope === 'catalog' ? (action.imageDeploy ?? null) : null);
 	const catalogPermissions = $derived(
@@ -43,9 +42,8 @@
 		data.project
 			? [
 					{ key: 'hosts', label: 'Hosts', href: `/projects/${data.project.id}?tab=hosts` },
-					// No hover preload: the Services load reads container status from the hosts.
-					{ key: 'services', label: 'Services', href: `/projects/${data.project.id}?tab=services`, preload: 'off' as const },
-					{ key: 'catalog', label: 'Catalog', href: `/projects/${data.project.id}?tab=catalog` },
+					// No hover preload: the load reads container status from the hosts.
+					{ key: 'catalog', label: 'Catalog & services', href: `/projects/${data.project.id}?tab=catalog`, preload: 'off' as const },
 					{ key: 'members', label: 'Members', href: `/projects/${data.project.id}?tab=members` },
 					...(data.canAdmin
 						? [{ key: 'tokens', label: 'Join tokens', href: `/projects/${data.project.id}?tab=tokens` }]
@@ -117,38 +115,9 @@
 				/>
 			{/if}
 		</HostsSection>
-	{:else if scope === 'services'}
-		<ServicesSection
-			projectId={data.project.id}
-			projectName={data.project.name}
-			hosts={data.hosts}
-			canAdmin={data.canAdmin}
-			rows={data.services}
-			total={data.servicesTotal}
-			prevCursor={data.servicesPrev}
-			nextCursor={data.servicesNext}
-			omitted={data.servicesOmitted}
-			message={sectionMessage ?? data.servicesMessage}
-			probe={action?.scope === 'services' ? (action.probe ?? null) : null}
-			probeServiceId={action?.scope === 'services' ? (action.probeServiceId ?? null) : null}
-			editorProbe={healthEditor.editorProbe}
-			renameServiceId={rename.renameServiceId}
-			typedName={rename.typedName}
-			healthServiceId={healthEditor.serviceId}
-			healthField={healthEditor.field}
-			healthIndex={healthEditor.index}
-			healthMessage={healthEditor.message}
-			probeIndex={action?.scope === 'services' ? (action.probeIndex ?? null) : null}
-			probeMessage={action?.scope === 'services' ? (action.probeMessage ?? null) : null}
-			onHealthSaved={toastHealthSaved}
-			entries={data.serviceEntries ?? []}
-			entriesMessage={data.serviceEntriesMessage ?? null}
-			notRunning={data.notRunning ?? []}
-			notRunningKnown={data.notRunningKnown ?? true}
-			serviceStates={data.serviceStates ?? null}
-			runResult={serviceRun}
-		/>
 	{:else if scope === 'catalog'}
+		<!-- A new project starts with fresh open entries and states. -->
+		{#key data.project.id}
 		<CatalogSection
 			canOwner={data.canOwner}
 			canAdmin={data.canAdmin}
@@ -164,7 +133,29 @@
 			imageDeploy={imageDeploy}
 			onImageSaved={toastImageSaved}
 			projectId={data.project.id}
+			copies={data.copies ?? {}}
+			copiesComplete={data.copiesComplete ?? true}
+			copiesOmitted={data.copiesOmitted ?? 0}
+			copiesMessage={data.copiesMessage ?? null}
+			statusCapped={data.statusCapped ?? false}
+			notRunning={data.notRunning ?? []}
+			notRunningKnown={data.notRunningKnown ?? true}
+			serviceStates={data.serviceStates ?? null}
+			runResult={serviceRun}
+			probe={action?.scope === 'catalog' ? (action.probe ?? null) : null}
+			probeServiceId={action?.scope === 'catalog' ? (action.probeServiceId ?? null) : null}
+			editorProbe={healthEditor.editorProbe}
+			renameServiceId={rename.renameServiceId}
+			typedName={rename.typedName}
+			healthServiceId={healthEditor.serviceId}
+			healthField={healthEditor.field}
+			healthIndex={healthEditor.index}
+			healthMessage={healthEditor.message}
+			probeIndex={action?.scope === 'catalog' ? (action.probeIndex ?? null) : null}
+			probeMessage={action?.scope === 'catalog' ? (action.probeMessage ?? null) : null}
+			onHealthSaved={toastHealthSaved}
 		/>
+		{/key}
 	{:else if scope === 'members'}
 		<MembersSection
 			members={data.members}

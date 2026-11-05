@@ -132,9 +132,10 @@ async function readServiceLinks(event: RequestEvent, hostId: string): Promise<Re
 		for (const item of parsed.raw.slice(0, 500)) {
 			const service = parseService(item);
 			if (!service) continue;
+			// Only a catalog copy has a row on the project's Catalog & services tab.
 			const href =
-				service.project_id && members.has(service.project_id)
-					? processServiceHref(service.project_id, hostId, service.name)
+				service.project_id && members.has(service.project_id) && service.source === 'owned' && service.catalog_entry
+					? processServiceHref(service.project_id, hostId, service.catalog_entry)
 					: null;
 			links[service.id] = { label: serviceLabel(service), href };
 		}
@@ -210,7 +211,7 @@ export const load: PageServerLoad = async (event) => {
 		if (!host) return present(event, blank(query.tab, query.range, query.processSort, 'The API returned an unexpected response.'));
 		if (event.url.searchParams.get('tab') === 'services') {
 			const project = await projectForServices(event, host);
-			if (project) redirect(303, `/projects/${project}?tab=services&services.host=${host.id}`);
+			if (project) redirect(303, `/projects/${project}?tab=catalog&catalog.host=${host.id}`);
 		}
 		const approvals = await loadApprovals(event, host);
 		if (query.tab === 'processes') return present(event, { ...(await loadProcesses(event, host, query.range, query.processSort)), ...approvals });

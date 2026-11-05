@@ -13,23 +13,16 @@
 		DEFAULT_PAGE_SIZE,
 		filterHref,
 		filterRows,
+		pagerText as pagerTextOf,
 		pagerVisible,
 		readFilters,
-		readServerTableQuery,
 		readTableQuery,
 		searchHiddenFields,
-		serverPageBounds,
-		serverPagerText,
-		serverPagerVisible,
-		serverSearchHiddenFields,
-		serverSortHref,
-		serverTableHref,
 		sortHref,
 		tableHref,
 		tableParam,
 		type ActiveFilter,
 		type Column,
-		type ServerTable,
 		type SortDir
 	} from '$lib/table';
 	import { cn } from '$lib/utils';
@@ -48,8 +41,8 @@
 		defaultSort = null,
 		defaultDir = 'asc',
 		searchLabel = '',
-		server = null,
-		emptyExtra
+		emptyExtra,
+		toolbar
 	}: {
 		rows: readonly Row[];
 		columns: Column<Row>[];
@@ -59,45 +52,23 @@
 		empty: string;
 		row: Snippet<[Row]>;
 		emptyExtra?: Snippet;
+		/** Controls (such as a filter form) on one wrapping row with the search, before it. */
+		toolbar?: Snippet;
 		/** Keeps form controls on the same record when the page or sort changes. */
 		rowKey?: (row: Row) => string | number;
 		defaultSort?: string | null;
 		defaultDir?: SortDir;
 		searchLabel?: string;
-		/** Rows are already paged. Sort, search, and the pager write namespaced URL params. */
-		server?: ServerTable | null;
 	} = $props();
 
-	const serverMode = $derived(server != null);
-	const clientQuery = $derived(readTableQuery(page.url.searchParams, id, columns, { sort: defaultSort, dir: defaultDir }));
-	const serverQuery = $derived(
-		serverMode
-			? readServerTableQuery(page.url.searchParams, id, columns, { sort: defaultSort ?? 'name', dir: defaultDir })
-			: null
-	);
-	/** Header filters narrow client rows only. A server table has none (its API would have to filter). */
-	const filters = $derived(serverMode ? [] : readFilters(page.url.searchParams, id, columns));
-	const clientView = $derived(
-		serverMode ? null : applyTable(filterRows(rows, columns, filters), columns, clientQuery, pageSize)
-	);
-	const bounds = $derived(
-		server ? serverPageBounds(server.total, rows.length, server.prevCursor, server.nextCursor) : null
-	);
-	const shown = $derived(serverMode ? rows : (clientView?.rows ?? []));
-	const canSearch = $derived(serverMode || columns.some((column) => column.searchable));
-	const active = $derived(serverQuery ? { q: serverQuery.q, sort: serverQuery.sort, dir: serverQuery.dir } : clientQuery);
-	const showPager = $derived(
-		server && serverQuery
-			? serverPagerVisible(server.total, rows.length, serverQuery.q, server.prevCursor, server.nextCursor)
-			: (clientView?.total ?? 0) > 0 && pagerVisible(clientView?.total ?? 0, pageSize, clientQuery.q)
-	);
-	const pagerText = $derived(
-		bounds
-			? serverPagerText(bounds.from, bounds.to, bounds.total)
-			: clientView
-				? serverPagerText(clientView.from, clientView.to, clientView.total)
-				: ''
-	);
+	const query = $derived(readTableQuery(page.url.searchParams, id, columns, { sort: defaultSort, dir: defaultDir }));
+	/** Header filters narrow the rows the page already has. */
+	const filters = $derived(readFilters(page.url.searchParams, id, columns));
+	const view = $derived(applyTable(filterRows(rows, columns, filters), columns, query, pageSize));
+	const shown = $derived(view.rows);
+	const canSearch = $derived(columns.some((column) => column.searchable));
+	const showPager = $derived(view.total > 0 && pagerVisible(view.total, pageSize, query.q));
+	const pagerText = $derived(pagerTextOf(view.from, view.to, view.total));
 
 	const labelText = $derived.by(() => {
 		if (searchLabel) return searchLabel;
@@ -106,22 +77,14 @@
 		return `Search ${labels.slice(0, -1).join(', ')}, or ${labels[labels.length - 1]}`;
 	});
 
-	const hidden = $derived(
-		serverMode ? serverSearchHiddenFields(page.url.searchParams, id) : searchHiddenFields(page.url.searchParams, id)
-	);
+	const hidden = $derived(searchHiddenFields(page.url.searchParams, id));
 
 	function hrefFor(next: string | null): string {
-		if (serverMode) return serverTableHref(page.url, id, { q: next });
 		return tableHref(page.url, id, { q: next, page: null });
 	}
 
 	function sortLink(column: Column<Row>): string {
-		if (serverQuery) return serverSortHref(page.url, id, column, serverQuery);
-		return sortHref(page.url, id, column, clientQuery);
-	}
-
-	function cursorHref(cursor: string): string {
-		return serverTableHref(page.url, id, { cursor });
+		return sortHref(page.url, id, column, query);
 	}
 
 	function filterOf(column: Column<Row>): ActiveFilter | null {
@@ -136,7 +99,7 @@
 	});
 
 	function sortName(column: Column<Row>): string {
-		if (active.sort === column.key) return `Sorted by ${column.label}`;
+		if (query.sort === column.key) return `Sorted by ${column.label}`;
 		return `Sort by ${column.label}`;
 	}
 </script>
@@ -151,9 +114,9 @@
 			aria-label={sortName(column)}
 		>
 			{#if column.srLabel}<span class="sr-only">{column.label}</span>{:else}{column.label}{/if}
-			{#if active.sort !== column.key}
+			{#if query.sort !== column.key}
 				<ArrowUpDown class="text-muted-foreground size-3.5" aria-hidden="true" data-sort-icon="none" />
-			{:else if active.dir === 'asc'}
+			{:else if query.dir === 'asc'}
 				<ArrowUp class="size-3.5" aria-hidden="true" data-sort-icon="asc" />
 			{:else}
 				<ArrowDown class="size-3.5" aria-hidden="true" data-sort-icon="desc" />
@@ -174,9 +137,17 @@
 		>
 	{/each}
 {/snippet}
-{#if canSearch}
+{#if toolbar}
+	<div class="flex min-w-0 flex-wrap items-end gap-x-2">
+		{@render toolbar()}
+		{#if canSearch}<div class="min-w-0 grow basis-64">{@render search()}</div>{/if}
+	</div>
+{:else if canSearch}
+	{@render search()}
+{/if}
+{#snippet search()}
 	<SearchField
-		q={active.q === '' ? null : active.q}
+		q={query.q === '' ? null : query.q}
 		label={labelText}
 		name={tableParam(id, 'q')}
 		action={page.url.pathname}
@@ -184,7 +155,7 @@
 		{hrefFor}
 		extra={filters.length > 0 ? chips : undefined}
 	/>
-{/if}
+{/snippet}
 {#if shown.length === 0 && filters.length === 0}
 	<p class="text-muted-foreground text-sm">{empty}{#if emptyExtra}{@render emptyExtra()}{/if}</p>
 {:else}
@@ -195,9 +166,9 @@
 					<Table.Head
 						scope="col"
 						class={cn(column.numeric ? 'text-right' : undefined, column.hideBelowSm && 'max-sm:hidden') || undefined}
-						aria-sort={ariaSort(column, active)}
+						aria-sort={ariaSort(column, query)}
 					>
-						{#if column.filter && !serverMode}
+						{#if column.filter}
 							<span class="inline-flex items-center">
 								{@render heading(column)}
 								<TableFilter
@@ -230,28 +201,15 @@
 	{#if showPager}
 		<nav class="pager mt-3 flex flex-wrap items-center gap-2 text-sm" aria-label="Pagination">
 			<span>{pagerText}</span>
-			{#if server}
-				{#if server.prevCursor}
-					<Button href={cursorHref(server.prevCursor)} variant="outline" size="sm">Prev</Button>
-				{:else}
-					<Button variant="outline" size="sm" disabled>Prev</Button>
-				{/if}
-				{#if server.nextCursor}
-					<Button href={cursorHref(server.nextCursor)} variant="outline" size="sm">Next</Button>
-				{:else}
-					<Button variant="outline" size="sm" disabled>Next</Button>
-				{/if}
-			{:else if clientView}
-				{#if clientView.page > 1}
-					<Button href={tableHref(page.url, id, { page: clientView.page - 1 })} variant="outline" size="sm">Prev</Button>
-				{:else}
-					<Button variant="outline" size="sm" disabled>Prev</Button>
-				{/if}
-				{#if clientView.page < clientView.pages}
-					<Button href={tableHref(page.url, id, { page: clientView.page + 1 })} variant="outline" size="sm">Next</Button>
-				{:else}
-					<Button variant="outline" size="sm" disabled>Next</Button>
-				{/if}
+			{#if view.page > 1}
+				<Button href={tableHref(page.url, id, { page: view.page - 1 })} variant="outline" size="sm">Prev</Button>
+			{:else}
+				<Button variant="outline" size="sm" disabled>Prev</Button>
+			{/if}
+			{#if view.page < view.pages}
+				<Button href={tableHref(page.url, id, { page: view.page + 1 })} variant="outline" size="sm">Next</Button>
+			{:else}
+				<Button variant="outline" size="sm" disabled>Next</Button>
 			{/if}
 		</nav>
 	{/if}

@@ -4,10 +4,9 @@ import { after, before, describe, test } from 'node:test';
 import { render } from 'svelte/server';
 import type { CatalogAction, Host, ImageDeploy, ImageEntry, ProjectServiceRow } from '../src/lib/api-types.ts';
 import type { ImageDeployState } from '../src/lib/project-action.ts';
-import type { ServiceEntryRef } from '../src/lib/service-actions.ts';
 import { processServiceHref, serviceLogsHref } from '../src/lib/service-label.ts';
 import {
-	SERVICE_LOGS_PARAM,
+	CATALOG_LOGS_PARAM,
 	dropServiceLogs,
 	serviceFilterKey,
 	serviceLogsEntry,
@@ -16,13 +15,14 @@ import {
 	serviceLogsStep,
 	withoutServiceLogs
 } from '../src/lib/service-view.ts';
-import { serverHostHiddenFields, serverSearchHiddenFields, serverTableHref } from '../src/lib/table.ts';
+import { filterHref, hostFilterHiddenFields, pageHrefKeepingAll, rowPage, searchHiddenFields, sortHref, tableHref, type Column } from '../src/lib/table.ts';
+import { openOnRequest } from '../src/lib/log-view.ts';
 import CatalogDeployForm from '../src/routes/projects/[id]/CatalogDeployForm.svelte';
 import LogsDrawer from '../src/routes/projects/[id]/LogsDrawer.svelte';
-import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
-import { actionUrlFrom, backTo, onPlainClick } from '../src/lib/url.ts';
+import { actionUrlFrom, backTo, onPlainClick, permissionsCloseHrefFor, permissionsOpenFields } from '../src/lib/url.ts';
 import { actions as projectActions } from '../src/routes/projects/[id]/+page.server.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
+import { imageCatalogEntry, renderCopies } from './copies.ts';
 import { replaceState, replaceStateCalls } from './stubs/app-navigation.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 
@@ -80,40 +80,22 @@ function row(overrides: Partial<ProjectServiceRow> = {}): ProjectServiceRow {
 	};
 }
 
-function entryRef(actions: CatalogAction[] = ALL, name = 'web'): ServiceEntryRef {
-	return { name, kind: 'image', my_actions: actions, runAs: '', shell: false };
+function catalogUrl(params: Record<string, string>): string {
+	return `http://console.example/projects/${PROJECT.id}?${new URLSearchParams({ tab: 'catalog', ...params }).toString()}`;
 }
 
-function servicesUrl(params: Record<string, string>): string {
-	return `http://console.example/projects/${PROJECT.id}?${new URLSearchParams({ tab: 'services', ...params }).toString()}`;
-}
-
+/** The tab with entry `web` (every grant) and these copies. */
 function renderServices(url: string, rows: ProjectServiceRow[], extra: Record<string, unknown> = {}): string {
-	setPageUrl(url);
-	return render(ServicesSection, {
-		props: {
-			projectId: PROJECT.id,
-			projectName: 'Lab',
-			hosts: [host(), host(OTHER_HOST, 'pi2')],
-			canAdmin: false,
-			rows,
-			total: rows.length,
-			prevCursor: null,
-			nextCursor: null,
-			omitted: 0,
-			message: null,
-			probe: null,
-			probeServiceId: null,
-			renameServiceId: null,
-			typedName: null,
-			entries: [entryRef()],
-			layout: 'wide',
-			...extra
-		}
-	}).body;
+	return renderCopies({
+		rows,
+		url,
+		hosts: [host(), host(OTHER_HOST, 'pi2')],
+		entries: [imageCatalogEntry('web', ALL)],
+		...extra
+	});
 }
 
-/** The opening tag of one services row. */
+/** The opening tag of one copy row. */
 function rowTag(html: string, id: string): string {
 	const match = new RegExp(`<tr[^>]*id="service-${id}"[^>]*>`).exec(html);
 	assert.ok(match, `row ${id} rendered`);
@@ -127,16 +109,13 @@ function logsButton(html: string, hostName = 'pi1'): string {
 	return match[0];
 }
 
-describe('services.logs link helpers', () => {
-	test('serviceLogsHref is the Services link for that host and entry plus services.logs', () => {
+describe('catalog.logs link helpers', () => {
+	test('serviceLogsHref is the tab link for that host and entry plus catalog.logs', () => {
 		const href = serviceLogsHref(PROJECT.id, HOST_ID, 'web');
+		assert.equal(href, `/projects/${PROJECT.id}?tab=catalog&catalog.host=${HOST_ID}&catalog.q=web&catalog.logs=web`);
 		assert.equal(href.startsWith(`${processServiceHref(PROJECT.id, HOST_ID, 'web')}&`), true);
 		const url = new URL(href, 'http://console.example');
-		assert.equal(url.pathname, `/projects/${PROJECT.id}`);
-		assert.equal(url.searchParams.get('tab'), 'services');
-		assert.equal(url.searchParams.get('services.host'), HOST_ID);
-		assert.equal(url.searchParams.get('services.q'), 'web');
-		assert.equal(url.searchParams.get(SERVICE_LOGS_PARAM), 'web');
+		assert.equal(url.searchParams.get(CATALOG_LOGS_PARAM), 'web');
 	});
 
 	test('serviceLogsEntry accepts catalog names only', () => {
@@ -161,55 +140,91 @@ describe('services.logs link helpers', () => {
 		assert.equal(serviceLogsRow([row({ catalog_entry: null })], request, PROJECT.id), null);
 	});
 
-	test('withoutServiceLogs drops only services.logs', () => {
-		const url = new URL(servicesUrl({ 'services.host': HOST_ID, 'services.q': 'web', 'services.logs': 'web', show: 'all' }));
+	test('withoutServiceLogs drops only catalog.logs', () => {
+		const url = new URL(catalogUrl({ 'catalog.host': HOST_ID, 'catalog.q': 'web', 'catalog.logs': 'web', 'catalog.kind': 'service' }));
 		const next = new URL(withoutServiceLogs(url), 'http://console.example');
-		assert.equal(next.searchParams.has(SERVICE_LOGS_PARAM), false);
-		assert.equal(next.searchParams.get('services.host'), HOST_ID);
-		assert.equal(next.searchParams.get('services.q'), 'web');
-		assert.equal(next.searchParams.get('show'), 'all');
-		assert.equal(next.searchParams.get('tab'), 'services');
+		assert.equal(next.searchParams.has(CATALOG_LOGS_PARAM), false);
+		assert.equal(next.searchParams.get('catalog.host'), HOST_ID);
+		assert.equal(next.searchParams.get('catalog.q'), 'web');
+		assert.equal(next.searchParams.get('catalog.kind'), 'service');
+		assert.equal(next.searchParams.get('tab'), 'catalog');
 	});
 
-	test('table links and filter forms never carry services.logs on', () => {
-		const url = new URL(servicesUrl({ 'services.host': HOST_ID, 'services.q': 'web', 'services.logs': 'web' }));
+	test('table links, filter forms and the Permissions drawer never carry catalog.logs on', () => {
+		// After use the param leaves the address bar, but `page.url` keeps it, so every link must drop it.
+		const url = new URL(catalogUrl({ 'catalog.host': HOST_ID, 'catalog.q': 'web', 'catalog.logs': 'web' }));
 		const names = (fields: Array<{ name: string }>) => fields.map((field) => field.name);
-		assert.equal(names(serverHostHiddenFields(url.searchParams, 'services')).includes(SERVICE_LOGS_PARAM), false);
-		assert.equal(names(serverSearchHiddenFields(url.searchParams, 'services')).includes(SERVICE_LOGS_PARAM), false);
-		assert.equal(serverTableHref(url, 'services', { sort: 'name' }).includes('services.logs'), false);
-		assert.equal(serverTableHref(url, 'services', { cursor: 'abc' }).includes('services.logs'), false);
+		assert.equal(names(hostFilterHiddenFields(url.searchParams, 'catalog')).includes(CATALOG_LOGS_PARAM), false);
+		assert.equal(names(searchHiddenFields(url.searchParams, 'catalog')).includes(CATALOG_LOGS_PARAM), false);
+		assert.equal(names(permissionsOpenFields(url, 'web')).includes(CATALOG_LOGS_PARAM), false);
+		assert.equal(permissionsCloseHrefFor(url).includes('catalog.logs'), false);
+		assert.equal(tableHref(url, 'catalog', { page: 2 }).includes('catalog.logs'), false);
+		assert.equal(sortHref(url, 'catalog', { key: 'name' }, { sort: null, dir: 'asc' }).includes('catalog.logs'), false);
+		assert.equal(filterHref(url, 'catalog', 'kind', 'service').includes('catalog.logs'), false);
+		assert.equal(tableHref(url, 'catalog', { page: 2 }).includes(`catalog.host=${HOST_ID}`), true);
 		assert.equal(serviceLogsMissingNote('web'), "web isn't listed on this host yet. Refresh in a moment.");
 	});
 });
 
-describe('services.logs after use', () => {
-	const linked = new URL(servicesUrl({ 'services.host': HOST_ID, 'services.q': 'web', 'services.logs': 'web' }));
+describe('catalog.logs after use', () => {
+	const linked = new URL(catalogUrl({ 'catalog.host': HOST_ID, 'catalog.q': 'web', 'catalog.logs': 'web' }));
 	const path = `/projects/${PROJECT.id}`;
 
-	test('action URLs and the redirect after an action drop services.logs and keep the rest', () => {
+	test('action URLs and the redirect after an action drop catalog.logs and keep the rest', () => {
 		const action = actionUrlFrom(linked, 'rename');
-		assert.equal(action.includes('services.logs'), false);
-		assert.equal(action.includes(`services.host=${HOST_ID}`), true);
+		assert.equal(action.includes('catalog.logs'), false);
+		assert.equal(action.includes(`catalog.host=${HOST_ID}`), true);
 		assert.equal(action.endsWith('&/rename'), true);
 		const posted = new URL(`http://console.example${path}?${linked.searchParams.toString()}&/rename`);
 		const back = backTo(posted);
-		assert.equal(back.includes('services.logs'), false);
-		assert.equal(back, `${path}?tab=services&services.host=${HOST_ID}&services.q=web`);
+		assert.equal(back.includes('catalog.logs'), false);
+		assert.equal(back, `${path}?tab=catalog&catalog.host=${HOST_ID}&catalog.q=web`);
 	});
 
-	test('the step waits for the row state, then opens and clears once', () => {
-		assert.equal(serviceLogsStep({ done: false, rowId: null, controls: null }), 'none');
-		assert.equal(serviceLogsStep({ done: false, rowId: SERVICE_ID, controls: 'checking' }), 'wait');
-		assert.equal(serviceLogsStep({ done: false, rowId: SERVICE_ID, controls: { logs: true } }), 'open-and-clear');
+	test('the step waits for the row state and its rendered row, then opens and clears once', () => {
+		const here = { page: 1, currentPage: 1, rendered: true };
+		assert.equal(serviceLogsStep({ done: false, rowId: null, controls: null, ...here }), 'none');
+		assert.equal(serviceLogsStep({ done: false, rowId: SERVICE_ID, controls: 'checking', ...here }), 'wait');
+		assert.equal(serviceLogsStep({ done: false, rowId: SERVICE_ID, controls: { logs: true }, ...here }), 'open-and-clear');
 		// No grant for any action: still selected and cleared, no drawer.
-		assert.equal(serviceLogsStep({ done: false, rowId: SERVICE_ID, controls: null }), 'open-and-clear');
-		assert.equal(serviceLogsStep({ done: true, rowId: SERVICE_ID, controls: { logs: true } }), 'none');
+		assert.equal(serviceLogsStep({ done: false, rowId: SERVICE_ID, controls: null, ...here }), 'open-and-clear');
+		assert.equal(serviceLogsStep({ done: true, rowId: SERVICE_ID, controls: { logs: true }, ...here }), 'none');
+		// The request is used only once the copy's row is on screen.
+		assert.equal(serviceLogsStep({ done: false, rowId: SERVICE_ID, controls: { logs: true }, ...here, rendered: false }), 'wait');
+		// On another table page: switch to it (the request stays); filtered out: the not-listed note.
+		assert.equal(serviceLogsStep({ done: false, rowId: SERVICE_ID, controls: 'checking', ...here, page: 2 }), 'go-to-page');
+		assert.equal(serviceLogsStep({ done: false, rowId: SERVICE_ID, controls: { logs: true }, ...here, page: null }), 'hidden');
 	});
 
-	test('dropServiceLogs replaces once with the URL without services.logs', () => {
+	test('the page switch keeps catalog.logs and every other param', () => {
+		const url = new URL(catalogUrl({ 'catalog.host': HOST_ID, 'catalog.q': 'web', 'catalog.logs': 'web', 'catalog.page': '1' }));
+		assert.equal(
+			pageHrefKeepingAll(url, 'catalog', 2),
+			`/projects/${PROJECT.id}?tab=catalog&catalog.host=${HOST_ID}&catalog.q=web&catalog.logs=web&catalog.page=2`
+		);
+		assert.equal(pageHrefKeepingAll(url, 'catalog', 1), `/projects/${PROJECT.id}?tab=catalog&catalog.host=${HOST_ID}&catalog.q=web&catalog.logs=web`);
+	});
+
+	test('rowPage finds the table page of a row after filters, search and sort', () => {
+		type Item = { name: string; kind: string };
+		const columns: Column<Item>[] = [
+			{ key: 'name', label: 'Name', sortable: true, searchable: true, value: (item) => item.name },
+			{ key: 'kind', label: 'Kind', value: (item) => item.kind, filter: { param: 'kind', label: 'Kind', options: [{ value: 'a', label: 'As' }], value: (item) => item.kind } }
+		];
+		const items: Item[] = Array.from({ length: 30 }, (_, n) => ({ name: `web-${String(n).padStart(2, '0')}`, kind: n === 27 ? 'b' : 'a' }));
+		const at = (query: string, name: string) =>
+			rowPage(items, columns, new URLSearchParams(query), 't', { sort: 'name', dir: 'asc' }, 25, (item) => item.name === name);
+		assert.deepEqual(at('', 'web-26'), { page: 2, current: 1 });
+		assert.deepEqual(at('t.page=2', 'web-26'), { page: 2, current: 2 });
+		assert.deepEqual(at('t.dir=desc', 'web-26'), { page: 1, current: 1 });
+		assert.deepEqual(at('t.kind=a', 'web-27'), { page: null, current: 1 });
+		assert.deepEqual(at('t.q=web-03', 'web-26'), { page: null, current: 1 });
+	});
+
+	test('dropServiceLogs replaces once with the URL without catalog.logs', () => {
 		replaceStateCalls.length = 0;
 		assert.equal(dropServiceLogs(linked, path, 'web', replaceState), true);
-		assert.deepEqual(replaceStateCalls, [`${path}?tab=services&services.host=${HOST_ID}&services.q=web`]);
+		assert.deepEqual(replaceStateCalls, [`${path}?tab=catalog&catalog.host=${HOST_ID}&catalog.q=web`]);
 		// Already gone, another entry, or another page: no call.
 		const cleared = new URL(`http://console.example${replaceStateCalls[0]}`);
 		assert.equal(dropServiceLogs(cleared, path, 'web', replaceState), false);
@@ -226,20 +241,20 @@ describe('services.logs after use', () => {
 		replaceStateCalls.length = 0;
 	});
 
-	test('the filter key changes with search, host, page, or Show, and not with services.logs or sort', () => {
+	test('the filter key changes with search, host, page, or Kind, and not with catalog.logs or sort', () => {
 		const key = serviceFilterKey(linked.searchParams);
 		const changed = (name: string, value: string) => {
 			const params = new URLSearchParams(linked.searchParams);
 			params.set(name, value);
 			return serviceFilterKey(params);
 		};
-		assert.notEqual(changed('services.q', 'api'), key);
-		assert.notEqual(changed('services.host', OTHER_HOST), key);
-		assert.notEqual(changed('services.cursor', 'abc'), key);
-		assert.notEqual(changed('show', 'all'), key);
-		assert.equal(changed('services.sort', 'host'), key);
+		assert.notEqual(changed('catalog.q', 'api'), key);
+		assert.notEqual(changed('catalog.host', OTHER_HOST), key);
+		assert.notEqual(changed('catalog.page', '2'), key);
+		assert.notEqual(changed('catalog.kind', 'job'), key);
+		assert.equal(changed('catalog.sort', 'name'), key);
 		const without = new URLSearchParams(linked.searchParams);
-		without.delete('services.logs');
+		without.delete('catalog.logs');
 		assert.equal(serviceFilterKey(without), key);
 	});
 });
@@ -308,9 +323,10 @@ describe('Catalog Deploy dialog link', () => {
 		}).body;
 	}
 
-	test('a result on a host links to that Services row and its logs', () => {
+	test('a result on a host links to that copy and its logs on the same tab', () => {
 		const html = deployHtml({ result: result() });
-		assert.equal(html.includes('View logs in Services'), true);
+		assert.match(html, />View logs<\/a>/);
+		assert.equal(html.includes('in Services'), false);
 		const href = serviceLogsHref(PROJECT.id, HOST_ID, 'web').replaceAll('&', '&amp;');
 		assert.match(html, new RegExp(`<a[^>]*href="${href.replace(/[.?]/g, '\\$&')}"[^>]*data-sveltekit-preload-data="off"`));
 	});
@@ -367,10 +383,10 @@ describe('Catalog Deploy dialog link', () => {
 			restoreEnv();
 		});
 
-		test('a finished rollback links to the Services row', async () => {
+		test('a finished rollback links to the copy', async () => {
 			const state = await actionState('catalogRollback', (path) => (path.endsWith('/rollback') ? envelope(rollbackBody) : null));
 			assert.equal(state.outcome?.outcome, 'succeeded');
-			assert.equal(deployHtml({ result: state }).includes('View logs in Services'), true);
+			assert.equal(deployHtml({ result: state }).includes('View logs'), true);
 		});
 
 		test('a pending confirmation has no link', async () => {
@@ -380,24 +396,24 @@ describe('Catalog Deploy dialog link', () => {
 					: null
 			);
 			assert.notEqual(state.confirmation, null);
-			assert.equal(deployHtml({ result: state }).includes('View logs in Services'), false);
+			assert.equal(deployHtml({ result: state }).includes('View logs'), false);
 			// Even next to an outcome, a pending confirmation gets no link.
-			assert.equal(deployHtml({ result: { ...state, outcome: rollbackBody.deploy as ImageDeploy } }).includes('View logs in Services'), false);
+			assert.equal(deployHtml({ result: { ...state, outcome: rollbackBody.deploy as ImageDeploy } }).includes('View logs'), false);
 		});
 
 		test('a remove result has no link', async () => {
 			const state = await actionState('catalogRemove', (path) => (path.endsWith('/remove') ? envelope({ status: { ...statusBody, state: 'missing' } }) : null));
 			assert.equal(state.outcome, null);
 			assert.notEqual(state.status, null);
-			assert.equal(deployHtml({ result: state }).includes('View logs in Services'), false);
+			assert.equal(deployHtml({ result: state }).includes('View logs'), false);
 		});
 	});
 
 	test('no link before a result, without a host, without a project, or in flight', () => {
-		assert.equal(deployHtml({ result: null }).includes('View logs in Services'), false);
-		assert.equal(deployHtml({ result: result({ hostId: '' }) }).includes('View logs in Services'), false);
-		assert.equal(deployHtml({ result: result(), projectId: null }).includes('View logs in Services'), false);
-		assert.equal(deployHtml({ result: result(), inFlight: 'deploy' }).includes('View logs in Services'), false);
+		assert.equal(deployHtml({ result: null }).includes('View logs'), false);
+		assert.equal(deployHtml({ result: result({ hostId: '' }) }).includes('View logs'), false);
+		assert.equal(deployHtml({ result: result(), projectId: null }).includes('View logs'), false);
+		assert.equal(deployHtml({ result: result(), inFlight: 'deploy' }).includes('View logs'), false);
 	});
 
 	test('a plain click closes the dialog; a modified or handled click does not', () => {
@@ -416,8 +432,8 @@ describe('Catalog Deploy dialog link', () => {
 	});
 });
 
-describe('Services tab with services.logs', () => {
-	const linked = servicesUrl({ 'services.host': HOST_ID, 'services.q': 'web', 'services.logs': 'web' });
+describe('Catalog & services tab with catalog.logs', () => {
+	const linked = catalogUrl({ 'catalog.host': HOST_ID, 'catalog.q': 'web', 'catalog.logs': 'web' });
 
 	test('the matching row is selected and its Logs drawer starts open', () => {
 		const html = renderServices(linked, [row()]);
@@ -426,38 +442,47 @@ describe('Services tab with services.logs', () => {
 		assert.match(tag, /data-state="selected"/);
 		assert.match(tag, /data-\[state=selected\]:bg-muted/);
 		// A bar on the left edge, so the selection does not rely on colour alone.
-		assert.match(html, /<td class="[^"]*shadow-\[inset_3px_0_0_var\(--primary\)\][^"]*" data-selected-bar/);
+		assert.match(html, /<td class="px-2 py-1.5 align-middle whitespace-normal max-sm:w-full max-sm:max-w-0 shadow-\[inset_3px_0_0_var\(--primary\)\]" data-selected-bar/);
 		assert.match(logsButton(html), /aria-expanded="true"/);
 		assert.equal(html.includes('data-logs-missing'), false);
 	});
 
-	test('without services.logs nothing is selected and the drawer is closed', () => {
-		const html = renderServices(servicesUrl({ 'services.host': HOST_ID, 'services.q': 'web' }), [row()]);
+	test('without catalog.logs nothing is selected and the drawer is closed', () => {
+		const html = renderServices(catalogUrl({ 'catalog.host': HOST_ID, 'catalog.q': 'web' }), [row()]);
 		assert.doesNotMatch(rowTag(html, SERVICE_ID), /aria-current/);
 		assert.match(logsButton(html), /aria-expanded="false"/);
 	});
 
-	test('an invalid services.logs is ignored', () => {
-		const html = renderServices(servicesUrl({ 'services.host': HOST_ID, 'services.logs': 'Bad Name' }), [row()]);
+	test('an invalid catalog.logs is ignored', () => {
+		const html = renderServices(catalogUrl({ 'catalog.host': HOST_ID, 'catalog.logs': 'Bad Name' }), [row()]);
 		assert.doesNotMatch(rowTag(html, SERVICE_ID), /aria-current/);
 		assert.equal(html.includes('data-logs-missing'), false);
 	});
 
-	test('a row on another host or of another project is not selected; the not-listed line shows', () => {
-		const html = renderServices(linked, [
-			row({ host_id: OTHER_HOST, host_name: 'pi2' }),
-			row({ id: SECOND_ID, project_id: OTHER_PROJECT, project_name: 'Share' })
-		]);
-		assert.doesNotMatch(rowTag(html, SERVICE_ID), /aria-current/);
-		assert.doesNotMatch(rowTag(html, SECOND_ID), /aria-current/);
+	test('a copy on another host or a row of another project is not selected; the not-listed line shows', () => {
+		const rows = [row({ host_id: OTHER_HOST, host_name: 'pi2' }), row({ id: SECOND_ID, project_id: OTHER_PROJECT, project_name: 'Share' })];
+		const html = renderServices(linked, rows);
+		// With pi1 chosen the pi2 copy is filtered out, and another project's row is never listed.
+		assert.equal(html.includes(`id="service-${SERVICE_ID}"`), false);
+		assert.equal(html.includes(`id="service-${SECOND_ID}"`), false);
 		assert.equal(html.includes('aria-expanded="true"'), false);
+		const everyHost = renderServices(catalogUrl({ 'catalog.q': 'web' }), rows);
+		assert.doesNotMatch(rowTag(everyHost, SERVICE_ID), /aria-current/);
 		assert.match(html, /<p[^>]*data-logs-missing[^>]*>web isn't listed on this host yet\. Refresh in a moment\.<\/p>/);
 	});
 
-	test('no row at all shows the not-listed line with the usual empty table', () => {
+	test('no copy at all shows the not-listed line with the usual empty table', () => {
 		const html = renderServices(linked, []);
 		assert.equal(html.includes('data-logs-missing'), true);
-		assert.equal(html.includes('No services'), true);
+		// The link also searches, so the host-only empty text does not apply.
+		assert.equal(html.includes('No catalog entries.'), true);
+		assert.equal(html.includes('Nothing in the catalog runs on this host.'), false);
+	});
+
+	test('a copy whose entry the Kind filter hides is not selected; the not-listed line shows', () => {
+		const html = renderServices(`${linked}&catalog.kind=job`, [row()]);
+		assert.equal(html.includes(`id="service-${SERVICE_ID}"`), false);
+		assert.equal(html.includes('data-logs-missing'), true);
 	});
 
 	test('the not-listed line stays away when the load failed', () => {
@@ -466,7 +491,7 @@ describe('Services tab with services.logs', () => {
 	});
 
 	test('a host that is not in the list is not a request', () => {
-		const html = renderServices(servicesUrl({ 'services.host': OTHER_PROJECT, 'services.logs': 'web' }), [row()]);
+		const html = renderServices(catalogUrl({ 'catalog.host': OTHER_PROJECT, 'catalog.logs': 'web' }), [row()]);
 		assert.doesNotMatch(rowTag(html, SERVICE_ID), /aria-current/);
 		assert.equal(html.includes('data-logs-missing'), false);
 	});
@@ -475,7 +500,9 @@ describe('Services tab with services.logs', () => {
 		const html = renderServices(linked, [row({ runtime: undefined })]);
 		assert.match(rowTag(html, SERVICE_ID), /aria-current="true"/);
 		assert.equal(html.includes('data-row-checking'), true);
-		assert.equal(html.includes('aria-expanded="true"'), false);
+		// No Logs button yet, so no drawer; the entry itself is open (its toggle says so).
+		assert.equal(html.includes('aria-label="Logs web'), false);
+		assert.match(html, /<button[^>]*aria-expanded="true"[^>]*aria-label="Services of web"/);
 	});
 });
 
@@ -486,7 +513,11 @@ describe('LogsDrawer initialOpen', () => {
 		}).body;
 	}
 
-	test('opens on mount only when asked', () => {
+	test('opens on mount only when asked; a later request opens it and nothing closes it', () => {
+		// The pre effect that applies a later request runs only in the browser (Main Dev's browser check).
+		assert.equal(openOnRequest(false, true), true);
+		assert.equal(openOnRequest(true, false), true);
+		assert.equal(openOnRequest(false, false), false);
 		assert.match(logsButton(drawer(true)), /aria-expanded="true"/);
 		assert.match(logsButton(drawer(false)), /aria-expanded="false"/);
 		assert.match(logsButton(drawer()), /aria-expanded="false"/);

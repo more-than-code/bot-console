@@ -2,13 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
-import type { CatalogEntry, Host, ImageSpec, ProjectServiceRow } from '../src/lib/api-types.ts';
+import type { CatalogEntry, ImageSpec } from '../src/lib/api-types.ts';
 import DataTable from '../src/lib/components/DataTable.svelte';
 import { CATALOG_KIND_OPTIONS, catalogKindInfo } from '../src/lib/catalog.ts';
-import { serviceKindLabel } from '../src/lib/host-view.ts';
 import { filterHref, filterRows, readFilters, type Column } from '../src/lib/table.ts';
 import CatalogSection from '../src/routes/projects/[id]/CatalogSection.svelte';
-import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import { PROJECT, USER } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 
@@ -79,13 +77,12 @@ const ENTRIES = [
 	unknownImage('c5', 'echo')
 ];
 const ALL = ['alpha', 'bravo', 'charlie', 'delta', 'echo'];
+/** Sortable columns and their header index; the arrow (0), Services (4) and Actions (6) are not sortable. */
 const SORTABLE = [
-	['name', 'Name'],
-	['kind', 'Kind'],
-	['command', 'Command'],
-	['run_as', 'Run as'],
-	['port', 'Port'],
-	['last_deployed', 'Last deployed']
+	['name', 'Name', 1],
+	['kind', 'Kind', 2],
+	['command', 'Command', 3],
+	['last_deployed', 'Last deployed', 5]
 ] as const;
 
 function section(query = ''): string {
@@ -109,6 +106,9 @@ function tbody(html: string): string {
 
 /** Row names in table order (the first cell of each row). */
 function rowNames(html: string): string[] {
+	const entries = [...tbody(html).matchAll(/<tr data-entry="([^"]+)"/g)].map((match) => match[1]);
+	if (entries.length > 0) return entries;
+	// A plain DataTable (no entry rows): the first cell of each row.
 	return [...tbody(html).matchAll(/<tr[^>]*>\s*<td class="p-2 align-middle">([^<]+)<\/td>/g)].map((match) => match[1]);
 }
 
@@ -149,90 +149,6 @@ test('catalog kind labels: program, image service, image job, and an unknown val
 	]);
 });
 
-function host(): Host {
-	return {
-		id: '00000000-0000-4000-8000-0000000000aa',
-		project_id: PROJECT.id,
-		name: 'pi1',
-		node_type: 'pi',
-		os: 'linux',
-		arch: 'arm64',
-		always_on: true,
-		agent_version: '1.2.0',
-		status: 'online',
-		last_seen_at: '2026-10-14T00:00:00Z',
-		enrolled_at: '2026-10-13T00:00:00Z',
-		revoked_at: null,
-		relation: 'owner',
-		share_level: null,
-		programs: null
-	} as Host;
-}
-
-function serviceRow(index: number, kind: string): ProjectServiceRow {
-	return {
-		id: `00000000-0000-4000-8000-00000000010${index}`,
-		name: `svc${index}`,
-		source: 'owned',
-		kind: kind as ProjectServiceRow['kind'],
-		ports: [3030 + index],
-		health: null,
-		last_seen_at: null,
-		gone_at: null,
-		display_name: null,
-		owner_user: 'joe',
-		project_id: PROJECT.id,
-		host_id: host().id,
-		host_name: 'pi1',
-		host_status: 'online',
-		project_name: 'Lab',
-		catalog_entry: null,
-		checks: [],
-		checksMessage: null,
-		container_name: null,
-		image_digest: null
-	};
-}
-
-test('services kind labels are readable; unknown values show as returned', () => {
-	assert.equal(serviceKindLabel('container'), 'Container');
-	assert.equal(serviceKindLabel('systemd'), 'systemd unit');
-	assert.equal(serviceKindLabel('process'), 'Process');
-	assert.equal(serviceKindLabel('socket'), 'socket');
-	assert.equal(serviceKindLabel('toString'), 'toString');
-
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
-	const kinds = ['container', 'systemd', 'process', 'socket'];
-	const html = decode(
-		render(ServicesSection, {
-			props: {
-				projectId: PROJECT.id,
-				projectName: 'Lab',
-				hosts: [host()],
-				canAdmin: false,
-				rows: kinds.map((kind, index) => serviceRow(index, kind)),
-				total: kinds.length,
-				prevCursor: null,
-				nextCursor: null,
-				omitted: 0,
-				message: null,
-				probe: null,
-				probeServiceId: null,
-				renameServiceId: null,
-				typedName: null
-			}
-		}).body
-	);
-	const kindIndex = headers(html).findIndex(([, inner]) => />Kind</.test(inner));
-	assert.ok(kindIndex >= 0, 'Kind header');
-	const rows = [...tbody(html).matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/g)].map((match) => match[1]);
-	const cells = rows.map((row) => {
-		const tds = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)];
-		return tds[kindIndex]?.[1];
-	});
-	assert.deepEqual(cells, ['Container', 'systemd unit', 'Process', 'socket']);
-});
-
 test('table filter helpers read, apply, set and clear a namespaced param', () => {
 	type Row = { name: string; kind: string };
 	const columns: Column<Row>[] = [
@@ -261,9 +177,11 @@ test('catalog has a Kind column after Name with a badge, tooltip and accessible 
 	const html = section();
 	const heads = headers(html);
 	assert.equal(heads.length, 7);
-	assert.match(heads[0][1], /Name/);
-	assert.match(heads[1][1], /Kind/);
-	assert.match(heads[2][1], /Command/);
+	// The arrow column comes first (its label is for screen readers only).
+	assert.match(heads[0][1], /<span class="sr-only">Expand<\/span>/);
+	assert.match(heads[1][1], /Name/);
+	assert.match(heads[2][1], /Kind/);
+	assert.match(heads[3][1], /Command/);
 	for (const [label, tip] of [
 		['Program', PROGRAM_TIP],
 		['Service', SERVICE_TIP],
@@ -280,7 +198,7 @@ test('catalog has a Kind column after Name with a badge, tooltip and accessible 
 	assert.ok(unknown, 'unknown kind cell');
 	assert.doesNotMatch(unknown, /title=|sr-only/);
 	assert.match(unknown, />cron</);
-	assert.match(html, /placeholder="Search name, kind or command"/);
+	assert.match(html, /placeholder="Search name, kind, command, host or label"/);
 });
 
 test('catalog Kind sorts Program, Service, Job, unknown, then by name', () => {
@@ -335,7 +253,7 @@ test('catalog Kind filter: button name, menu links, current option, chip, and UR
 	assert.match(chip[2], /focus-visible:ring-3/);
 	assert.match(chip[2], /focus-visible:ring-ring\/50/);
 	// The chip sits in the search form, beside the field, and the form keeps the filter.
-	const form = jobs.slice(jobs.indexOf('role="search"'), jobs.indexOf('</form>'));
+	const form = jobs.slice(jobs.indexOf('role="search"'), jobs.indexOf('</form>', jobs.indexOf('role="search"')));
 	assert.ok(form.includes('Filtered: Jobs'));
 	assert.match(form, /type="hidden" value="job" name="catalog.kind"/);
 
@@ -365,7 +283,7 @@ test('filter works with sort and search, and sort links keep the filter and drop
 	assert.deepEqual(rowNames(section('&catalog.kind=program&catalog.q=delta')), ['delta']);
 	const html = section('&catalog.kind=job&catalog.page=2');
 	const hrefs = headers(html).flatMap(([, inner]) => [...inner.matchAll(/aria-label="Sort[^"]*"|href="([^"]+)"[^>]*aria-label="Sort/g)].map((m) => m[1]).filter(Boolean));
-	assert.equal(hrefs.length, 6);
+	assert.equal(hrefs.length, 4);
 	for (const href of hrefs) {
 		assert.ok(href.includes('catalog.kind=job'), href);
 		assert.equal(href.includes('catalog.page'), false, href);
@@ -391,19 +309,21 @@ test('zero matches with a filter keep the header and offer Clear filter; without
 
 test('every sortable header shows the right aria-hidden icon, aria-sort and name in asc and desc', () => {
 	const unsorted = headers(section());
-	for (const [index, [, label]] of SORTABLE.entries()) {
+	for (const [, label, index] of SORTABLE) {
 		const [attrs, inner] = unsorted[index];
 		assert.match(attrs, /aria-sort="none"/, label);
 		assert.match(inner, new RegExp(`aria-label="Sort by ${label}"`));
 		assert.match(inner, /<svg[^>]*class="[^"]*lucide-arrow-up-down[^"]*text-muted-foreground[^"]*"[^>]*aria-hidden="true"/, label);
 	}
-	assert.doesNotMatch(unsorted[6][1], /<svg|aria-label="Sort/);
-	assert.equal(unsorted[6][0].includes('aria-sort'), false);
+	for (const index of [0, 4, 6]) {
+		assert.doesNotMatch(unsorted[index][1], /<svg|aria-label="Sort/);
+		assert.equal(unsorted[index][0].includes('aria-sort'), false);
+	}
 
 	for (const dir of ['asc', 'desc'] as const) {
-		for (const [activeIndex, [key, activeLabel]] of SORTABLE.entries()) {
+		for (const [key, activeLabel, activeIndex] of SORTABLE) {
 			const heads = headers(section(`&catalog.sort=${key}&catalog.dir=${dir}`));
-			for (const [index, [, label]] of SORTABLE.entries()) {
+			for (const [, label, index] of SORTABLE) {
 				const [attrs, inner] = heads[index];
 				for (const svg of inner.match(/<svg[^>]*>/g) ?? []) assert.match(svg, /aria-hidden="true"/);
 				if (index === activeIndex) {
@@ -422,30 +342,35 @@ test('every sortable header shows the right aria-hidden icon, aria-sort and name
 	}
 });
 
-test('Run as, Port and Last deployed are hidden below sm on the header and every cell; no other column is', () => {
+test('Kind, Command, Services and Last deployed are hidden below sm on the header and every entry cell', () => {
 	const html = section();
 	const heads = headers(html).map(([attrs]) => classOf(attrs));
-	const hidden = new Set([3, 4, 5]);
+	const hidden = new Set([2, 3, 4, 5]);
 	for (const [index, cls] of heads.entries()) {
 		if (hidden.has(index)) assert.match(cls, /(^|\s)max-sm:hidden(\s|$)/, `th ${index}`);
 		else assert.doesNotMatch(cls, /max-sm:/, `th ${index}`);
 	}
 	assert.doesNotMatch(html, /max-sm:sr-only/);
-	const rows = [...tbody(html).matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/g)].map((match) => match[1]);
+	const rows = [...tbody(html).matchAll(/<tr data-entry[^>]*>([\s\S]*?)<\/tr>/g)].map((match) => match[1]);
 	assert.equal(rows.length, 5);
 	for (const row of rows) {
 		const cells = [...row.matchAll(/<td\b([^>]*)>/g)].map((match) => classOf(match[1]));
 		assert.equal(cells.length, 7);
 		for (const [index, cls] of cells.entries()) {
 			if (hidden.has(index)) assert.match(cls, /(^|\s)max-sm:hidden(\s|$)/, `td ${index}`);
-			else assert.doesNotMatch(cls, /max-sm:/, `td ${index}`);
+			else assert.doesNotMatch(cls, /max-sm:hidden/, `td ${index}`);
 		}
 	}
-	// The actions are a grid of at most four per line at every width.
+	// Below sm the Name cell is bounded, so its command line truncates instead of widening the table.
+	assert.match(html, /<td class="p-2 align-middle max-sm:w-full max-sm:max-w-0">/);
+	// Below sm the Name cell carries the kind and the muted command instead.
+	assert.match(html, /data-phone-kind/);
+	assert.match(html, /<div class="text-muted-foreground min-w-0 truncate text-sm sm:hidden" data-phone-command="">/);
+	// The actions are fixed icon slots, four from sm up; below sm only the 44 px ⋯ menu.
 	const fieldset = /<fieldset[^>]*class="([^"]*)"/.exec(html)?.[1] ?? '';
 	assert.match(fieldset, /(^|\s)grid(\s|$)/);
-	assert.match(fieldset, /(^|\s)grid-cols-\[repeat\(4,max-content\)\](\s|$)/);
-	assert.doesNotMatch(fieldset, /max-sm:|flex-wrap/);
+	assert.match(fieldset, /(^|\s)grid-cols-\[repeat\(4,1\.75rem\)\](\s|$)/);
+	assert.match(fieldset, /(^|\s)max-sm:grid-cols-\[2\.75rem\](\s|$)/);
 });
 
 type Item = { name: string; size: number; kind: string };
@@ -468,7 +393,7 @@ const itemRow = createRawSnippet((item: () => Item) => ({
 	render: () => `<tr><td class="p-2 align-middle">${item().name}</td><td>${item().size}</td><td>${item().kind}</td></tr>`
 }));
 
-function table(query: string, columns: Column<Item>[], server = false): string {
+function table(query: string, columns: Column<Item>[]): string {
 	setPageUrl(`http://console.example/list?${query}`);
 	return decode(
 		render(DataTable<Item>, {
@@ -478,23 +403,11 @@ function table(query: string, columns: Column<Item>[], server = false): string {
 				id: 't',
 				labelledBy: 'h',
 				empty: 'Nothing.',
-				row: itemRow,
-				...(server ? { server: { total: 2, prevCursor: null, nextCursor: null } } : {})
+				row: itemRow
 			}
 		}).body
 	);
 }
-
-test('DataTable server mode: no filter control or chip, icons follow the server sort', () => {
-	const html = table('t.kind=x&t.sort=size&t.dir=desc', ITEM_COLUMNS, true);
-	assert.doesNotMatch(html, /<details|lucide-funnel|Filter Kind|Filtered:/);
-	assert.deepEqual(rowNames(html), ['a', 'b']);
-	const heads = headers(html);
-	assert.match(heads[1][0], /aria-sort="descending"/);
-	assert.match(heads[1][1], /lucide-arrow-down\b/);
-	assert.match(heads[0][1], /lucide-arrow-up-down/);
-	assert.match(heads[2][1], /lucide-arrow-up-down/);
-});
 
 test('DataTable plain client table: no menu or chip; numeric headers stay right-aligned with -mr-2', () => {
 	const plain = ITEM_COLUMNS.map(({ filter: _filter, ...column }) => column);

@@ -1,117 +1,49 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { render } from 'svelte/server';
-import type { HealthCheck, Host, ProjectServiceRow } from '../src/lib/api-types.ts';
+import type { HealthCheck, ProjectServiceRow } from '../src/lib/api-types.ts';
 import { COPY_FAILED_NOTE, COPIED_NOTE, copyText } from '../src/lib/copy-text.ts';
-import { PROCESS_COLUMNS, SERVICE_COLUMNS, smallestPort } from '../src/lib/host-view.ts';
-import { imageDigestText, showsDockerHealthcheck } from '../src/lib/service-view.ts';
-import { compareCells } from '../src/lib/table.ts';
-import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
-import { PROJECT } from './harness.ts';
-import { setPageUrl } from './stubs/app-state.ts';
+import { PROCESS_COLUMNS } from '../src/lib/host-view.ts';
+import { imageDigestText } from '../src/lib/service-view.ts';
+import { CATALOG_CELL, SERVICES_CELL } from '../src/lib/catalog-copies.ts';
+import { copyRow, renderCopies } from './copies.ts';
 
-const HOST_ID = '00000000-0000-4000-8000-0000000000aa';
-const SERVICE_ID = '00000000-0000-4000-8000-0000000000bb';
 const DIGEST = `sha256:${'ab'.repeat(32)}`;
-
-const HOST: Host = {
-	id: HOST_ID,
-	project_id: PROJECT.id,
-	name: 'pi1',
-	node_type: 'pi',
-	os: 'linux',
-	arch: 'arm64',
-	always_on: true,
-	agent_version: '1.2.0',
-	status: 'online',
-	last_seen_at: '2026-10-14T00:00:00Z',
-	enrolled_at: '2026-10-13T00:00:00Z',
-	revoked_at: null,
-	relation: 'owner',
-	share_level: null,
-	programs: null
-};
 
 function check(protocol: 'tcp' | 'http', port: number, path: string | null): HealthCheck {
 	return { id: `${protocol}-${port}`, protocol, port, path, enabled: true };
 }
 
 function row(overrides: Partial<ProjectServiceRow> = {}): ProjectServiceRow {
-	return {
-		id: SERVICE_ID,
-		name: 'web',
-		source: 'owned',
-		kind: 'container',
-		ports: [80, 443],
-		health: null,
-		last_seen_at: '2026-10-14T12:00:00Z',
-		gone_at: null,
-		display_name: 'Web',
-		owner_user: 'root',
-		project_id: PROJECT.id,
-		host_id: HOST_ID,
-		host_name: 'pi1',
-		host_status: 'online',
-		project_name: 'Lab',
-		catalog_entry: null,
-		container_name: 'web-1',
-		image_digest: null,
-		checks: [],
-		checksMessage: null,
-		...overrides
-	};
+	return copyRow(overrides);
 }
 
 function renderRow(item: ProjectServiceRow): string {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
-	return render(ServicesSection, {
-		props: {
-			projectId: PROJECT.id,
-			projectName: 'Lab',
-			hosts: [HOST],
-			canAdmin: false,
-			rows: [item],
-			total: 1,
-			prevCursor: null,
-			nextCursor: null,
-			omitted: 0,
-			message: null,
-			probe: null,
-			probeServiceId: null,
-			renameServiceId: null,
-			typedName: null
-		}
-	}).body;
+	return renderCopies({ rows: [item] });
 }
 
-test('the ports column is not numeric and its header is not right-aligned', () => {
-	const ports = SERVICE_COLUMNS.find((column) => column.key === 'ports');
-	assert.equal(ports?.numeric, undefined);
-	assert.equal(ports?.sortable, undefined);
-	assert.equal(ports?.value?.({ ports: [8080, 80] } as ProjectServiceRow), 80);
-	assert.equal(smallestPort([8080, 80]), 80);
-	assert.ok(compareCells(80, 8080, 'asc', true) < 0);
-
-	const html = renderRow(row());
-	const at = html.indexOf('>Ports<');
-	assert.ok(at >= 0);
-	const header = html.slice(html.lastIndexOf('<th', at), html.indexOf('>', html.lastIndexOf('<th', at)));
-	assert.doesNotMatch(header, /text-right/);
-	assert.match(header, /text-left/);
-	assert.match(html, /<td class="p-2 align-middle font-mono">80, 443<\/td>/);
+test('a service row has Port, Digest and Uptime columns, and a phone line with all three', () => {
+	const short = `sha256:${DIGEST.slice('sha256:'.length, 'sha256:'.length + 12)}`;
+	const started = new Date(Date.now() - (3 * 3600 + 5 * 60) * 1000).toISOString();
+	const html = renderRow(row({ image_digest: DIGEST, runtime: { state: 'running', restarts: 0, container: { state: 'running', exitCode: null, digest: DIGEST, ports: [80, 443], startedAt: started } } }));
+	assert.match(html, /data-ports="">80, 443</);
+	assert.match(html, new RegExp(`data-digest="">${short}<`));
+	assert.match(html, /data-uptime="">3h 5m</);
+	assert.match(html, new RegExp(`data-phone-detail="">ports 80, 443 · ${short} · up 3h 5m<`));
+	// A copy whose state is not read (no grant) has no uptime: a dash.
+	assert.match(renderRow(row()), /data-uptime="">—</);
+	assert.match(renderRow(row({ ports: [8080] })), /data-ports="">8080</);
 });
 
-test('a services row shows the digest icon and not the short digest text', () => {
-	const html = renderRow(row({ image_digest: DIGEST, catalog_entry: 'web' }));
+test('a copy row shows the digest icon with the short digest text', () => {
+	const html = renderRow(row({ image_digest: DIGEST }));
 	assert.equal(html.includes(`aria-label="Image digest ${DIGEST}"`), true);
 	assert.equal(html.includes(`title="${DIGEST}"`), true);
-	assert.equal(html.includes('>catalog<'), true);
 	// The container name is in the label's tooltip, not shown beside it.
 	assert.equal(html.includes('title="Web (container web-1)"'), true);
 	assert.equal(html.replace(/ title="[^"]*"/g, '').includes('web-1'), false);
 	const short = `sha256:${DIGEST.slice('sha256:'.length, 'sha256:'.length + 12)}`;
-	assert.equal(html.split(DIGEST).join('').includes(short), false);
+	assert.equal(html.split(DIGEST).join('').includes(short), true);
 	assert.match(html, /<svg[^>]*lucide-fingerprint/);
 
 	const plain = renderRow(row({ image_digest: null, container_name: 'Web' }));
@@ -139,37 +71,17 @@ test('copyText writes the full value and reports the copy notes', async () => {
 	);
 });
 
-test('checks lead with docker healthcheck and keep tcp and http lines', () => {
-	assert.equal(showsDockerHealthcheck({ health: { source: 'docker' } }), true);
-	assert.equal(showsDockerHealthcheck({ health: { source: 'check' } }), false);
-	assert.equal(showsDockerHealthcheck({ health: null }), false);
-
+test('health-check lines and Probe are not in the services table (they are in the dialog)', () => {
 	const both = renderRow(
 		row({
 			health: { status: 'up', last_checked_at: null, latency_ms: null, source: 'docker' },
 			checks: [check('tcp', 6379, null), check('http', 8080, '/health')]
 		})
 	);
-	assert.match(both, /<p class="text-muted-foreground text-sm">docker healthcheck<\/p>/);
-	assert.equal(both.includes('tcp 6379'), true);
-	assert.equal(both.includes('http 8080/health'), true);
-	assert.match(both, /aria-label="Probe Web tcp 6379"/);
-	assert.match(both, /aria-label="Probe Web http 8080"/);
-	assert.equal(both.includes('No health checks.'), false);
-	const lineAt = both.indexOf('<p class="text-muted-foreground text-sm">docker healthcheck</p>');
-	const formAt = both.indexOf('<form method="POST"');
-	assert.ok(lineAt >= 0 && formAt > lineAt);
-
-	const dockerOnly = renderRow(
-		row({ health: { status: 'up', last_checked_at: null, latency_ms: null, source: 'docker' }, checks: [] })
-	);
-	assert.equal(dockerOnly.includes('docker healthcheck'), true);
-	assert.equal(dockerOnly.includes('No health checks.'), false);
-	assert.equal(dockerOnly.includes('Probe Web'), false);
-
-	const neither = renderRow(row({ health: null, checks: [] }));
-	assert.equal(neither.includes('docker healthcheck'), false);
-	assert.equal(neither.includes('No health checks.'), true);
+	assert.equal(both.includes('docker healthcheck'), false);
+	assert.equal(both.includes('tcp 6379'), false);
+	assert.equal(both.includes('aria-label="Probe '), false);
+	assert.equal(both.includes('data-checks'), false);
 });
 
 test('process numeric cells stay right-aligned with their headers', () => {
@@ -191,16 +103,57 @@ test('process numeric cells stay right-aligned with their headers', () => {
 	assert.match(table, /column\.numeric \? 'text-right'/);
 });
 
-test('services cells are middle-aligned and there is no Last seen cell', () => {
-	const source = readFileSync(new URL('../src/routes/projects/[id]/ServicesSection.svelte', import.meta.url), 'utf8');
-	const cells = [...source.matchAll(/<td\b[^>]*>/g)].map((match) => match[0]);
-	assert.ok(cells.length >= 7);
-	for (const cell of cells) assert.match(cell, /align-middle/);
-	assert.equal(source.includes('<LocalTime iso={service.last_seen_at}'), false);
-	assert.match(source, /class="ml-auto inline-flex shrink-0 items-center gap-1"/);
+test('an expanded entry holds a nested services table; its rows have one cell per header', () => {
+	const source = readFileSync(new URL('../src/routes/projects/[id]/CatalogCopyRow.svelte', import.meta.url), 'utf8');
+	assert.equal(source.includes('<LocalTime iso={copy.last_seen_at}'), false);
 	assert.match(source, /icon=\{Fingerprint\} iconOnly/);
 	assert.match(
 		readFileSync(new URL('../src/lib/components/CopyButton.svelte', import.meta.url), 'utf8'),
 		/Tooltip\.Content class=\{tip \? 'max-w-sm' : 'max-w-sm font-mono break-all'\}/
 	);
+	const html = renderRow(row());
+	const tbody = html.slice(html.indexOf('<tbody'));
+	const rowAt = (marker: string) => {
+		const at = tbody.indexOf(marker);
+		assert.ok(at >= 0, marker);
+		return tbody.slice(tbody.lastIndexOf('<tr', at), tbody.indexOf('</tr>', at));
+	};
+	// The services row: an empty first cell, then one cell spanning the other columns, holding the panel.
+	const servicesAt = html.indexOf('data-services-row="web"');
+	const servicesTr = html.slice(html.lastIndexOf('<tr', servicesAt), html.indexOf('data-services-table', servicesAt));
+	const outerHeads = [...html.slice(0, html.indexOf('</thead>')).matchAll(/<th\b/g)].length;
+	assert.match(servicesTr, /<td class="w-px p-2 align-middle"><\/td>/);
+	assert.match(servicesTr, new RegExp(`<td colspan="${outerHeads - 1}"`));
+	assert.match(html, /<div class="bg-muted\/40 rounded-lg px-1 py-1" data-services-table="">/);
+	// The nested table: Host | Status | Port | Digest | Uptime | actions, with a cell for each.
+	const nested = html.slice(html.indexOf('data-services-table'));
+	const nestedHeads = [...nested.slice(0, nested.indexOf('</thead>')).matchAll(/<th\b/g)].length;
+	assert.equal(nestedHeads, 6);
+	const copyCells = [...rowAt('data-copy="web ').matchAll(/<td\b[^>]*class="([^"]*)"/g)].map((match) => match[1].trim());
+	assert.deepEqual(copyCells, Object.values(SERVICES_CELL));
+	// The actions use the entry row's slot grid, right-aligned, so icons line up under the entry's.
+	const groups = [...tbody.matchAll(/<fieldset\b[^>]*class="([^"]*)"/g)].map((match) => match[1]);
+	assert.equal(groups.length, 2);
+	assert.equal(groups[0], groups[1]);
+	assert.equal(groups[0], CATALOG_CELL.actionsGroup);
+	assert.match(CATALOG_CELL.actionsGroup, /\bml-auto\b/);
+});
+
+test('below sm the services table stacks: host and status, then port, digest and uptime; actions only in ⋯', () => {
+	for (const cell of [SERVICES_CELL.status, SERVICES_CELL.port, SERVICES_CELL.digest, SERVICES_CELL.uptime]) {
+		assert.equal(cell.includes('max-sm:hidden'), true, cell);
+	}
+	assert.equal(SERVICES_CELL.host.includes('max-sm:hidden'), false);
+	assert.match(SERVICES_CELL.host, /max-sm:w-full max-sm:max-w-0/);
+	assert.equal(SERVICES_CELL.actions.includes('max-sm'), false);
+	const source = readFileSync(new URL('../src/routes/projects/[id]/CatalogCopyRow.svelte', import.meta.url), 'utf8');
+	assert.match(source, /extra=\{copyActions\}/);
+	assert.equal(source.includes('contents'), false);
+	const html = renderRow(row({ ports: [80] }));
+	const copyAt = html.indexOf('data-copy="web ');
+	const copy = html.slice(copyAt, html.indexOf('</tr>', copyAt));
+	assert.match(copy, /data-phone-status/);
+	assert.match(copy, /data-phone-detail="">port 80</);
+	// The nested header hides below sm.
+	assert.match(html, /<thead[^>]*class="[^"]*max-sm:hidden/);
 });

@@ -5,25 +5,19 @@ import { render } from 'svelte/server';
 import DataTable from '../src/lib/components/DataTable.svelte';
 import { setPageUrl } from './stubs/app-state.ts';
 import { withQuery } from '../src/lib/table-href.ts';
-import { compareValues, slicePage } from '../src/lib/table-query.ts';
+import { compareValues, SEARCH_MAX, slicePage } from '../src/lib/table-query.ts';
 import {
 	applyTable,
 	ariaSort,
 	compareCells,
 	pageRows,
+	hostFilterHiddenFields,
+	pagerText,
 	pagerVisible,
-	readServerTableQuery,
+	readSearch,
 	readTableQuery,
 	searchHiddenFields,
 	searchRows,
-	serverApiParams,
-	serverHostHiddenFields,
-	serverPageBounds,
-	serverPagerText,
-	serverPagerVisible,
-	serverSearchHiddenFields,
-	serverSortHref,
-	serverTableHref,
 	sortHref,
 	sortRows,
 	tableHref,
@@ -248,221 +242,20 @@ test('the search form keeps sort and direction and drops q and page', () => {
 	]);
 });
 
-const serverColumns: Column<{ name: string }>[] = [
-	{ key: 'name', label: 'Name', sortable: true },
-	{ key: 'host', label: 'Host', sortable: true },
-	{ key: 'kind', label: 'Kind', sortable: true },
-	{ key: 'status', label: 'Status', sortable: true },
-	{ key: 'last_seen', label: 'Last seen', sortable: true, firstDir: 'desc' },
-	{ key: 'ports', label: 'Ports' }
-];
-
-test('server table params map onto the API query', () => {
-	const host = '00000000-0000-4000-8000-0000000000aa';
-	const full = readServerTableQuery(
-		new URLSearchParams(`services.q=api&services.host=${host}&services.sort=status&services.dir=desc&services.cursor=abc`),
-		'services',
-		serverColumns,
-		{ sort: 'name', dir: 'asc' }
-	);
-	assert.equal(full.qTooLong, false);
-	assert.equal(full.hostRejected, false);
-	assert.equal(full.cursorDropped, false);
-	const params = serverApiParams(full, 25);
-	assert.equal(params.get('q'), 'api');
-	assert.equal(params.get('host_id'), host);
-	assert.equal(params.get('sort'), 'status');
-	assert.equal(params.get('dir'), 'desc');
-	assert.equal(params.get('limit'), '25');
-	assert.equal(params.get('cursor'), 'abc');
-
-	const defaults = serverApiParams(
-		readServerTableQuery(new URLSearchParams('tab=services'), 'services', serverColumns, { sort: 'name', dir: 'asc' }),
-		25
-	);
-	assert.equal(defaults.has('q'), false);
-	assert.equal(defaults.has('host_id'), false);
-	assert.equal(defaults.has('cursor'), false);
-	assert.equal(defaults.get('sort'), 'name');
-	assert.equal(defaults.get('dir'), 'asc');
-	assert.equal(defaults.get('limit'), '25');
-
-	const lastSeen = readServerTableQuery(new URLSearchParams('services.sort=last_seen'), 'services', serverColumns, {
-		sort: 'name',
-		dir: 'asc'
-	});
-	assert.equal(lastSeen.sort, 'last_seen');
-	assert.equal(lastSeen.dir, 'desc');
-
-	const badSort = readServerTableQuery(
-		new URLSearchParams('services.sort=ports&services.dir=desc'),
-		'services',
-		serverColumns,
-		{ sort: 'name', dir: 'asc' }
-	);
-	assert.equal(badSort.sort, 'name');
-	assert.equal(badSort.dir, 'asc');
-	assert.equal(serverApiParams(badSort).get('sort'), 'name');
-
-	const badHost = readServerTableQuery(new URLSearchParams('services.host=pi1'), 'services', serverColumns, {
-		sort: 'name',
-		dir: 'asc'
-	});
-	assert.equal(badHost.host, null);
-	assert.equal(badHost.hostRejected, true);
-	assert.equal(serverApiParams(badHost).has('host_id'), false);
-
-	const longCursor = 'c'.repeat(513);
-	const badCursor = readServerTableQuery(new URLSearchParams(`services.cursor=${longCursor}`), 'services', serverColumns, {
-		sort: 'name',
-		dir: 'asc'
-	});
-	assert.equal(badCursor.cursor, null);
-	assert.equal(badCursor.cursorDropped, true);
-	const controlCursor = readServerTableQuery(
-		new URLSearchParams('services.cursor=bad%07'),
-		'services',
-		serverColumns,
-		{ sort: 'name', dir: 'asc' }
-	);
-	assert.equal(controlCursor.cursor, null);
-	assert.equal(controlCursor.cursorDropped, true);
-
-	const tooLong = readServerTableQuery(new URLSearchParams(`services.q=${'a'.repeat(101)}`), 'services', serverColumns, {
-		sort: 'name',
-		dir: 'asc'
-	});
-	assert.equal(tooLong.qTooLong, true);
-	assert.equal(tooLong.q, '');
-	assert.equal(serverApiParams(tooLong).has('q'), false);
-
-	const pastClientCap = new URLSearchParams();
-	pastClientCap.set('services.q', 'a'.repeat(201));
-	const huge = readServerTableQuery(pastClientCap, 'services', serverColumns, { sort: 'name', dir: 'asc' });
-	assert.equal(huge.qTooLong, true);
-	assert.equal(huge.q, '');
-	assert.equal(serverApiParams(huge).has('q'), false);
-
-	const padded = new URLSearchParams();
-	padded.set('services.q', `  ${'b'.repeat(101)}`);
-	const paddedQuery = readServerTableQuery(padded, 'services', serverColumns, { sort: 'name', dir: 'asc' });
-	assert.equal(paddedQuery.qTooLong, true);
-	assert.equal(serverApiParams(paddedQuery).has('q'), false);
-
-	const nul = new URLSearchParams();
-	nul.set('services.q', 'bad\0name');
-	const nulQuery = readServerTableQuery(nul, 'services', serverColumns, { sort: 'name', dir: 'asc' });
-	assert.equal(nulQuery.qTooLong, true);
-	assert.equal(nulQuery.q, '');
-	assert.equal(serverApiParams(nulQuery).has('q'), false);
-
-	const exact = readServerTableQuery(new URLSearchParams(`services.q=${'a'.repeat(100)}`), 'services', serverColumns, {
-		sort: 'name',
-		dir: 'asc'
-	});
-	assert.equal(exact.qTooLong, false);
-	assert.equal(exact.q, 'a'.repeat(100));
-	assert.equal(serverApiParams(exact).get('q'), 'a'.repeat(100));
-});
-
-test('a server sort, search, or host change drops the cursor', () => {
-	const url = new URL(
-		'http://console.example/projects/1?tab=services&services.q=api&services.sort=name&services.dir=asc&services.host=00000000-0000-4000-8000-0000000000aa&services.cursor=abc&services.page=2'
-	);
-	const query = { sort: 'name', dir: 'asc' as const };
-	assert.equal(serverSortHref(url, 'services', { key: 'host' }, query).includes('services.cursor'), false);
-	assert.equal(serverSortHref(url, 'services', { key: 'host' }, query).includes('services.page'), false);
-	assert.equal(serverTableHref(url, 'services', { q: 'web' }).includes('services.cursor'), false);
-	assert.equal(serverTableHref(url, 'services', { host: null }).includes('services.cursor'), false);
-	const next = serverTableHref(url, 'services', { cursor: 'next' });
-	assert.equal(new URL(next, url.origin).searchParams.get('services.cursor'), 'next');
-	assert.equal(new URL(next, url.origin).searchParams.get('services.q'), 'api');
-	assert.equal(new URL(next, url.origin).searchParams.get('services.sort'), 'name');
-	assert.equal(
-		serverSortHref(url, 'services', { key: 'last_seen', firstDir: 'desc' }, query).includes('services.dir=desc'),
-		true
-	);
-
-	const search = new URLSearchParams(url.search);
-	assert.deepEqual(
-		serverSearchHiddenFields(search, 'services').map((field) => field.name),
-		['tab', 'services.sort', 'services.dir', 'services.host']
+test('the host filter keeps the other params and drops the host, the page, and the one-shot logs', () => {
+	const search = new URLSearchParams(
+		'tab=catalog&catalog.q=api&catalog.sort=name&catalog.dir=asc&catalog.host=00000000-0000-4000-8000-0000000000aa&catalog.page=2&catalog.logs=api&hosts.q=pi'
 	);
 	assert.deepEqual(
-		serverHostHiddenFields(search, 'services').map((field) => field.name),
-		['tab', 'services.q', 'services.sort', 'services.dir']
+		hostFilterHiddenFields(search, 'catalog').map((field) => field.name),
+		['tab', 'catalog.q', 'catalog.sort', 'catalog.dir', 'hosts.q']
 	);
 });
 
-test('server pager text uses the cursors it can see', () => {
-	assert.deepEqual(serverPageBounds(40, 25, null, 'next'), { from: 1, to: 25, total: 40 });
-	assert.equal(serverPagerText(1, 25, 40), 'Showing 1\u201325 of 40');
-	assert.deepEqual(serverPageBounds(40, 15, 'prev', null), { from: 26, to: 40, total: 40 });
-	assert.equal(serverPagerText(26, 40, 40), 'Showing 26\u201340 of 40');
-	assert.deepEqual(serverPageBounds(80, 25, 'prev', 'next'), { from: 0, to: 25, total: 80 });
-	assert.equal(serverPagerText(0, 25, 80), 'Showing 25 of 80');
-	assert.equal(serverPagerVisible(2, 2, '', null, null), false);
-	assert.equal(serverPagerVisible(40, 2, '', null, 'next'), true);
-	assert.equal(serverPagerVisible(40, 2, '', 'prev', null), true);
-	assert.equal(serverPagerVisible(25, 25, 'api', null, null), true);
-	assert.equal(serverPagerVisible(0, 0, '', null, null), false);
-});
-
-test('a server-mode data table keeps the given row order and pages with cursors', () => {
-	type Item = { id: string; name: string };
-	const columns: Column<Item>[] = [
-		{ key: 'name', label: 'Name', sortable: true, value: (item) => item.name }
-	];
-	const row = createRawSnippet<[Item]>((item) => ({
-		render: () => `<tr><td>${item().name}</td></tr>`
-	}));
-	const rows: Item[] = [
-		{ id: 'b', name: 'beta' },
-		{ id: 'a', name: 'alpha' }
-	];
-	setPageUrl('http://console.example/projects/1?tab=services');
-	const both = render(DataTable, {
-		props: {
-			rows,
-			columns,
-			id: 'services',
-			labelledBy: 'services-heading',
-			empty: 'No services reported.',
-			row,
-			server: { total: 40, prevCursor: 'prev-token', nextCursor: 'next-token' }
-		}
-	} as never).body.replaceAll('&amp;', '&');
-	assert.ok(both.indexOf('>beta<') < both.indexOf('>alpha<'));
-	assert.equal(both.includes('/projects/1?tab=services&services.cursor=prev-token'), true);
-	assert.equal(both.includes('/projects/1?tab=services&services.cursor=next-token'), true);
-	assert.match(both, /aria-label="Pagination"/);
-
-	const first = render(DataTable, {
-		props: {
-			rows,
-			columns,
-			id: 'services',
-			labelledBy: 'services-heading',
-			empty: 'No services reported.',
-			row,
-			server: { total: 40, prevCursor: null, nextCursor: 'next-token' }
-		}
-	} as never).body.replaceAll('&amp;', '&');
-	assert.equal(first.includes('Showing 1\u20132 of 40'), true);
-	assert.equal(first.includes('/projects/1?tab=services&services.cursor=next-token'), true);
-
-	const onePage = render(DataTable, {
-		props: {
-			rows,
-			columns,
-			id: 'services',
-			labelledBy: 'services-heading',
-			empty: 'No services reported.',
-			row,
-			server: { total: 2, prevCursor: null, nextCursor: null }
-		}
-	} as never).body;
-	assert.equal(onePage.includes('aria-label="Pagination"'), false);
+test('pager text counts the rows shown', () => {
+	assert.equal(pagerText(1, 25, 40), 'Showing 1\u201325 of 40');
+	assert.equal(pagerText(26, 40, 40), 'Showing 26\u201340 of 40');
+	assert.equal(pagerText(0, 0, 0), 'Showing 0\u20130 of 0');
 });
 
 test('a client-mode data table sorts and pages the rows it was given', () => {
@@ -509,4 +302,14 @@ test('aria-sort is ascending, descending, or none', () => {
 	assert.equal(ariaSort(name, { sort: 'name', dir: 'desc' }), 'descending');
 	assert.equal(ariaSort(name, { sort: 'ports', dir: 'asc' }), 'none');
 	assert.equal(ariaSort({ key: 'source' }, { sort: 'source', dir: 'asc' }), undefined);
+});
+
+test('readSearch trims a search and drops blank, NUL and over-length ones', () => {
+	assert.equal(readSearch(null), '');
+	assert.equal(readSearch(''), '');
+	assert.equal(readSearch('   '), '');
+	assert.equal(readSearch('  web  '), 'web');
+	assert.equal(readSearch('we\0b'), '');
+	assert.equal(readSearch('a'.repeat(SEARCH_MAX)), 'a'.repeat(SEARCH_MAX));
+	assert.equal(readSearch('a'.repeat(SEARCH_MAX + 1)), '');
 });

@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { untrack } from 'svelte';
+	import { focusFallbackAfterClose } from '$lib/dialog-open';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import { flightFocusReturn } from '$lib/catalog-flight';
 	import type { CatalogRunKind, CatalogRunState } from '$lib/project-action';
-	import { RUN_ICON, RUN_LABEL, runResultTitle } from '$lib/run-actions';
+	import { RUN_ICON, RUN_LABEL, runResultTitle, shownOnOpen } from '$lib/run-actions';
 	import CatalogRunForm from './CatalogRunForm.svelte';
 	import CatalogRunResult from './CatalogRunResult.svelte';
 
@@ -20,12 +21,14 @@
 		entryKind = 'program',
 		tip,
 		blockedReason = null,
-		onRowBusy
+		onRowBusy,
+		openRequest = 0,
+		fallbackFocusId = null
 	}: {
 		/** What the trigger and a new form do now. A shown result keeps the kind that ran. Logs use `LogsDrawer`. */
 		kind: Exclude<CatalogRunKind, 'logs'>;
 		entryName: string;
-		/** The Services row's host. */
+		/** The copy's host. */
 		hostId: string;
 		hostName: string;
 		serviceId?: string | null;
@@ -38,12 +41,34 @@
 		/** The trigger stays focusable but does nothing, and says why. */
 		blockedReason?: string | null;
 		onRowBusy?: (busy: boolean) => void;
+		/** A new value (a counter) opens it: the row's "⋯" menu asks for it (below `sm`, where its icon is hidden). */
+		openRequest?: number;
+		/** Where focus goes when it closes and its own trigger is hidden (the menu button). */
+		fallbackFocusId?: string | null;
 	} = $props();
 
 	const Icon = $derived(RUN_ICON[kind]);
 	const label = $derived(RUN_LABEL[kind]);
 
 	let open = $state(untrack(() => result != null));
+	// The row's "⋯" menu opens this by changing `openRequest`; closing returns focus to that menu button.
+	let requestSeen = untrack(() => openRequest);
+	$effect(() => {
+		const request = openRequest;
+		if (request === requestSeen) return;
+		requestSeen = request;
+		untrack(() => {
+			// From the menu, like the icon: a fresh form, not the last result.
+			shown = shownOnOpen('user', shown);
+			open = true;
+		});
+	});
+	let openBefore = untrack(() => open);
+	$effect(() => {
+		const now = open;
+		if (openBefore && !now) focusFallbackAfterClose(untrack(() => fallbackFocusId));
+		openBefore = now;
+	});
 	let seen = $state<string | null>(untrack(() => result?.resultId ?? null));
 	/** The result on view. Null shows the form. */
 	let shown = $state<CatalogRunState | null>(untrack(() => result));
@@ -73,7 +98,7 @@
 	$effect(() => {
 		const id = result?.resultId ?? null;
 		if (id != null && id !== untrack(() => seen)) {
-			shown = result;
+			shown = shownOnOpen('result', result);
 			open = true;
 		}
 		seen = id;
@@ -81,7 +106,7 @@
 
 	/** Opening from the trigger starts a fresh form; a result opens the dialog on its own. */
 	function onOpenChange(next: boolean) {
-		if (next) shown = null;
+		if (next) shown = shownOnOpen('user', shown);
 	}
 
 	/** Back to this row's control, whatever it now shows. */

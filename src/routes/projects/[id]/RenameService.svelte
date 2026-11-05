@@ -3,7 +3,7 @@
 	import { untrack } from 'svelte';
 	import RenameForm from '$lib/components/RenameForm.svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
-	import { nextFormDialog, type DialogOutcome } from '$lib/dialog-open';
+	import { focusFallbackAfterClose, nextFormDialog, type DialogOutcome } from '$lib/dialog-open';
 	import * as Dialog from '$lib/components/ui/dialog';
 
 	let {
@@ -12,7 +12,10 @@
 		rowLabel,
 		value,
 		failed,
-		message = null
+		message = null,
+		openRequest = 0,
+		fallbackFocusId = null,
+		showTrigger = true
 	}: {
 		action: string;
 		serviceId: string;
@@ -20,6 +23,12 @@
 		value: string;
 		failed: boolean;
 		message?: string | null;
+		/** A new value (a counter) opens the dialog: the row's "⋯" menu asks for it. */
+		openRequest?: number;
+		/** Where focus goes when the dialog closes and its own trigger is hidden or absent. */
+		fallbackFocusId?: string | null;
+		/** False: no icon of its own (it opens from a menu). */
+		showTrigger?: boolean;
 	} = $props();
 
 	let open = $state(untrack(() => failed));
@@ -36,6 +45,21 @@
 		if (failedNow || !next.open) draft = serverValue;
 	});
 
+	// The row's "⋯" menu opens this by changing `openRequest`; closing returns focus to that menu button.
+	let requestSeen = untrack(() => openRequest);
+	$effect(() => {
+		const request = openRequest;
+		if (request === requestSeen) return;
+		requestSeen = request;
+		untrack(() => (open = true));
+	});
+	let openBefore = untrack(() => open);
+	$effect(() => {
+		const now = open;
+		if (openBefore && !now) focusFallbackAfterClose(untrack(() => fallbackFocusId));
+		openBefore = now;
+	});
+
 	function settle(outcome: DialogOutcome) {
 		const next = nextFormDialog({ open, sawFailure }, outcome);
 		open = next.open;
@@ -45,13 +69,15 @@
 </script>
 
 <Dialog.Root bind:open>
-	<RowAction label="Rename {rowLabel}" icon={Pencil}>
-		{#snippet trigger(props)}
-			<Dialog.Trigger {...props}>
-				<Pencil class="size-4" />
-			</Dialog.Trigger>
-		{/snippet}
-	</RowAction>
+	{#if showTrigger}
+		<RowAction label="Rename {rowLabel}" icon={Pencil}>
+			{#snippet trigger(props)}
+				<Dialog.Trigger {...props}>
+					<Pencil class="size-4" />
+				</Dialog.Trigger>
+			{/snippet}
+		</RowAction>
+	{/if}
 	<Dialog.Content>
 		<Dialog.Header>
 			<Dialog.Title>Rename service</Dialog.Title>

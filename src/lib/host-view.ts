@@ -1,7 +1,6 @@
-import type { Approval, Host, ProcessItem, ProcessSample, ProjectServiceRow } from './api-types';
+import type { Approval, Host, ProcessItem, ProcessSample } from './api-types';
 import { parseRange, type RangeKey } from './ranges';
-import { serviceLabel } from './service-label';
-import type { Column, SortDir } from './table';
+import type { Column } from './table';
 
 export const METRIC_REFRESH_MS = 30_000;
 
@@ -160,17 +159,12 @@ export function serviceDomId(serviceId: string): string {
 	return `service-${serviceId}`;
 }
 
-/** The Project column is only there when a row belongs to some other project. */
-export function showProjectColumn(projectName: string, rows: readonly { project_name: string }[]): boolean {
-	return rows.some((row) => row.project_name !== projectName);
-}
-
 /** A sample the processes table can show. Null `sampled_at` and no rows is "no sample yet". */
 export function hasProcessSample(sample: ProcessSample | null): sample is ProcessSample & { sampled_at: string } {
 	return sample != null && sample.sampled_at != null && (sample.items.length > 0 || sample.skipped > 0);
 }
 
-/** Services list rows: every service on an owned host, or this project's services on a deploy share. */
+/** Hosts the Catalog & services host filter offers: owned hosts and deploy shares. */
 export function serviceHostReachable(host: Pick<Host, 'relation' | 'share_level'>): boolean {
 	if (host.relation === 'owner') return true;
 	return host.relation === 'shared' && host.share_level === 'deploy';
@@ -183,56 +177,6 @@ export function processServiceText(
 ): string {
 	if (!row.service_id) return '';
 	return links[row.service_id]?.label ?? 'service';
-}
-
-/** Smallest port, or null when the list is empty. Null sorts last. */
-export function smallestPort(ports: readonly number[]): number | null {
-	let min: number | null = null;
-	for (const port of ports) {
-		if (!Number.isFinite(port)) continue;
-		if (min == null || port < min) min = port;
-	}
-	return min;
-}
-
-/** Words for `Service.kind` (api-v1: container|systemd|process). Other values show as returned. */
-const SERVICE_KIND_LABELS: Record<string, string> = {
-	container: 'Container',
-	systemd: 'systemd unit',
-	process: 'Process'
-};
-
-export function serviceKindLabel(kind: string): string {
-	return Object.hasOwn(SERVICE_KIND_LABELS, kind) ? SERVICE_KIND_LABELS[kind] : kind;
-}
-
-export const SERVICE_DEFAULT_SORT = 'name';
-export const SERVICE_DEFAULT_DIR: SortDir = 'asc';
-
-export const PROJECT_COLUMN: Column<ProjectServiceRow> = {
-	key: 'project',
-	label: 'Project',
-	value: (row) => row.project_name
-};
-
-/** Server-sorted project services. Ports has no API sort. Last seen is in the status tooltip, not a column. */
-export const SERVICE_COLUMNS: Column<ProjectServiceRow>[] = [
-	{ key: 'name', label: 'Name', sortable: true, value: (row) => serviceLabel(row) },
-	{ key: 'host', label: 'Host', sortable: true, value: (row) => row.host_name },
-	{ key: 'kind', label: 'Kind', sortable: true, value: (row) => row.kind },
-	{ key: 'ports', label: 'Ports', value: (row) => smallestPort(row.ports) },
-	{ key: 'status', label: 'Status', sortable: true, value: (row) => row.health?.status ?? 'unknown' },
-	// Next to the state it acts on, so it stays in view when the table scrolls sideways.
-	{ key: 'actions', label: 'Actions', srLabel: true, hideBelowSm: true },
-	{ key: 'checks', label: 'Checks' }
-];
-
-export function serviceColumns(showProject: boolean): Column<ProjectServiceRow>[] {
-	if (!showProject) return [...SERVICE_COLUMNS];
-	const columns = [...SERVICE_COLUMNS];
-	const hostIndex = columns.findIndex((column) => column.key === 'host');
-	columns.splice(hostIndex + 1, 0, PROJECT_COLUMN);
-	return columns;
 }
 
 export const PROCESS_COLUMNS: Column<ProcessItem>[] = [

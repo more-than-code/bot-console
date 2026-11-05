@@ -5,6 +5,7 @@
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import { tick, untrack } from 'svelte';
+	import { focusFallbackAfterClose } from '$lib/dialog-open';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -16,7 +17,7 @@
 	import { formatTime } from '$lib/format';
 	import { DEFAULT_LOG_LINES, TRUNCATED_NOTE, linesKept, pickerChoices, type LinesState } from '$lib/log-lines';
 	import { LogsLoader, canCopy, chooseLines, emptyLogsView, logsText, switchLive, type LogsView } from '$lib/logs-load';
-	import { atBottom, logsAnnouncement, logsInfoLine, scrollAfterUpdate } from '$lib/log-view';
+	import { atBottom, logsAnnouncement, logsInfoLine, openOnRequest, scrollAfterUpdate } from '$lib/log-view';
 	import { LIVE_TIMEOUT_NOTE, createLogsPoller, type LiveEnd, type LogsPoller } from '$lib/logs-poll';
 	import { RUN_ICON, RUN_LABEL } from '$lib/run-actions';
 	import { timeZoneSource } from '$lib/time-zone';
@@ -28,19 +29,28 @@
 		hostName,
 		action,
 		tip,
-		initialOpen = false
+		initialOpen = false,
+		openRequest = 0,
+		fallbackFocusId = null
 	}: {
 		entryName: string;
 		entryKind?: 'program' | 'image';
-		/** The Services row's host. */
+		/** The copy's host. */
 		hostId: string;
 		hostName: string;
 		/** The `catalogLogs` form action URL. */
 		action: string;
 		/** Extra hover sentence on the row button. */
 		tip?: string;
-		/** Open on mount (the Catalog Deploy drawer's "View logs in Services" link). Read once. */
+		/**
+		 * Open on mount, and again whenever it turns true while mounted (the Catalog Deploy drawer's
+		 * "View logs" link, which can land on a copy that is already shown).
+		 */
 		initialOpen?: boolean;
+		/** A new value (a counter) opens it: the row's "⋯" menu asks for it (below `sm`, where its icon is hidden). */
+		openRequest?: number;
+		/** Where focus goes when it closes and its own trigger is hidden (the menu button). */
+		fallbackFocusId?: string | null;
 	} = $props();
 
 	const Icon = RUN_ICON.logs;
@@ -52,6 +62,25 @@
 	const zones = timeZoneSource();
 
 	let open = $state(untrack(() => initialOpen));
+	// The row's "⋯" menu opens this by changing `openRequest`; closing returns focus to that menu button.
+	let requestSeen = untrack(() => openRequest);
+	$effect(() => {
+		const request = openRequest;
+		if (request === requestSeen) return;
+		requestSeen = request;
+		untrack(() => (open = true));
+	});
+	let openBefore = untrack(() => open);
+	$effect(() => {
+		const now = open;
+		if (openBefore && !now) focusFallbackAfterClose(untrack(() => fallbackFocusId));
+		openBefore = now;
+	});
+	// Before the parent's effects run, so a request that is used up in the same update still opens the drawer.
+	$effect.pre(() => {
+		const requested = initialOpen;
+		untrack(() => (open = openOnRequest(open, requested)));
+	});
 	let view = $state<LogsView>(emptyLogsView());
 	/** Live's only owner. The switch shows it; `onLive` and the poller's end change it. */
 	let live = $state(false);

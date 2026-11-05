@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
 import { render } from 'svelte/server';
@@ -7,11 +6,11 @@ import type { Host, ProbeView, ProcessSample, ProjectServiceRow } from '../src/l
 import RenameForm from '../src/lib/components/RenameForm.svelte';
 import { CHECKS_NEED_API, UNREAD_HEALTH_CHECKS } from '../src/lib/health-checks.ts';
 import { serviceHostReachable } from '../src/lib/host-view.ts';
+import { chosenHost, COPIES_CAPPED_NOTE, hostChoices } from '../src/lib/catalog-copies.ts';
 import { nextRenameOpen, servicesRenameView } from '../src/lib/project-action.ts';
 import ProcessesTab from '../src/routes/hosts/[id]/ProcessesTab.svelte';
 import { load as hostLoad } from '../src/routes/hosts/[id]/+page.server.ts';
 import ProjectPage from '../src/routes/projects/[id]/+page.svelte';
-import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import { actions as projectActions, load as projectLoad } from '../src/routes/projects/[id]/+page.server.ts';
 import { formatLatency, formatWhen } from '../src/lib/format.ts';
 
@@ -29,6 +28,7 @@ import {
 	USER,
 	type FetchCall
 } from './harness.ts';
+import { imageCatalogEntry, programCatalogEntry, renderCopies } from './copies.ts';
 import { setPageUrl } from './stubs/app-state.ts';
 
 const HOST_ID = '00000000-0000-4000-8000-0000000000aa';
@@ -70,9 +70,10 @@ function baseService(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+/** An owned copy of catalog entry `api` on pi1, as the services list returns it. */
 function projectItem(overrides: Record<string, unknown> = {}) {
 	return {
-		...baseService(),
+		...baseService({ source: 'owned', catalog_entry: 'api' }),
 		host_id: HOST_ID,
 		display_name: null,
 		owner_user: 'ada',
@@ -91,9 +92,13 @@ function pageData<T>(value: T): Exclude<T, void | undefined | null> {
 	return value as Exclude<T, void | undefined | null>;
 }
 
+/** Catalog entry `api` (a program), as the catalog list returns it. */
+const API_ENTRY = programCatalogEntry('api', ['logs'], '00000000-0000-4000-8000-0000000000c2');
+
 function shell(call: FetchCall, services: (call: FetchCall) => Response): Response {
 	const id = PROJECT.id;
 	if (call.url.pathname === `/v1/projects/${id}/services`) return services(call);
+	if (call.url.pathname === `/v1/projects/${id}/catalog`) return envelope({ items: [API_ENTRY], next_cursor: null });
 	if (call.url.pathname === `/v1/projects/${id}/hosts`) return envelope({ items: [HOST], next_cursor: null });
 	if (call.url.pathname === `/v1/projects/${id}/members`) return envelope({ items: [], next_cursor: null });
 	if (call.url.pathname === `/v1/projects/${id}/join-tokens`) return envelope({ items: [], next_cursor: null });
@@ -170,8 +175,10 @@ describe('project services', { concurrency: false }, () => {
 		restoreEnv();
 	});
 
-	function serviceList(calls: FetchCall[]): FetchCall | undefined {
-		return calls.find((call) => call.url.pathname === `/v1/projects/${PROJECT.id}/services`);
+	function loadAt(url: string, projects = [PROJECT]) {
+		return projectLoad(
+			fakeEvent({ url, session: TOKEN, user: USER, projects, params: { id: PROJECT.id } }).event as never
+		);
 	}
 
 	test('each tab fetches only what it shows, and independent calls overlap', async () => {
@@ -193,9 +200,8 @@ describe('project services', { concurrency: false }, () => {
 		const expected: Record<string, string[]> = {
 			// An admin's Hosts tab also lists join tokens for the Add a host card.
 			hosts: ['hosts', 'join-tokens'],
-			// Services reads the catalog for the row actions (Start, Stop, Restart, Logs, Status).
-			services: ['catalog', 'hosts', 'services'],
-			catalog: ['catalog', 'hosts', 'members'],
+			// Catalog & services: the entries, their running copies, the hosts they run on, and members for Permissions.
+			catalog: ['catalog', 'hosts', 'members', 'services'],
 			members: ['invites', 'members'],
 			tokens: ['join-tokens'],
 			settings: ['env-sets', 'files', 'registries']
@@ -204,17 +210,7 @@ describe('project services', { concurrency: false }, () => {
 		for (const [tab, want] of Object.entries(expected)) {
 			maxInFlight = 0;
 			const calls = installFetch(respond);
-			const data = pageData(
-				await projectLoad(
-					fakeEvent({
-						url: `http://console.example/projects/${id}?tab=${tab}`,
-						session: TOKEN,
-						user: USER,
-						projects: [PROJECT],
-						params: { id }
-					}).event as never
-				)
-			);
+			const data = pageData(await loadAt(`http://console.example/projects/${id}?tab=${tab}`));
 			assert.equal(data.tab, tab);
 			const sections = calls
 				.map((call) => call.url.pathname)
@@ -224,190 +220,248 @@ describe('project services', { concurrency: false }, () => {
 			assert.deepEqual(sections, want, tab);
 			overlap[tab] = maxInFlight;
 		}
-		assert.equal(overlap.catalog, 3);
+		assert.equal(overlap.catalog, 4);
 		assert.equal(overlap.members, 2);
 		assert.equal(overlap.hosts, 2);
-		assert.equal(overlap.services, 2);
 	});
 
-	test('the services load maps each query param onto the API url', async () => {
-		const host = HOST_ID;
+	test('an old tab=services link redirects to the merged tab with its params mapped', async () => {
+		const calls = installFetch(() => envelope(null, 500, 'error', 'should not load'));
+		await assert.rejects(
+			async () => {
+				await loadAt(
+					`http://console.example/projects/${PROJECT.id}?tab=services&services.q=api&services.host=${HOST_ID}&services.sort=status&services.dir=desc&services.cursor=abc&show=all&services.logs=api`
+				);
+			},
+			(err: unknown) =>
+				isRedirect(err) &&
+				err.status === 303 &&
+				err.location === `/projects/${PROJECT.id}?tab=catalog&catalog.q=api&catalog.host=${HOST_ID}&catalog.logs=api`
+		);
+		assert.equal(calls.length, 0);
+	});
+
+	test('the copies load sends view, include and limit once, and groups owned rows of this project by entry', async () => {
 		const calls = installFetch((call) =>
 			shell(call, () =>
 				envelope({
-					items: [projectItem()],
+					items: [
+						projectItem(),
+						projectItem({ id: CHECK_ID, source: 'discovered', catalog_entry: null }),
+						projectItem({ id: OTHER_ID, project_id: OTHER_ID, project_name: 'Share' }),
+						projectItem({ id: SECOND_ID, catalog_entry: 'unlisted' })
+					],
 					total: 4,
-					next_cursor: 'n',
+					next_cursor: null,
 					prev_cursor: null
 				})
 			)
 		);
-		const data = pageData(
-			await projectLoad(
-				fakeEvent({
-					url: `http://console.example/projects/${PROJECT.id}?tab=services&services.q=api&services.host=${host}&services.sort=status&services.dir=desc&services.cursor=abc`,
-					session: TOKEN,
-					user: USER,
-					projects: [PROJECT],
-					params: { id: PROJECT.id }
-				}).event as never
-			)
-		);
-		const listed = serviceList(calls);
-		assert.ok(listed);
-		assert.equal(listed.url.searchParams.get('q'), 'api');
-		assert.equal(listed.url.searchParams.get('host_id'), host);
-		assert.equal(listed.url.searchParams.get('sort'), 'status');
-		assert.equal(listed.url.searchParams.get('dir'), 'desc');
-		assert.equal(listed.url.searchParams.get('limit'), '25');
-		assert.equal(listed.url.searchParams.get('cursor'), 'abc');
-		assert.equal(listed.url.searchParams.get('include'), 'health_checks');
-		assert.equal(data.tab, 'services');
-		assert.equal(data.services[0]?.name, 'api');
-		assert.equal(data.servicesTotal, 4);
-		assert.equal(data.servicesNext, 'n');
-		assert.equal(data.servicesMessage, null);
+		const data = pageData(await loadAt(`http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=api&catalog.host=${HOST_ID}`));
+		const listed = calls.filter((call) => call.url.pathname === `/v1/projects/${PROJECT.id}/services`);
+		assert.equal(listed.length, 1);
+		const params = listed[0]?.url.searchParams;
+		assert.deepEqual([...(params?.keys() ?? [])].sort(), ['include', 'limit', 'view']);
+		assert.equal(params?.get('view'), 'deploybot');
+		assert.equal(params?.get('include'), 'health_checks');
+		assert.equal(params?.get('limit'), '200');
+		assert.equal(data.tab, 'catalog');
+		assert.deepEqual(Object.keys(data.copies), ['api']);
+		assert.deepEqual(data.copies.api?.map((row: ProjectServiceRow) => row.id), [SERVICE_ID]);
+		assert.equal(data.copiesMessage, null);
+		assert.equal(data.copiesComplete, true);
 
-		const droppedUrl = `http://console.example/projects/${PROJECT.id}?tab=services&services.host=not-a-uuid&services.cursor=${'c'.repeat(513)}`;
-		const droppedCalls = installFetch((call) =>
-			shell(call, () => envelope({ items: [projectItem()], total: 1, next_cursor: null, prev_cursor: null }))
-		);
-		const dropped = pageData(
-			await projectLoad(
-				fakeEvent({
-					url: droppedUrl,
-					session: TOKEN,
-					user: USER,
-					projects: [PROJECT],
-					params: { id: PROJECT.id }
-				}).event as never
-			)
-		);
-		const droppedList = serviceList(droppedCalls);
-		assert.ok(droppedList);
-		assert.equal(droppedList.url.searchParams.has('q'), false);
-		assert.equal(droppedList.url.searchParams.has('host_id'), false);
-		assert.equal(droppedList.url.searchParams.has('cursor'), false);
-		assert.equal(droppedList.url.searchParams.get('sort'), 'name');
-		assert.equal(droppedList.url.searchParams.get('dir'), 'asc');
-		assert.equal(droppedList.url.searchParams.get('limit'), '25');
-		assert.equal(dropped.services[0]?.name, 'api');
-		assert.equal(dropped.servicesTotal, 1);
-		assert.equal(
-			dropped.servicesMessage,
-			'That host is not available for this project. That page link is not valid.'
-		);
-		setPageUrl(droppedUrl);
-		const droppedHtml = decode(render(ProjectPage, { props: { data: dropped as never, form: null } }).body);
-		assert.match(droppedHtml, /role="alert"/);
-		assert.match(droppedHtml, /That host is not available for this project\./);
-		assert.match(droppedHtml, /That page link is not valid\./);
-
-		const lastSeenCalls = installFetch((call) =>
-			shell(call, () => envelope({ items: [], total: 0, next_cursor: null, prev_cursor: null }))
-		);
-		const lastSeen = pageData(
-			await projectLoad(
-				fakeEvent({
-					url: `http://console.example/projects/${PROJECT.id}?tab=services&services.sort=last_seen`,
-					session: TOKEN,
-					user: USER,
-					projects: [PROJECT],
-					params: { id: PROJECT.id }
-				}).event as never
-			)
-		);
-		const lastSeenList = serviceList(lastSeenCalls);
-		assert.ok(lastSeenList);
-		// Last seen is no longer a column, so an old link falls back to the default sort.
-		assert.equal(lastSeenList.url.searchParams.get('sort'), 'name');
-		assert.equal(lastSeenList.url.searchParams.get('dir'), 'asc');
-		assert.equal(lastSeen.services.length, 0);
-		assert.equal(lastSeen.servicesMessage, null);
-
-		const lastSeenDescCalls = installFetch((call) =>
-			shell(call, () => envelope({ items: [], total: 0, next_cursor: null, prev_cursor: null }))
-		);
-		await projectLoad(
-			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=services&services.sort=last_seen&services.dir=desc`,
-				session: TOKEN,
-				user: USER,
-				projects: [PROJECT],
-				params: { id: PROJECT.id }
-			}).event as never
-		);
-		const lastSeenDescList = serviceList(lastSeenDescCalls);
-		assert.ok(lastSeenDescList);
-		assert.equal(lastSeenDescList.url.searchParams.get('sort'), 'name');
-		assert.equal(lastSeenDescList.url.searchParams.get('dir'), 'asc');
-
-		const tooLong = installFetch((call) => shell(call, () => envelope(null, 500, 'error', 'should not list')));
-		const refused = pageData(
-			await projectLoad(
-				fakeEvent({
-					url: `http://console.example/projects/${PROJECT.id}?tab=services&services.q=${'a'.repeat(101)}`,
-					session: TOKEN,
-					user: USER,
-					projects: [PROJECT],
-					params: { id: PROJECT.id }
-				}).event as never
-			)
-		);
-		assert.equal(refused.servicesMessage, 'Search must be at most 100 characters.');
-		assert.equal(tooLong.some((call) => call.url.pathname === `/v1/projects/${PROJECT.id}/services`), false);
-
-		installFetch((call) => shell(call, () => envelope({ items: [projectItem()], next_cursor: null })));
-		const malformed = pageData(
-			await projectLoad(
-				fakeEvent({
-					url: `http://console.example/projects/${PROJECT.id}?tab=services`,
-					session: TOKEN,
-					user: USER,
-					projects: [PROJECT],
-					params: { id: PROJECT.id }
-				}).event as never
-			)
-		);
-		assert.equal(malformed.services.length, 0);
-		assert.equal(malformed.servicesMessage, 'The API returned an unexpected response.');
-
+		// A host outside the project's own and deploy-shared hosts is ignored with a notice.
 		const metricsId = '00000000-0000-4000-8000-0000000000ee';
-		const unreachableUrl = `http://console.example/projects/${PROJECT.id}?tab=services&services.host=${metricsId}`;
-		const unreachableCalls = installFetch((call) => {
+		const unreachableUrl = `http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.host=${metricsId}`;
+		installFetch((call) => {
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/hosts`) {
 				return envelope({
 					items: [HOST, { ...HOST, id: metricsId, name: 'metrics-box', relation: 'shared', share_level: 'metrics' }],
 					next_cursor: null
 				});
 			}
-			return shell(call, () => envelope({ items: [projectItem()], total: 2, next_cursor: null, prev_cursor: null }));
+			return shell(call, () => envelope({ items: [projectItem()], total: 1, next_cursor: null, prev_cursor: null }));
 		});
-		const unreachable = pageData(
-			await projectLoad(
-				fakeEvent({
-					url: unreachableUrl,
-					session: TOKEN,
-					user: USER,
-					projects: [PROJECT],
-					params: { id: PROJECT.id }
-				}).event as never
-			)
-		);
-		const unreachableList = serviceList(unreachableCalls);
-		assert.ok(unreachableList);
-		assert.equal(unreachableList.url.searchParams.has('host_id'), false);
-		assert.equal(unreachable.services[0]?.name, 'api');
-		assert.equal(unreachable.servicesTotal, 2);
-		assert.equal(unreachable.servicesMessage, 'That host is not available for this project.');
+		const unreachable = pageData(await loadAt(unreachableUrl));
 		setPageUrl(unreachableUrl);
 		const unreachableHtml = decode(render(ProjectPage, { props: { data: unreachable as never, form: null } }).body);
 		assert.match(unreachableHtml, /role="alert"/);
 		assert.match(unreachableHtml, /That host is not available for this project\./);
+		// The filter is ignored: the entry still lists its copy (collapsed, so its table is not rendered yet).
+		assert.match(unreachableHtml, /data-entry="api"[\s\S]*1 on pi1/);
+
+		installFetch((call) => shell(call, () => envelope({ items: [projectItem()], next_cursor: null })));
+		const malformed = pageData(await loadAt(`http://console.example/projects/${PROJECT.id}?tab=catalog`));
+		assert.deepEqual(malformed.copies, {});
+		assert.equal(malformed.copiesComplete, false);
+		assert.equal(malformed.copiesMessage, 'The API returned an unexpected response.');
+	});
+
+	test('the copies load follows next_cursor for at most five pages and then says so', async () => {
+		let n = 0;
+		const calls = installFetch((call) =>
+			shell(call, () => {
+				n += 1;
+				const id = `00000000-0000-4000-8200-${n.toString(16).padStart(12, '0')}`;
+				return envelope({ items: [projectItem({ id, host_name: `pi${n}` })], total: 9, next_cursor: `c${n}`, prev_cursor: null });
+			})
+		);
+		const url = `http://console.example/projects/${PROJECT.id}?tab=catalog`;
+		const data = pageData(await loadAt(url));
+		const pages = calls.filter((call) => call.url.pathname === `/v1/projects/${PROJECT.id}/services`);
+		assert.deepEqual(
+			pages.map((call) => call.url.searchParams.get('cursor')),
+			[null, 'c1', 'c2', 'c3', 'c4']
+		);
+		assert.equal(data.copies.api?.length, 5);
+		assert.equal(data.copiesMessage, COPIES_CAPPED_NOTE);
+		setPageUrl(url);
+		const html = decode(render(ProjectPage, { props: { data: data as never, form: null } }).body);
+		assert.match(html, /role="status"[^>]*>(?:(?!<\/div>)[\s\S])*Some running copies could not be listed\./);
+
+		const twoPages = installFetch((call) =>
+			shell(call, () =>
+				call.url.searchParams.has('cursor')
+					? envelope({ items: [projectItem({ id: CHECK_ID, host_name: 'a-first' })], total: 2, next_cursor: null, prev_cursor: 'p' })
+					: envelope({ items: [projectItem()], total: 2, next_cursor: 'n', prev_cursor: null })
+			)
+		);
+		const both = pageData(await loadAt(url));
+		assert.equal(twoPages.filter((call) => call.url.pathname.endsWith('/services')).length, 2);
+		// Host-name order under the entry.
+		assert.deepEqual(both.copies.api?.map((row: ProjectServiceRow) => row.host_name), ['a-first', 'pi1']);
+		assert.equal(both.copiesMessage, null);
+	});
+
+	test('a row repeated on a later page is one copy, and hosts sort without case first', async () => {
+		installFetch((call) =>
+			shell(call, () =>
+				call.url.searchParams.has('cursor')
+					? envelope({
+							items: [projectItem({ host_name: 'pi1' }), projectItem({ id: CHECK_ID, host_name: 'Pi2' }), projectItem({ id: SECOND_ID, host_name: 'pi10' })],
+							total: 3,
+							next_cursor: null,
+							prev_cursor: 'p'
+						})
+					: envelope({ items: [projectItem({ host_name: 'pi1' })], total: 3, next_cursor: 'n', prev_cursor: null })
+			)
+		);
+		const data = pageData(await loadAt(`http://console.example/projects/${PROJECT.id}?tab=catalog`));
+		assert.deepEqual(data.copies.api?.map((row: ProjectServiceRow) => row.id), [SERVICE_ID, SECOND_ID, CHECK_ID]);
+		assert.deepEqual(data.copies.api?.map((row: ProjectServiceRow) => row.host_name), ['pi1', 'pi10', 'Pi2']);
+		assert.equal(data.copiesComplete, true);
+	});
+
+	test('a failure on a later page lists no copies and shows the message', async () => {
+		for (const [second, message] of [
+			[() => envelope(null, 503, 'unavailable', 'api down'), 'api down'],
+			[() => envelope({ items: 'nope' }), 'The API returned an unexpected response.']
+		] as const) {
+			installFetch((call) =>
+				shell(call, () =>
+					call.url.searchParams.has('cursor') ? second() : envelope({ items: [projectItem()], total: 2, next_cursor: 'n', prev_cursor: null })
+				)
+			);
+			const data = pageData(await loadAt(`http://console.example/projects/${PROJECT.id}?tab=catalog`));
+			assert.deepEqual(data.copies, {}, message);
+			assert.equal(data.copiesMessage, message);
+			assert.equal(data.copiesComplete, false);
+			assert.equal(data.notRunningKnown, false);
+		}
+	});
+
+	test('a malformed row of another project is skipped, not left out, so not-running rows stay', async () => {
+		const runnable = programCatalogEntry('api', ['run'], '00000000-0000-4000-8000-0000000000c2');
+		const programs = { enabled: true, run_as: ['joe'], allow_shell: false, policy_hash: 'p', images: true, docker: true, files: false, logging: false, health_policy: false };
+		installFetch((call) => {
+			if (call.url.pathname === `/v1/projects/${PROJECT.id}/catalog`) return envelope({ items: [runnable], next_cursor: null });
+			if (call.url.pathname === `/v1/projects/${PROJECT.id}/hosts`) return envelope({ items: [{ ...HOST, programs }], next_cursor: null });
+			return shell(call, () =>
+				envelope({ items: [{ id: OTHER_ID, project_id: OTHER_ID, name: 'broken' }], total: 1, next_cursor: null, prev_cursor: null })
+			);
+		});
+		const data = pageData(await loadAt(`http://console.example/projects/${PROJECT.id}?tab=catalog`));
+		assert.equal(data.copiesOmitted, 0);
+		assert.equal(data.copiesComplete, true);
+		assert.equal(data.notRunningKnown, true);
+		assert.deepEqual(data.notRunning.map((pair: { entry: { name: string }; host: { name: string } }) => `${pair.entry.name}@${pair.host.name}`), ['api@pi1']);
+
+		// A malformed row of this project is left out: the list is incomplete.
+		installFetch((call) => {
+			if (call.url.pathname === `/v1/projects/${PROJECT.id}/catalog`) return envelope({ items: [runnable], next_cursor: null });
+			return shell(call, () =>
+				envelope({ items: [{ id: OTHER_ID, project_id: PROJECT.id, name: 'broken' }], total: 1, next_cursor: null, prev_cursor: null })
+			);
+		});
+		const mine = pageData(await loadAt(`http://console.example/projects/${PROJECT.id}?tab=catalog`));
+		assert.equal(mine.copiesOmitted, 1);
+		assert.equal(mine.copiesComplete, false);
+		assert.equal(mine.notRunningKnown, false);
+	});
+
+	test('status reads stop after 100 container copies; the rest are unknown and the tab says so', async () => {
+		const web = imageCatalogEntry('web', ['run', 'stop', 'logs'], '00000000-0000-4000-8000-0000000000c1');
+		const db = imageCatalogEntry('db', ['run', 'stop', 'logs'], '00000000-0000-4000-8000-0000000000c3');
+		const container = (n: number, entry: string) =>
+			projectItem({
+				id: `00000000-0000-4000-8300-${n.toString(16).padStart(12, '0')}`,
+				host_id: `00000000-0000-4000-8400-${n.toString(16).padStart(12, '0')}`,
+				host_name: `h${String(n).padStart(3, '0')}`,
+				name: entry,
+				catalog_entry: entry,
+				kind: 'container'
+			});
+		// Catalog order web, then db: web's 60 copies are read first, then the first 40 of db's 60.
+		const items = [...Array.from({ length: 60 }, (_, n) => container(n, 'db')), ...Array.from({ length: 60 }, (_, n) => container(100 + n, 'web'))];
+		const calls = installFetch((call) => {
+			if (call.url.pathname === `/v1/projects/${PROJECT.id}/catalog`) return envelope({ items: [web, db], next_cursor: null });
+			if (call.url.pathname.endsWith('/status')) {
+				return envelope({ container: 'c', state: 'running', exit_code: null, restart_count: 0, started_at: null, finished_at: null, digest: null, ports: [] });
+			}
+			return shell(call, () => envelope({ items, total: items.length, next_cursor: null, prev_cursor: null }));
+		});
+		const url = `http://console.example/projects/${PROJECT.id}?tab=catalog`;
+		const data = pageData(await loadAt(url));
+		const states = (await data.serviceStates) as Record<string, unknown>;
+		assert.equal(calls.filter((call) => call.url.pathname.endsWith('/status')).length, 100);
+		assert.equal(Object.keys(states).length, 100);
+		assert.equal(data.statusCapped, true);
+		assert.equal(data.copies.web?.every((row: ProjectServiceRow) => row.runtime === undefined), true);
+		const db40 = data.copies.db ?? [];
+		assert.equal(db40.filter((row: ProjectServiceRow) => row.runtime === undefined).length, 40);
+		assert.deepEqual(db40[59]?.runtime, { state: 'unknown', restarts: null });
+		setPageUrl(url);
+		const html = decode(render(ProjectPage, { props: { data: data as never, form: null } }).body);
+		assert.match(html, /role="status"[^>]*>(?:(?!<\/div>)[\s\S])*Live state is shown for the first 100 copies\./);
+	});
+
+	test('an image entry with no copy says Not deployed only when the copy list is complete', async () => {
+		const web = imageCatalogEntry('web', [], '00000000-0000-4000-8000-0000000000c1');
+		const url = `http://console.example/projects/${PROJECT.id}?tab=catalog`;
+		const loadWith = async (services: (call: FetchCall) => Response) => {
+			installFetch((call) => {
+				if (call.url.pathname === `/v1/projects/${PROJECT.id}/catalog`) return envelope({ items: [web], next_cursor: null });
+				return shell(call, services);
+			});
+			return pageData(await loadAt(url));
+		};
+		const complete = await loadWith(() => envelope({ items: [], total: 0, next_cursor: null, prev_cursor: null }));
+		setPageUrl(url);
+		assert.match(decode(render(ProjectPage, { props: { data: complete as never, form: null } }).body), /Not deployed(?! yet)/);
+		// Five pages and more: the page cap notice, and no claim that web has no copy.
+		const capped = await loadWith((call) =>
+			envelope({ items: [projectItem({ id: `00000000-0000-4000-8500-00000000000${call.url.searchParams.get('cursor')?.length ?? 0}` })], total: 9, next_cursor: `${call.url.searchParams.get('cursor') ?? ''}x`, prev_cursor: null })
+		);
+		assert.equal(capped.copiesMessage, COPIES_CAPPED_NOTE);
+		assert.equal(capped.copiesComplete, false);
+		const cappedHtml = decode(render(ProjectPage, { props: { data: capped as never, form: null } }).body);
+		assert.equal(cappedHtml.includes('Some running copies could not be listed.'), true);
+		assert.doesNotMatch(cappedHtml, /Not deployed/);
 	});
 
 	test('rename keeps the table query and keeps a rejected value', async () => {
-		const url = `http://console.example/projects/${PROJECT.id}?tab=services&services.q=api&services.sort=host&services.dir=asc&services.cursor=abc&/rename`;
+		const url = `http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=api&catalog.sort=name&catalog.dir=asc&catalog.host=${HOST_ID}&/rename`;
 		const calls = installFetch((call) => {
 			assert.equal(call.method, 'PATCH');
 			assert.equal(call.url.pathname, `/v1/services/${SERVICE_ID}`);
@@ -430,11 +484,11 @@ describe('project services', { concurrency: false }, () => {
 				if (!isRedirect(err) || err.status !== 303) return false;
 				const dest = new URL(err.location, 'http://console.example');
 				assert.equal(dest.pathname, `/projects/${PROJECT.id}`);
-				assert.equal(dest.searchParams.get('tab'), 'services');
-				assert.equal(dest.searchParams.get('services.q'), 'api');
-				assert.equal(dest.searchParams.get('services.sort'), 'host');
-				assert.equal(dest.searchParams.get('services.dir'), 'asc');
-				assert.equal(dest.searchParams.get('services.cursor'), 'abc');
+				assert.equal(dest.searchParams.get('tab'), 'catalog');
+				assert.equal(dest.searchParams.get('catalog.q'), 'api');
+				assert.equal(dest.searchParams.get('catalog.sort'), 'name');
+				assert.equal(dest.searchParams.get('catalog.dir'), 'asc');
+				assert.equal(dest.searchParams.get('catalog.host'), HOST_ID);
 				assert.equal(dest.searchParams.has('/rename'), false);
 				return true;
 			}
@@ -497,8 +551,9 @@ describe('project services', { concurrency: false }, () => {
 			assert.equal(rejectedData.message, code);
 			assert.equal(rejectedData.displayName, '  Widget  ');
 			assert.equal(rejectedData.renameServiceId, SERVICE_ID);
+			assert.equal((rejected.data as unknown as { scope?: string }).scope, 'catalog');
 			const view = servicesRenameView({
-				scope: 'services',
+				scope: 'catalog',
 				message: rejectedData.message,
 				renameServiceId: rejectedData.renameServiceId,
 				displayName: rejectedData.displayName
@@ -558,7 +613,7 @@ describe('project services', { concurrency: false }, () => {
 		});
 		const probe = await projectActions.probe(
 			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=services&services.q=api&services.cursor=abc&/probe`,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=api&/probe`,
 				session: TOKEN,
 				user: USER,
 				projects: [PROJECT],
@@ -568,7 +623,7 @@ describe('project services', { concurrency: false }, () => {
 		);
 		assert.equal(isActionFailure(probe), false);
 		if (!probe || isActionFailure(probe)) assert.fail('expected a probe result');
-		assert.equal(probe.scope, 'services');
+		assert.equal(probe.scope, 'catalog');
 		assert.equal(probe.probeServiceId, SERVICE_ID);
 		assert.equal(probe.probe?.result, 'up');
 		assert.equal(calls[0]?.body, JSON.stringify({ check_id: CHECK_ID }));
@@ -595,7 +650,7 @@ describe('project services', { concurrency: false }, () => {
 			(err: unknown) =>
 				isRedirect(err) &&
 				err.status === 303 &&
-				err.location === `/projects/${PROJECT.id}?tab=services&services.host=${HOST_ID}`
+				err.location === `/projects/${PROJECT.id}?tab=catalog&catalog.host=${HOST_ID}`
 		);
 		assert.equal(
 			ownerCalls.some((call) => call.url.pathname.includes('/projects/')),
@@ -626,7 +681,7 @@ describe('project services', { concurrency: false }, () => {
 			(err: unknown) =>
 				isRedirect(err) &&
 				err.status === 303 &&
-				err.location === `/projects/${SECOND_ID}?tab=services&services.host=${HOST_ID}`
+				err.location === `/projects/${SECOND_ID}?tab=catalog&catalog.host=${HOST_ID}`
 		);
 		const shareLists = shareCalls.filter((call) => call.url.pathname.endsWith('/hosts') && call.url.pathname.includes('/projects/'));
 		assert.deepEqual(
@@ -698,9 +753,13 @@ describe('project services', { concurrency: false }, () => {
 		);
 	});
 
-	test('a process links to the service project only when the caller is a member', async () => {
+	test('a process links to the catalog copy only when the caller is a member', async () => {
+		const DISCOVERED_ID = '00000000-0000-4000-8000-0000000000dd';
 		const serviceBody = {
-			items: [baseService({ project_id: PROJECT.id, display_name: 'API', name: 'api' })],
+			items: [
+				baseService({ project_id: PROJECT.id, display_name: 'API', name: 'deploybot-lab-api.service', source: 'owned', catalog_entry: 'api' }),
+				baseService({ id: DISCOVERED_ID, project_id: PROJECT.id, name: 'nginx' })
+			],
 			next_cursor: null
 		};
 		async function loadProcesses(projects: typeof PROJECT[]) {
@@ -747,8 +806,11 @@ describe('project services', { concurrency: false }, () => {
 		assert.equal(member.data.serviceLinks[SERVICE_ID]?.label, 'API');
 		assert.equal(
 			member.data.serviceLinks[SERVICE_ID]?.href,
-			`/projects/${PROJECT.id}?tab=services&services.host=${HOST_ID}&services.q=api`
+			`/projects/${PROJECT.id}?tab=catalog&catalog.host=${HOST_ID}&catalog.q=api`
 		);
+		// A discovered service has no row on that tab, so it is not a link.
+		assert.equal(member.data.serviceLinks[DISCOVERED_ID]?.label, 'nginx');
+		assert.equal(member.data.serviceLinks[DISCOVERED_ID]?.href, null);
 		assert.equal(member.data.message, null);
 
 		const stranger = await loadProcesses([OTHER]);
@@ -799,7 +861,7 @@ describe('project services', { concurrency: false }, () => {
 	});
 
 	test('display name accepts 64 characters and rejects 65 or a control character before PATCH', async () => {
-		const url = `http://console.example/projects/${PROJECT.id}?tab=services&/rename`;
+		const url = `http://console.example/projects/${PROJECT.id}?tab=catalog&/rename`;
 		const accepted = 'a'.repeat(64);
 		const calls = installFetch((call) => {
 			assert.equal(call.method, 'PATCH');
@@ -842,11 +904,12 @@ describe('project services', { concurrency: false }, () => {
 		}
 	});
 
-	test('a viewer load shows the services tab, no rename, and the probe control', async () => {
+	test('a viewer load shows the merged tab, no rename, and the checks reach the copy (for the dialog)', async () => {
 		installFetch((call) => {
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}`) return envelope({ ...PROJECT, role: 'viewer' });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/hosts`) return envelope({ items: [HOST], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/members`) return envelope({ items: [], next_cursor: null });
+			if (call.url.pathname === `/v1/projects/${PROJECT.id}/catalog`) return envelope({ items: [API_ENTRY], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/services`) {
 				return envelope({
 					items: [projectItem({ health_checks: [{ id: CHECK_ID, protocol: 'http', port: 80, path: '/health', enabled: true }] })],
@@ -857,7 +920,7 @@ describe('project services', { concurrency: false }, () => {
 			}
 			return envelope(null, 500, 'error', 'unexpected');
 		});
-		const url = `http://console.example/projects/${PROJECT.id}?tab=services`;
+		const url = `http://console.example/projects/${PROJECT.id}?tab=catalog`;
 		const data = pageData(
 			await projectLoad(
 				fakeEvent({
@@ -869,68 +932,19 @@ describe('project services', { concurrency: false }, () => {
 				}).event as never
 			)
 		);
-		assert.equal(data.tab, 'services');
+		assert.equal(data.tab, 'catalog');
 		assert.equal(data.canAdmin, false);
-		assert.equal(data.services[0]?.checks.length, 1);
+		assert.equal(data.copies.api?.[0]?.checks.length, 1);
 		setPageUrl(url);
 		const html = decode(render(ProjectPage, { props: { data: data as never, form: null } }).body);
-		assert.match(html, /aria-current="page">Services</);
+		assert.match(html, /aria-current="page">Catalog & services</);
+		assert.equal(html.includes('tab=services'), false);
 		assert.equal(html.includes('aria-label="Rename '), false);
-		assert.match(html, /aria-label="Probe api http 80"/);
+		// Health-check lines and Probe live in the Health checks dialog, not in the services table.
+		assert.equal(html.includes('aria-label="Probe api http 80"'), false);
 	});
 
-	test('a search over 100 characters or containing NUL is refused before the API', async () => {
-		for (const raw of ['a'.repeat(201), `  ${'b'.repeat(101)}`, 'bad\0name']) {
-			const url = new URL(`http://console.example/projects/${PROJECT.id}?tab=services`);
-			url.searchParams.set('services.q', raw);
-			const calls = installFetch((call) => shell(call, () => envelope(null, 500, 'error', 'should not list')));
-			const refused = pageData(
-				await projectLoad(
-					fakeEvent({
-						url: url.href,
-						session: TOKEN,
-						user: USER,
-						projects: [PROJECT],
-						params: { id: PROJECT.id }
-					}).event as never
-				)
-			);
-			assert.equal(calls.some((call) => call.url.pathname === `/v1/projects/${PROJECT.id}/services`), false);
-			assert.equal(refused.servicesMessage, 'Search must be at most 100 characters.');
-			assert.equal(refused.services.length, 0);
-		}
-	});
-
-	test('a deploy-share host id is sent as host_id', async () => {
-		const deployId = '00000000-0000-4000-8000-0000000000ef';
-		const calls = installFetch((call) => {
-			if (call.url.pathname === `/v1/projects/${PROJECT.id}/hosts`) {
-				return envelope({
-					items: [HOST, { ...HOST, id: deployId, name: 'deploy-box', relation: 'shared', share_level: 'deploy' }],
-					next_cursor: null
-				});
-			}
-			return shell(call, () => envelope({ items: [projectItem()], total: 1, next_cursor: null, prev_cursor: null }));
-		});
-		const data = pageData(
-			await projectLoad(
-				fakeEvent({
-					url: `http://console.example/projects/${PROJECT.id}?tab=services&services.host=${deployId}`,
-					session: TOKEN,
-					user: USER,
-					projects: [PROJECT],
-					params: { id: PROJECT.id }
-				}).event as never
-			)
-		);
-		const listed = serviceList(calls);
-		assert.ok(listed);
-		assert.equal(listed.url.searchParams.get('host_id'), deployId);
-		assert.equal(data.servicesMessage, null);
-		assert.equal(data.services[0]?.name, 'api');
-	});
-
-	test('a services list error sets the notice', async () => {
+	test('a services list error sets the notice and keeps the entries', async () => {
 		const cases = [
 			[400, 'bad_request', 'bad search'],
 			[403, 'forbidden', 'not allowed'],
@@ -939,7 +953,7 @@ describe('project services', { concurrency: false }, () => {
 		] as const;
 		for (const [status, code, msg] of cases) {
 			installFetch((call) => shell(call, () => envelope(null, status, code, msg)));
-			const url = `http://console.example/projects/${PROJECT.id}?tab=services`;
+			const url = `http://console.example/projects/${PROJECT.id}?tab=catalog`;
 			const failed = pageData(
 				await projectLoad(
 					fakeEvent({
@@ -951,67 +965,17 @@ describe('project services', { concurrency: false }, () => {
 					}).event as never
 				)
 			);
-			assert.equal(failed.services.length, 0);
-			assert.equal(failed.servicesMessage, msg);
+			assert.deepEqual(failed.copies, {});
+			assert.equal(failed.copiesMessage, msg);
+			assert.equal(failed.catalog.length, 1);
 			setPageUrl(url);
 			const html = decode(render(ProjectPage, { props: { data: failed as never, form: null } }).body);
 			assert.match(html, /role="alert"/);
 			assert.equal(html.includes(msg), true);
+			// Unknown copies: no entry claims it is not deployed.
+			assert.equal(html.includes('data-entry="api"'), true);
+			assert.equal(html.includes('Not deployed yet.'), false);
 		}
-	});
-
-	test('the services load sends view from show and falls back to deploybot', async () => {
-		const cases = [
-			['', 'deploybot'],
-			['show=deploybot', 'deploybot'],
-			['show=discovered', 'deploybot_and_discovered'],
-			['show=all', 'all'],
-			['show=nope', 'deploybot'],
-			['show=deploybot_and_discovered', 'deploybot']
-		] as const;
-		for (const [query, view] of cases) {
-			const calls = installFetch((call) =>
-				shell(call, () => envelope({ items: [], total: 0, next_cursor: null, prev_cursor: null }))
-			);
-			const qs = query ? `?tab=services&${query}` : '?tab=services';
-			await projectLoad(
-				fakeEvent({
-					url: `http://console.example/projects/${PROJECT.id}${qs}`,
-					session: TOKEN,
-					user: USER,
-					projects: [PROJECT],
-					params: { id: PROJECT.id }
-				}).event as never
-			);
-			const listed = serviceList(calls);
-			assert.ok(listed, query || '(default)');
-			assert.equal(listed.url.searchParams.get('view'), view, query || '(default)');
-			assert.equal(listed.url.searchParams.get('include'), 'health_checks', query || '(default)');
-		}
-	});
-
-	test('page 2 of the default view sends view with the table query', async () => {
-		const calls = installFetch((call) =>
-			shell(call, () => envelope({ items: [projectItem()], total: 40, next_cursor: 'n', prev_cursor: 'p' }))
-		);
-		await projectLoad(
-			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=services&services.q=api&services.host=${HOST_ID}&services.sort=status&services.dir=desc&services.cursor=abc`,
-				session: TOKEN,
-				user: USER,
-				projects: [PROJECT],
-				params: { id: PROJECT.id }
-			}).event as never
-		);
-		const listed = serviceList(calls);
-		assert.ok(listed);
-		assert.equal(listed.url.searchParams.get('view'), 'deploybot');
-		assert.equal(listed.url.searchParams.get('q'), 'api');
-		assert.equal(listed.url.searchParams.get('host_id'), HOST_ID);
-		assert.equal(listed.url.searchParams.get('sort'), 'status');
-		assert.equal(listed.url.searchParams.get('dir'), 'desc');
-		assert.equal(listed.url.searchParams.get('cursor'), 'abc');
-		assert.equal(listed.url.searchParams.get('include'), 'health_checks');
 	});
 
 	test('a row without health_checks says the API is too old, and a malformed one says unread', async () => {
@@ -1027,21 +991,13 @@ describe('project services', { concurrency: false }, () => {
 				})
 			)
 		);
-		const data = pageData(
-			await projectLoad(
-				fakeEvent({
-					url: `http://console.example/projects/${PROJECT.id}?tab=services`,
-					session: TOKEN,
-					user: USER,
-					projects: [PROJECT],
-					params: { id: PROJECT.id }
-				}).event as never
-			)
-		);
-		assert.equal(data.services[0]?.checksMessage, CHECKS_NEED_API);
-		assert.deepEqual(data.services[0]?.checks, []);
-		assert.equal(data.services[1]?.checksMessage, UNREAD_HEALTH_CHECKS);
-		assert.deepEqual(data.services[1]?.checks, []);
+		const data = pageData(await loadAt(`http://console.example/projects/${PROJECT.id}?tab=catalog`));
+		const apiCopies: ProjectServiceRow[] = data.copies.api ?? [];
+		const byId = new Map(apiCopies.map((row) => [row.id, row]));
+		assert.equal(byId.get(SERVICE_ID)?.checksMessage, CHECKS_NEED_API);
+		assert.deepEqual(byId.get(SERVICE_ID)?.checks, []);
+		assert.equal(byId.get(CHECK_ID)?.checksMessage, UNREAD_HEALTH_CHECKS);
+		assert.deepEqual(byId.get(CHECK_ID)?.checks, []);
 	});
 
 	test('gone_at from the list payload reaches the loaded row', async () => {
@@ -1051,27 +1007,18 @@ describe('project services', { concurrency: false }, () => {
 				envelope({ items: [projectItem({ gone_at: gone })], total: 1, next_cursor: null, prev_cursor: null })
 			)
 		);
-		const data = pageData(
-			await projectLoad(
-				fakeEvent({
-					url: `http://console.example/projects/${PROJECT.id}?tab=services`,
-					session: TOKEN,
-					user: USER,
-					projects: [PROJECT],
-					params: { id: PROJECT.id }
-				}).event as never
-			)
-		);
-		assert.equal(data.services[0]?.gone_at, gone);
-		assert.equal(data.servicesMessage, null);
+		const data = pageData(await loadAt(`http://console.example/projects/${PROJECT.id}?tab=catalog`));
+		assert.equal(data.copies.api?.[0]?.gone_at, gone);
+		assert.equal(data.copiesMessage, null);
 	});
 });
 
+/** An owned copy of entry `widget`, labelled Widget, with one HTTP check. */
 function serviceRow(projectName: string, overrides: Partial<ProjectServiceRow> = {}): ProjectServiceRow {
 	return {
 		id: SERVICE_ID,
-		name: 'port-80',
-		source: 'discovered',
+		name: 'widget',
+		source: 'owned',
 		kind: 'process',
 		ports: [80],
 		health: { status: 'up', last_checked_at: null, latency_ms: 1, source: null },
@@ -1086,7 +1033,7 @@ function serviceRow(projectName: string, overrides: Partial<ProjectServiceRow> =
 		project_name: projectName,
 		checks: [{ id: CHECK_ID, protocol: 'http', port: 80, path: '/health', enabled: true }],
 		checksMessage: null,
-		catalog_entry: null,
+		catalog_entry: 'widget',
 		container_name: null,
 		image_digest: null,
 		...overrides
@@ -1099,30 +1046,21 @@ const hostRow = (projectId: string): Host => ({
 	status: 'online'
 });
 
+/** The merged tab with these rows under their entries; the page URL is whatever the test set. */
 function renderServices(rows: ProjectServiceRow[], extra: Record<string, unknown> = {}) {
-	return render(ServicesSection, {
-		props: {
-			projectId: PROJECT.id,
-			projectName: 'Lab',
-			hosts: [hostRow(PROJECT.id)],
-			canAdmin: true,
-			rows,
-			total: rows.length,
-			prevCursor: null,
-			nextCursor: null,
-			omitted: 0,
-			message: null,
-			probe: null,
-			probeServiceId: null,
-			renameServiceId: null,
-			typedName: null,
-			...extra
-		}
-	}).body;
+	const { hosts, canAdmin, ...rest } = extra as { hosts?: Host[]; canAdmin?: boolean };
+	const entries = [...new Set(rows.map((row) => row.catalog_entry ?? 'widget'))].map((name) => programCatalogEntry(name, ['logs']));
+	return renderCopies({ rows, entries, hosts: hosts ?? [hostRow(PROJECT.id)], canAdmin: canAdmin ?? true, url: currentUrl, ...rest });
 }
 
+let currentUrl = `http://console.example/projects/${PROJECT.id}?tab=catalog`;
+
+function setUrl(url: string | URL): void {
+	currentUrl = String(url);
+	setPageUrl(url);
+}
 test('an owned container shows its container name by default; a rename shows alone with the container name on hover', () => {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+	setUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 	const owned = serviceRow('Lab', {
 		name: 'aihub-edvisor',
 		source: 'owned',
@@ -1138,35 +1076,22 @@ test('an owned container shows its container name by default; a rename shows alo
 	assert.equal(renamed.replace(/ title="[^"]*"/g, '').includes('ai-hub-aihub-edvisor'), false);
 });
 
-test('the Project column renders only when a row is from another project', () => {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services&services.q=api`);
+test('there is no Project column, another project\'s row is not listed, and rename follows the edit rule', () => {
+	setUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=widget`);
 	const same = decode(renderServices([serviceRow('Lab')]));
 	assert.equal(same.includes('>Project<'), false);
-	const mixed = decode(renderServices([serviceRow('Lab'), serviceRow('Other', { id: CHECK_ID, project_name: 'Other' })]));
-	assert.equal(mixed.includes('>Project<'), true);
-	assert.match(same, /aria-label="Rename Widget"/);
+	assert.match(same, /data-row-menu="[^"]*\brename\b[^"]*"/);
+	const mixed = decode(renderServices([serviceRow('Lab'), serviceRow('Other', { id: CHECK_ID, project_id: OTHER_ID, project_name: 'Other' })]));
+	assert.equal(mixed.includes('>Project<'), false);
+	assert.equal(mixed.includes(`id="service-${CHECK_ID}"`), false);
 
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
-	const viewer = decode(
-		renderServices([serviceRow('Lab')], {
-			canAdmin: false
-		})
-	);
-	assert.equal(viewer.includes('aria-label="Rename '), false);
+	setUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+	const viewer = decode(renderServices([serviceRow('Lab')], { canAdmin: false }));
+	assert.doesNotMatch(viewer, /data-row-menu="[^"]*\brename\b/);
 
-	const foreign = decode(
-		renderServices([serviceRow('Other', { project_id: OTHER_ID, project_name: 'Other' })], {
-			hosts: [hostRow(OTHER_ID)]
-		})
-	);
-	assert.equal(foreign.includes('aria-label="Rename '), false);
-
-	const shared = decode(
-		renderServices([serviceRow('Lab', { project_id: PROJECT.id })], {
-			hosts: [hostRow(OTHER_ID)]
-		})
-	);
-	assert.match(shared, /aria-label="Rename Widget"/);
+	// This project's copy on a host another project owns (a deploy share) can still be renamed.
+	const shared = decode(renderServices([serviceRow('Lab', { project_id: PROJECT.id })], { hosts: [hostRow(OTHER_ID)] }));
+	assert.match(shared, /data-row-menu="[^"]*\brename\b[^"]*"/);
 });
 
 test('the project probe form keeps the table query and shows the service label', () => {
@@ -1181,21 +1106,17 @@ test('the project probe form keeps the table query and shows the service label',
 		checked_at: '2026-10-14T00:00:00Z'
 	};
 	const pageUrl = new URL(
-		`http://console.example/projects/${PROJECT.id}?tab=services&services.q=api&services.sort=name&services.dir=asc&services.cursor=abc`
+		`http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=widget&catalog.sort=name&catalog.dir=asc&catalog.page=2`
 	);
 	const action = actionUrlFrom(pageUrl, 'probe');
-	assert.equal(action, '?tab=services&services.q=api&services.sort=name&services.dir=asc&services.cursor=abc&/probe');
-	assert.equal(action.includes('services.q=api'), true);
-	assert.equal(action.includes('services.sort'), true);
-	assert.equal(action.includes('&/probe'), true);
-	setPageUrl(pageUrl);
+	assert.equal(action, '?tab=catalog&catalog.q=widget&catalog.sort=name&catalog.dir=asc&catalog.page=2&/probe');
+	setUrl(pageUrl);
 	const html = decode(
 		renderServices([serviceRow('Lab')], {
 			probe,
 			probeServiceId: SERVICE_ID
 		})
 	);
-	assert.equal(html.includes(`action="${action}"`), true);
 	assert.match(html, /Widget/);
 	assert.match(html, />pi1</);
 	assert.equal(html.includes('raw-name'), false);
@@ -1237,7 +1158,7 @@ test('a process row links for a member and stays plain text otherwise', () => {
 			}
 		]
 	};
-	const href = `/projects/${PROJECT.id}?tab=services&services.host=${HOST_ID}&services.q=api`;
+	const href = `/projects/${PROJECT.id}?tab=catalog&catalog.host=${HOST_ID}&catalog.q=api`;
 	setPageUrl(`http://console.example/hosts/${HOST_ID}?tab=processes`);
 	const linked = decode(
 		render(ProcessesTab, {
@@ -1288,7 +1209,7 @@ test('a failed rename opens from the action result and a success closes it', () 
 	assert.deepEqual(nextRenameOpen({ open: false, sawFailure: false }, false), { open: false, sawFailure: false });
 
 	const failed = servicesRenameView({
-		scope: 'services',
+		scope: 'catalog',
 		message: 'conflict',
 		renameServiceId: SERVICE_ID,
 		displayName: '  Widget  '
@@ -1302,21 +1223,21 @@ test('a failed rename opens from the action result and a success closes it', () 
 		typedName: null,
 		open: false
 	});
-	assert.deepEqual(servicesRenameView({ scope: 'services', message: 'saved' }), {
+	assert.deepEqual(servicesRenameView({ scope: 'catalog', message: 'saved' }), {
 		renameServiceId: null,
 		typedName: null,
 		open: false
 	});
-	const opened = servicesRenameView({ scope: 'services', renameServiceId: SERVICE_ID });
+	const opened = servicesRenameView({ scope: 'catalog', renameServiceId: SERVICE_ID });
 	assert.equal(opened.open, true);
 	assert.equal(opened.typedName, null);
 });
 
 test('the rename dialog posts display_name only when that row may be renamed', () => {
-	const url = new URL(`http://console.example/projects/${PROJECT.id}?tab=services&services.q=api`);
-	setPageUrl(url);
+	const url = new URL(`http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=widget`);
+	setUrl(url);
 	const html = decode(renderServices([serviceRow('Lab')]));
-	assert.match(html, /aria-label="Rename Widget"/);
+	assert.match(html, /data-row-menu="[^"]*\brename\b[^"]*"/);
 	assert.equal(html.includes('name="display_name"'), false);
 
 	const action = actionUrlFrom(url, 'rename');
@@ -1334,28 +1255,22 @@ test('the rename dialog posts display_name only when that row may be renamed', (
 	assert.equal(namedControl(form, 'clear', '1'), true);
 	assert.match(form, />Clear</);
 
-	const blocked = decode(
-		renderServices([serviceRow('Other', { project_id: OTHER_ID, project_name: 'Other' })], {
-			hosts: [hostRow(OTHER_ID)]
-		})
-	);
+	const blocked = decode(renderServices([serviceRow('Lab')], { canAdmin: false }));
 	assert.equal(blocked.includes('name="display_name"'), false);
-	assert.equal(blocked.includes('aria-label="Rename '), false);
+	assert.doesNotMatch(blocked, /data-row-menu="[^"]*\brename\b/);
 	assert.equal(blocked.includes('>Save<'), false);
 	assert.equal(blocked.includes('Widget'), true);
 
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+	setUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 	const unknownHost = decode(renderServices([serviceRow('Lab')], { hosts: [] }));
-	assert.match(unknownHost, /aria-label="Rename Widget"/);
+	assert.match(unknownHost, /data-row-menu="[^"]*\brename\b[^"]*"/);
 	assert.equal(unknownHost.includes('name="display_name"'), false);
 });
 
 test('the host filter lists owned hosts and deploy shares', () => {
 	const deployId = '00000000-0000-4000-8000-0000000000ee';
 	const metricsId = '00000000-0000-4000-8000-0000000000dd';
-	setPageUrl(
-		`http://console.example/projects/${PROJECT.id}?tab=services&services.q=api&services.sort=host&services.dir=desc&services.cursor=abc`
-	);
+	setUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=widget&catalog.sort=name&catalog.dir=desc&catalog.page=2`);
 	const html = decode(
 		renderServices([serviceRow('Lab')], {
 			hosts: [
@@ -1365,7 +1280,7 @@ test('the host filter lists owned hosts and deploy shares', () => {
 			]
 		})
 	);
-	assert.match(html, /name="services\.host"/);
+	assert.match(html, /name="catalog\.host"/);
 	assert.match(html, /All hosts/);
 	assert.match(html, />pi1</);
 	assert.equal(html.includes('metrics-box'), false);
@@ -1373,16 +1288,21 @@ test('the host filter lists owned hosts and deploy shares', () => {
 	assert.equal(serviceHostReachable(hostRow(PROJECT.id)), true);
 	assert.equal(serviceHostReachable({ relation: 'shared', share_level: 'deploy' }), true);
 	assert.equal(serviceHostReachable({ relation: 'shared', share_level: 'metrics' }), false);
-	const servicesSource = readFileSync(new URL('../src/routes/projects/[id]/ServicesSection.svelte', import.meta.url), 'utf8');
-	assert.match(servicesSource, /hosts\.filter\(\(host\) => serviceHostReachable\(host\)\)/);
-	assert.match(servicesSource, /\{#each serviceHosts/);
-	assert.match(servicesSource, /placeholder="All hosts"/);
+	const deployBox = { ...hostRow(OTHER_ID), id: deployId, name: 'deploy-box', relation: 'shared' as const, share_level: 'deploy' as const };
+	const metricsBox = { ...hostRow(OTHER_ID), id: metricsId, name: 'metrics-box', relation: 'shared' as const, share_level: 'metrics' as const };
+	const choices = hostChoices([hostRow(PROJECT.id), deployBox, metricsBox]);
+	assert.deepEqual(choices.map((host) => host.name), ['pi1', 'deploy-box']);
+	assert.deepEqual(chosenHost(deployId, choices), { hostId: deployId, notice: null });
+	assert.deepEqual(chosenHost(metricsId, choices), { hostId: null, notice: 'That host is not available for this project.' });
+	assert.deepEqual(chosenHost('not-a-uuid', choices), { hostId: null, notice: 'That host is not available for this project.' });
+	assert.deepEqual(chosenHost(null, choices), { hostId: null, notice: null });
+	assert.deepEqual(chosenHost('', choices), { hostId: null, notice: null });
 	const methodAt = html.indexOf('method="GET"');
 	const hostForm = html.slice(html.lastIndexOf('<form', methodAt), html.indexOf('</form>', methodAt));
-	assert.equal(hiddenInput(hostForm, 'services.q', 'api'), true);
-	assert.equal(hiddenInput(hostForm, 'services.sort', 'host'), true);
-	assert.equal(hiddenInput(hostForm, 'services.dir', 'desc'), true);
-	assert.equal(hostForm.includes('services.cursor'), false);
+	assert.equal(hiddenInput(hostForm, 'catalog.q', 'widget'), true);
+	assert.equal(hiddenInput(hostForm, 'catalog.sort', 'name'), true);
+	assert.equal(hiddenInput(hostForm, 'catalog.dir', 'desc'), true);
+	assert.equal(hostForm.includes('catalog.page'), false);
 });
 
 function hiddenInput(html: string, name: string, value: string): boolean {

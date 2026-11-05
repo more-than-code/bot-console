@@ -471,7 +471,7 @@ export type ServiceRuntime = {
 	state: 'running' | 'restarting' | 'paused' | 'stopped' | 'missing' | 'unknown';
 	restarts: number | null;
 	/** What catalog status said about the container, for the status badge tooltip. Absent for programs. */
-	container?: { state: ImageState; exitCode: number | null; digest: string | null; ports: number[] };
+	container?: { state: ImageState; exitCode: number | null; digest: string | null; ports: number[]; startedAt?: string | null };
 };
 
 /** A project services row plus its health checks (api-v1 v1.18 `include=health_checks`) and why they are missing. */

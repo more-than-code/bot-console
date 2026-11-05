@@ -26,6 +26,7 @@ import {
 	USER,
 	type FetchCall
 } from './harness.ts';
+import { imageCatalogEntry, programCatalogEntry } from './copies.ts';
 
 const originalFetch = globalThis.fetch;
 
@@ -299,7 +300,8 @@ describe('auth routes', { concurrency: false }, () => {
 							id: SERVICE_ID,
 							host_id: HOST_ID,
 							name: 'api',
-							source: 'discovered',
+							source: 'owned',
+							catalog_entry: 'api',
 							kind: 'process',
 							ports: [8080],
 							health: null,
@@ -317,6 +319,7 @@ describe('auth routes', { concurrency: false }, () => {
 					total: 1
 				});
 			}
+			if (call.url.pathname === `/v1/projects/${PROJECT.id}/catalog`) return envelope({ items: [programCatalogEntry('api', [], '00000000-0000-4000-8000-0000000000c2')], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/hosts`) return envelope({ items: [], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/members`) return envelope({ items: [], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/join-tokens`) return envelope({ items: [], next_cursor: null });
@@ -325,7 +328,7 @@ describe('auth routes', { concurrency: false }, () => {
 		});
 		const services = pageData(await projectLoad(
 			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=services`,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog`,
 				session: TOKEN,
 				user: USER,
 				projects: [PROJECT],
@@ -333,8 +336,8 @@ describe('auth routes', { concurrency: false }, () => {
 			}).event as never
 		));
 		assert.equal(services.project?.name, 'Lab');
-		assert.equal(services.services[0]?.name, 'api');
-		assert.equal(services.services[0]?.checksMessage, 'Health checks need API v1.18 or later.');
+		assert.equal(services.copies.api?.[0]?.name, 'api');
+		assert.equal(services.copies.api?.[0]?.checksMessage, 'Health checks need API v1.18 or later.');
 		assert.equal(containsToken(services), false);
 	});
 
@@ -462,7 +465,7 @@ describe('auth routes', { concurrency: false }, () => {
 		});
 		const probe = await projectActions.probe(
 			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=services`,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog`,
 				session: TOKEN,
 				user: USER,
 				projects: [PROJECT],
@@ -847,13 +850,14 @@ describe('auth routes', { concurrency: false }, () => {
 		assert.match(page, /data\.device\.status === 'pending'/);
 	});
 
-	test('the services load reads health checks with the list in one call (api-v1 v1.18)', async () => {
+	test('the copies load reads health checks with the list in one call (api-v1 v1.18)', async () => {
 		useApi('https://api.test');
 		const row = (index: number, healthChecks: unknown) => ({
 			id: `00000000-0000-4000-8000-${(index + 1).toString(16).padStart(12, '0')}`,
 			host_id: HOST_ID,
 			name: `s${index}`,
-			source: 'discovered',
+			source: 'owned',
+			catalog_entry: 'web',
 			kind: 'process',
 			ports: [],
 			health: null,
@@ -871,15 +875,16 @@ describe('auth routes', { concurrency: false }, () => {
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/services`) {
 				return envelope({ items: services, next_cursor: null, prev_cursor: null, total: services.length });
 			}
+			if (call.url.pathname === `/v1/projects/${PROJECT.id}/catalog`) return envelope({ items: [imageCatalogEntry('web', [], '00000000-0000-4000-8000-0000000000c1')], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/hosts`) return envelope({ items: [], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/members`) return envelope({ items: [], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/join-tokens`) return envelope({ items: [], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}`) return envelope(PROJECT);
 			return envelope(null, 500, 'error', 'unexpected');
 		});
-		const page = pageData(await projectLoad(
+		const loaded = pageData(await projectLoad(
 			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=services`,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog`,
 				session: TOKEN,
 				user: USER,
 				projects: [PROJECT],
@@ -890,8 +895,9 @@ describe('auth routes', { concurrency: false }, () => {
 		assert.equal(lists.length, 1);
 		assert.equal(lists[0]?.url.searchParams.get('include'), 'health_checks');
 		assert.equal(calls.filter((call) => call.url.pathname.startsWith('/v1/services/')).length, 0);
+		const page = { services: loaded.copies.web ?? [] };
 		assert.equal(page.services.length, 55);
-		assert.equal(page.servicesOmitted, 0);
+		assert.equal(loaded.copiesOmitted, 0);
 		assert.deepEqual(page.services[0]?.checks, [
 			{ id: CHECK_ID, protocol: 'http', port: 80, path: '/health', enabled: true, interval_sec: 60, expect_status_min: 200, expect_status_max: 399 }
 		]);

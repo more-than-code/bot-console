@@ -2,6 +2,7 @@
 	import Rocket from '@lucide/svelte/icons/rocket';
 	import { browser } from '$app/environment';
 	import { untrack } from 'svelte';
+	import { focusFallbackAfterClose } from '$lib/dialog-open';
 	import { buttonVariants } from '$lib/components/ui/button';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import RowAction from '$lib/components/RowAction.svelte';
@@ -22,7 +23,9 @@
 		result = null,
 		disabled = false,
 		onRowBusy,
-		projectId = null
+		projectId = null,
+		openRequest = 0,
+		fallbackFocusId = null
 	}: {
 		entry: ImageEntry;
 		hosts: Host[];
@@ -34,11 +37,29 @@
 		result?: ImageDeployState | null;
 		disabled?: boolean;
 		onRowBusy?: (busy: boolean) => void;
-		/** For the "View logs in Services" link. */
+		/** For the "View logs" link. */
 		projectId?: string | null;
+		/** A new value (a counter) opens it: the row's "⋯" menu asks for it (below `sm`, where its icon is hidden). */
+		openRequest?: number;
+		/** Where focus goes when it closes and its own trigger is hidden (the menu button). */
+		fallbackFocusId?: string | null;
 	} = $props();
 
 	let open = $state(untrack(() => result != null));
+	// The row's "⋯" menu opens this by changing `openRequest`; closing returns focus to that menu button.
+	let requestSeen = untrack(() => openRequest);
+	$effect(() => {
+		const request = openRequest;
+		if (request === requestSeen) return;
+		requestSeen = request;
+		untrack(() => (open = true));
+	});
+	let openBefore = untrack(() => open);
+	$effect(() => {
+		const now = open;
+		if (openBefore && !now) focusFallbackAfterClose(untrack(() => fallbackFocusId));
+		openBefore = now;
+	});
 	let seen = $state<string | null>(untrack(() => result?.resultId ?? null));
 	let flight = $state(false);
 	let contentEl = $state<HTMLDivElement | null>(null);

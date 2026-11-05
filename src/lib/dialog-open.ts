@@ -196,3 +196,16 @@ export function nextInviteSecret(
 	if (!open) shownUrl = null;
 	return { open, sawFailure, shownUrl, seenUrl };
 }
+
+/**
+ * A dialog opened from a "⋯" menu has its own trigger hidden (or none at all). When it closes and focus
+ * fell to the page body, put focus on `id` (the menu button) instead. Runs after the close settles.
+ */
+export function focusFallbackAfterClose(id: string | null | undefined, doc: Pick<Document, 'activeElement' | 'body' | 'getElementById'> | null = typeof document === 'undefined' ? null : document): void {
+	if (!id || doc == null) return;
+	setTimeout(() => {
+		const active = doc.activeElement;
+		if (active != null && active !== doc.body) return;
+		doc.getElementById(id)?.focus();
+	}, 0);
+}

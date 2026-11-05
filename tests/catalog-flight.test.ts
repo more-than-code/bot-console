@@ -199,15 +199,16 @@ test('flight helpers format elapsed time, the health budget, and the in-flight l
 	assert.equal(flightOfRunKind('run'), 'run');
 });
 
-test('a catalog row keeps Deploy, Edit, Permissions and Delete; running copies act from Services', () => {
+test('a catalog entry row keeps Deploy, Edit, Permissions and Delete; running copies act from their own rows', () => {
 	for (const entry of [imageEntry([...ACTIONS]), programEntry()]) {
 		const html = section([entry], true);
 		for (const action of ['Run', 'Start', 'Stop', 'Restart', 'Logs', 'Status']) {
 			assert.equal(html.includes(`aria-label="${action} web`), false, `${entry.kind} ${action}`);
 		}
 		assert.equal(html.includes('aria-label="Edit web"'), true, entry.kind);
-		assert.equal(html.includes('aria-label="Permissions web"'), true, entry.kind);
-		assert.equal(html.includes('aria-label="Delete web"'), true, entry.kind);
+		// Permissions and Delete are in the row's ⋯ menu (its items render only when it opens).
+		assert.equal(html.includes('aria-label="More actions for web"'), true, entry.kind);
+		assert.equal(html.includes('aria-label="Permissions web"'), false, entry.kind);
 		assert.equal(html.includes('aria-label="Deploy web"'), entry.kind === 'image', entry.kind);
 	}
 	const source = readSource('CatalogSection.svelte');
@@ -216,7 +217,7 @@ test('a catalog row keeps Deploy, Edit, Permissions and Delete; running copies a
 });
 
 test('the run dialog posts the row host and offers no host choice', () => {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 	const html = render(CatalogRunForm, {
 		props: { kind: 'run', entryName: 'web', hostId: HOST_ID, action: '?/catalogRun', entryKind: 'image' }
 	}).body;
@@ -316,7 +317,7 @@ test('an in-flight deploy shows a spinner, a label, and a timer', () => {
 	assert.match(runDialog, /<Dialog\.Close type="button" disabled=\{flight\}>Cancel<\/Dialog\.Close>/);
 	// Deploy is a drawer now; its Cancel is the Sheet's close, still blocked in flight.
 	assert.match(deployDialog, /<Sheet\.Close type="button" class=\{buttonVariants\(\{ variant: 'outline' \}\)\} disabled=\{flight\}>Cancel<\/Sheet\.Close>/);
-	assert.equal(readSource('CatalogSection.svelte').includes('disabled={rowBusy === entry.name}'), true);
+	assert.equal(readSource('CatalogEntryRow.svelte').includes('disabled={rowBusy}'), true);
 	assert.equal(readSource('ServiceRowActions.svelte').includes('<fieldset disabled={busy}'), true);
 	assert.equal(runDialog.includes('<CatalogRunForm'), true);
 	assert.equal(deployDialog.includes('<CatalogDeployForm'), true);

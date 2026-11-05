@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { isActionFailure, isRedirect } from '@sveltejs/kit';
-import { render } from 'svelte/server';
 import type { Host, ProjectServiceRow } from '../src/lib/api-types.ts';
 import {
 	HEALTH_CHECK_NOTE,
@@ -29,10 +28,10 @@ import {
 	type CheckDraft
 } from '../src/lib/health-checks.ts';
 import { parseHealthChecks } from '../src/lib/server/shape.ts';
-import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import { actions as projectActions } from '../src/routes/projects/[id]/+page.server.ts';
 import { containsToken, envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
-import { setPageUrl } from './stubs/app-state.ts';
+import { programCatalogEntry, renderCopies } from './copies.ts';
+import { copyMenuItems } from '../src/lib/row-menu.ts';
 
 const HOST_ID = '00000000-0000-4000-8000-0000000000aa';
 const SERVICE_ID = '00000000-0000-4000-8000-0000000000bb';
@@ -118,7 +117,7 @@ function serviceRow(overrides: Partial<ProjectServiceRow> = {}): ProjectServiceR
 	return {
 		id: SERVICE_ID,
 		name: 'port-80',
-		source: 'discovered',
+		source: 'owned',
 		kind: 'process',
 		ports: [80, 443],
 		health: { status: 'up', last_checked_at: '2026-10-14T00:00:00Z', latency_ms: 4, source: null },
@@ -133,34 +132,22 @@ function serviceRow(overrides: Partial<ProjectServiceRow> = {}): ProjectServiceR
 		project_name: 'Lab',
 		checks: [{ id: CHECK_ID, protocol: 'http', port: 80, path: '/health', enabled: true }],
 		checksMessage: null,
-		catalog_entry: null,
+		catalog_entry: 'widget',
 		container_name: null,
 		image_digest: null,
 		...overrides
 	};
 }
 
+/** The Catalog & services tab with entry `widget` and this copy under it. */
 function renderServices(extra: Record<string, unknown> = {}, row: ProjectServiceRow = serviceRow(), hosts: Host[] = [HOST]) {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
-	return render(ServicesSection, {
-		props: {
-			projectId: PROJECT.id,
-			projectName: 'Lab',
-			hosts,
-			canAdmin: true,
-			rows: [row],
-			total: 1,
-			prevCursor: null,
-			nextCursor: null,
-			omitted: 0,
-			message: null,
-			probe: null,
-			probeServiceId: null,
-			renameServiceId: null,
-			typedName: null,
-			...extra
-		}
-	}).body.replaceAll('&amp;', '&').replaceAll('&quot;', '"');
+	return renderCopies({
+		rows: [row],
+		entries: [programCatalogEntry('widget', ['logs'])],
+		hosts,
+		canAdmin: true,
+		...extra
+	}).replaceAll('&amp;', '&').replaceAll('&quot;', '"');
 }
 
 describe('health check validation', () => {
@@ -369,10 +356,10 @@ describe('saved health-check notice', () => {
 		assert.deepEqual(healthNoticeOnCloseComplete(SERVICE_ID, false), { pending: null, announce: SERVICE_ID });
 	});
 
-	test('a services action carries the editor fields and another scope does not', () => {
+	test('a copy action carries the editor fields and another scope does not', () => {
 		assert.deepEqual(
 			servicesHealthView({
-				scope: 'services',
+				scope: 'catalog',
 				healthServiceId: SERVICE_ID,
 				healthField: 'path',
 				healthIndex: 1,
@@ -381,7 +368,7 @@ describe('saved health-check notice', () => {
 			}),
 			{ serviceId: SERVICE_ID, field: 'path', index: 1, message: 'missing', editorProbe: true }
 		);
-		assert.deepEqual(servicesHealthView({ scope: 'catalog', healthMessage: 'missing', editorProbe: true }), {
+		assert.deepEqual(servicesHealthView({ scope: 'settings', healthMessage: 'missing', editorProbe: true }), {
 			serviceId: null,
 			field: null,
 			index: null,
@@ -416,27 +403,44 @@ describe('health check permission', () => {
 		);
 	});
 
-	test('a viewer row has no Health checks button', () => {
+	test('a viewer row has no Health checks or Rename menu item', () => {
 		const html = renderServices({ canAdmin: false });
 		assert.equal(html.includes('aria-label="Health checks '), false);
 		assert.equal(html.includes('aria-label="Rename '), false);
+		// No grant and no edit right: the copy has no ⋯ menu at all.
+		assert.equal(html.includes('aria-label="More actions for Widget on pi1"'), false);
+		const items = copyMenuItems({ entry: 'widget', host: 'pi1', state: null, restart: false, logs: false, health: null, rename: false, label: 'Widget' });
+		assert.deepEqual(items, []);
 	});
 
-	test('an admin row has the Health checks button and no inline saved line', () => {
+	test('an admin row has Health checks and Rename in its ⋯ menu and no inline saved line', () => {
 		const html = renderServices();
-		assert.match(html, /aria-label="Health checks Widget"/);
+		assert.match(html, /aria-label="More actions for Widget on pi1"/);
+		assert.deepEqual(
+			copyMenuItems({ entry: 'widget', host: 'pi1', state: null, restart: false, logs: false, health: { disabledReason: null }, rename: true, label: 'Widget' }).map(
+				(item) => [item.label, item.phoneOnly]
+			),
+			[
+				['Health checks Widget', false],
+				['Rename Widget', false]
+			]
+		);
 		assert.equal(html.includes('name="hc_protocol"'), false);
 		// "Saved health checks." is a toast now (tests/success-toast.test.ts).
 		assert.equal(html.includes('Saved health checks.'), false);
 	});
 
-	test('a sharing admin does not see the button on another project service', () => {
+	test('another project\'s service on a shared host is not listed, so it has no button', () => {
 		const foreign = renderServices(
 			{},
 			serviceRow({ project_id: OTHER_ID, project_name: 'Other' }),
 			[{ ...HOST, project_id: OTHER_ID }]
 		);
 		assert.equal(foreign.includes('aria-label="Health checks '), false);
+		assert.equal(foreign.includes(`id="service-${SERVICE_ID}"`), false);
+		// This project's own copy on that shared host keeps it.
+		const own = renderServices({}, serviceRow(), [{ ...HOST, project_id: OTHER_ID }]);
+		assert.match(own, /aria-label="More actions for Widget on pi1"/);
 	});
 });
 
@@ -485,7 +489,7 @@ describe('health check actions', () => {
 			if (call.method === 'GET') return envelope(serviceDetail([80, 443]));
 			return envelope({ checks: [] });
 		});
-		const url = `http://console.example/projects/${PROJECT.id}?tab=services&services.q=api&/saveHealthChecks`;
+		const url = `http://console.example/projects/${PROJECT.id}?tab=catalog&catalog.q=api&/saveHealthChecks`;
 		await assert.rejects(
 			async () => {
 				await projectActions.saveHealthChecks(
@@ -500,7 +504,7 @@ describe('health check actions', () => {
 				);
 			},
 			(err: unknown) =>
-				isRedirect(err) && err.status === 303 && err.location === `/projects/${PROJECT.id}?tab=services&services.q=api`
+				isRedirect(err) && err.status === 303 && err.location === `/projects/${PROJECT.id}?tab=catalog&catalog.q=api`
 		);
 		assert.equal(calls[0]?.method, 'GET');
 		assert.equal(calls[0]?.url.pathname, `/v1/services/${SERVICE_ID}`);
@@ -530,7 +534,7 @@ describe('health check actions', () => {
 		await assert.rejects(async () => {
 			await projectActions.saveHealthChecks(
 				fakeEvent({
-					url: `http://console.example/projects/${PROJECT.id}?tab=services&/saveHealthChecks`,
+					url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/saveHealthChecks`,
 					session: TOKEN,
 					user: USER,
 					projects: [PROJECT],
@@ -547,7 +551,7 @@ describe('health check actions', () => {
 		});
 		const failed = await projectActions.saveHealthChecks(
 			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=services&/saveHealthChecks`,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/saveHealthChecks`,
 				session: TOKEN,
 				user: USER,
 				projects: [PROJECT],
@@ -575,7 +579,7 @@ describe('health check actions', () => {
 		});
 		const failed = await projectActions.saveHealthChecks(
 			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=services&/saveHealthChecks`,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/saveHealthChecks`,
 				session: TOKEN,
 				user: USER,
 				projects: [PROJECT],
@@ -589,7 +593,7 @@ describe('health check actions', () => {
 		assert.equal(isActionFailure(failed), true);
 		if (!isActionFailure(failed)) assert.fail('expected a bad request');
 		const data = failed.data as unknown as { healthField?: string; healthMessage?: string; message?: string; scope?: string };
-		assert.equal(data.scope, 'services');
+		assert.equal(data.scope, 'catalog');
 		assert.equal(data.healthField, 'path');
 		assert.equal(data.healthMessage, 'path must start with /');
 		assert.equal(data.message, undefined);
@@ -611,7 +615,7 @@ describe('health check actions', () => {
 		});
 		const probe = await projectActions.probe(
 			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=services&/probe`,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/probe`,
 				session: TOKEN,
 				user: USER,
 				projects: [PROJECT],
@@ -645,7 +649,7 @@ describe('health check actions', () => {
 		);
 		const probe = await projectActions.probe(
 			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=services&/probe`,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/probe`,
 				session: TOKEN,
 				user: USER,
 				projects: [PROJECT],
@@ -676,7 +680,7 @@ describe('health check actions', () => {
 		});
 		await projectActions.probe(
 			fakeEvent({
-				url: `http://console.example/projects/${PROJECT.id}?tab=services&/probe`,
+				url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/probe`,
 				session: TOKEN,
 				user: USER,
 				projects: [PROJECT],
@@ -711,7 +715,7 @@ describe('parsed health checks', () => {
 	});
 });
 
-test('the services editor calls the health-check functions', () => {
+test('the copy row editor calls the health-check functions', () => {
 	const root = new URL('../src/', import.meta.url);
 	const read = (name: string) => readFileSync(new URL(name, root), 'utf8');
 	const anchors: Array<[string, string]> = [
@@ -735,15 +739,15 @@ test('the services editor calls the health-check functions', () => {
 		['routes/projects/[id]/+page.server.ts', 'healthCheckPayload('],
 		['routes/projects/[id]/+page.server.ts', 'probeRequestBody('],
 		['routes/projects/[id]/+page.server.ts', 'fieldForHealthMessage('],
-		['routes/projects/[id]/ServicesSection.svelte', 'canEditHealthChecks('],
+		['routes/projects/[id]/CatalogCopyRow.svelte', 'canEditHealthChecks('],
 		['lib/success-toast.ts', 'toast.success(SAVED_HEALTH_CHECKS)'],
-		['routes/projects/[id]/ServicesSection.svelte', '{#if renameAllowed(service)}']
+		['routes/projects/[id]/CatalogCopyRow.svelte', '{#if renameAllowed}']
 	];
 	for (const [file, needle] of anchors) {
 		assert.equal(read(file).includes(needle), true, `${file} missing ${needle}`);
 	}
-	const section = read('routes/projects/[id]/ServicesSection.svelte');
-	const gate = section.slice(section.indexOf('{#if renameAllowed(service)}'), section.indexOf('{/if}', section.indexOf('{#if renameAllowed(service)}')));
+	const section = read('routes/projects/[id]/CatalogCopyRow.svelte');
+	const gate = section.slice(section.indexOf('{#if renameAllowed}'), section.indexOf('{/if}', section.indexOf('{#if renameAllowed}')));
 	assert.equal(gate.includes('<RenameService'), true);
 	assert.equal(gate.includes('<HealthChecks'), true);
 });

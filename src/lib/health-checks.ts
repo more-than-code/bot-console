@@ -139,7 +139,7 @@ export function dockerCheckTimings(check: Exclude<DockerCheckView, 'image-defaul
 	return `every ${check.intervalSec} s, timeout ${check.timeoutSec} s, ${retries}`;
 }
 
-/** Catalog tab on the current project page, filtered to one entry. */
+/** Catalog & services tab on the current project page, searched for one entry. */
 export function catalogEntryHref(name: string): string {
 	const params = new URLSearchParams({ tab: 'catalog' });
 	params.set(tableParam(CATALOG_TABLE_ID, 'q'), name);
@@ -430,7 +430,7 @@ export function servicesHealthView(action: {
 	message: string | null;
 	editorProbe: boolean;
 } {
-	if (action?.scope !== 'services') {
+	if (action?.scope !== 'catalog') {
 		return { serviceId: null, field: null, index: null, message: null, editorProbe: false };
 	}
 	return {

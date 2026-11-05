@@ -423,7 +423,8 @@ describe('auth session', { concurrency: false }, () => {
 			if (!/\.(ts|js|svelte)$/.test(file)) continue;
 			const text = readFileSync(file, 'utf8');
 			assert.equal(text.includes('localStorage'), false, file);
-			assert.equal(text.includes('sessionStorage'), false, file);
+			// Only the Catalog & services open-entry names may use sessionStorage (no token, spec §10).
+			if (!file.endsWith(resolve(root, 'src/lib/catalog-open.ts'))) assert.equal(text.includes('sessionStorage'), false, file);
 			if (file.endsWith('+page.server.ts') && !file.includes(`${resolve(root, 'src/routes/signout')}`)) {
 				assert.equal(text.includes('bot_session'), false, file);
 				assert.equal(text.includes('SESSION_COOKIE'), false, file);

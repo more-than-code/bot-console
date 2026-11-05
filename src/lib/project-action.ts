@@ -17,12 +17,12 @@ import { nextFormDialog, type DialogState } from '$lib/dialog-open';
 import type { ImageDraft, KnownSet } from '$lib/image-spec';
 import type { ImageDigestResult, ImageTagsResult } from '$lib/image-tags';
 
-export type ProjectScope = 'hosts' | 'services' | 'catalog' | 'members' | 'tokens' | 'settings';
+export type ProjectScope = 'hosts' | 'catalog' | 'members' | 'tokens' | 'settings';
 
 /** The dialog form an action result belongs to. Its message shows in that dialog, not on the page. */
 export type ActionField = 'createToken' | 'addMember';
 
-/** Catalog actions on a Services row. A container's status is the row's badge tooltip, not an action. */
+/** Catalog actions on a copy row. A container's status is the row's badge tooltip, not an action. */
 export type CatalogRunKind = 'run' | 'stop' | 'restart' | 'logs';
 
 export type CatalogDraft = {
@@ -46,12 +46,12 @@ export type CatalogEditorState = {
 	message: string | null;
 };
 
-/** Start, stop, restart, logs, or status dialog on a Services row. A new `resultId` opens it again. */
+/** Start, stop, restart, logs, or status dialog on a copy row. A new `resultId` opens it again. */
 export type CatalogRunState = {
 	name: string;
 	/** The row's host. Empty when the posted host id was not valid. */
 	hostId: string;
-	/** The Services row that posted it, or null for a not-running item (no row yet). */
+	/** The copy's service row that posted it, or null for a not-running item (no row yet). */
 	serviceId: string | null;
 	kind: CatalogRunKind;
 	resultId: string;
@@ -161,7 +161,7 @@ export function servicesRenameView(action: ProjectActionData | null): {
 	typedName: string | null;
 	open: boolean;
 } {
-	if (action?.scope !== 'services' || action.renameServiceId == null) {
+	if (action?.scope !== 'catalog' || action.renameServiceId == null) {
 		return { renameServiceId: null, typedName: null, open: false };
 	}
 	return {

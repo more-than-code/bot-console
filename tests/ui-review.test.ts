@@ -14,10 +14,10 @@ import { COPY_FAILED_NOTE, COPY_FAILURE_MS, shownDigestFailure } from '../src/li
 import CatalogRunForm from '../src/routes/projects/[id]/CatalogRunForm.svelte';
 import CatalogRunResult from '../src/routes/projects/[id]/CatalogRunResult.svelte';
 import EnvSetTable from '../src/routes/projects/[id]/EnvSetTable.svelte';
-import ServicesSection from '../src/routes/projects/[id]/ServicesSection.svelte';
 import { initialAddDraft, setAddSecret } from '../src/routes/projects/[id]/env-add-variable.ts';
 import { PROJECT } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
+import { renderCopies } from './copies.ts';
 
 const HOST_ID = '00000000-0000-4000-8000-0000000000aa';
 const SERVICE_ID = '00000000-0000-4000-8000-0000000000bb';
@@ -65,7 +65,7 @@ function host(): Host {
 }
 
 function renderResult(message: string): string {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 	return render(CatalogRunResult, {
 		props: {
 			close: createRawSnippet(() => ({ render: () => '<button type="button">Close</button>' })),
@@ -75,7 +75,7 @@ function renderResult(message: string): string {
 }
 
 test('an in-flight submit stays focusable and a second submit is blocked', () => {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 	const html = render(CatalogRunForm, {
 		props: { kind: 'run', entryName: 'web', hostId: host().id, action: '?/catalogRun', entryKind: 'image' }
 	}).body;
@@ -164,15 +164,16 @@ test('an icon-only copy failure shows the digest below the name line and then cl
 	assert.equal(shownDigestFailure('', at, at + 1), null);
 	assert.equal(COPY_FAILURE_MS, 8000);
 
-	const services = readRoute('ServicesSection.svelte');
-	const groupAt = services.indexOf('class="ml-auto inline-flex shrink-0 items-center gap-1"');
-	const groupEnd = services.indexOf('</span>', groupAt);
+	const services = readRoute('CatalogCopyRow.svelte');
+	// The label and digest line closes before the failure lines, which sit under it in the Command cell.
+	const lineAt = services.indexOf('<div class="flex min-w-0 flex-wrap items-center gap-x-2">');
+	const lineEnd = services.indexOf('</div>', lineAt);
 	const failureAt = services.indexOf('{digestFailure.value}');
-	assert.ok(groupAt > 0 && failureAt > groupEnd);
+	assert.ok(lineAt > 0 && failureAt > lineEnd);
 	assert.match(services, /class="font-mono text-sm break-all select-text"/);
 	assert.match(services, /\{COPY_FAILED_NOTE\}/);
 	assert.match(services, /note === COPIED_NOTE/);
-	assert.match(services, /shownDigestFailure\(current\.value, current\.failedAt, Date\.now\(\)\)/);
+	assert.match(services, /shownDigestFailure\(failure\.value, failure\.failedAt, Date\.now\(\)\)/);
 	const copy = readLib('components/CopyButton.svelte');
 	const template = copy.slice(copy.indexOf('{#if iconOnly}'));
 	const labeledAt = template.indexOf('{:else}');
@@ -182,7 +183,7 @@ test('an icon-only copy failure shows the digest below the name line and then cl
 });
 
 test('the service label uses a definite max width and its tooltip carries the container name', () => {
-	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=services`);
+	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 	const row: ProjectServiceRow = {
 		id: SERVICE_ID,
 		name: 'web',
@@ -199,31 +200,14 @@ test('the service label uses a definite max width and its tooltip carries the co
 		host_name: 'pi1',
 		host_status: 'online',
 		project_name: 'Lab',
-		catalog_entry: null,
+		catalog_entry: 'web',
 		container_name: 'a-very-long-container-name',
 		image_digest: null,
 		checks: [],
 		checksMessage: null
 	};
-	const html = render(ServicesSection, {
-		props: {
-			projectId: PROJECT.id,
-			projectName: 'Lab',
-			hosts: [host()],
-			canAdmin: false,
-			rows: [row],
-			total: 1,
-			prevCursor: null,
-			nextCursor: null,
-			omitted: 0,
-			message: null,
-			probe: null,
-			probeServiceId: null,
-			renameServiceId: null,
-			typedName: null
-		}
-	}).body;
-	assert.match(html, /class="inline-block max-w-48 min-w-0 truncate"/);
+	const html = renderCopies({ rows: [row], hosts: [host()] });
+	assert.match(html, /class="inline-block max-w-48 min-w-0 truncate align-bottom text-xs"/);
 	assert.equal(html.includes('font-mono text-sm" title="a-very-long-container-name"'), false);
 	assert.equal(
 		html.includes('title="A very long service label that should truncate (container a-very-long-container-name)"'),
