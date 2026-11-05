@@ -5,6 +5,7 @@
 	import { focusFallbackAfterClose } from '$lib/dialog-open';
 	import { buttonVariants } from '$lib/components/ui/button';
 	import * as Sheet from '$lib/components/ui/sheet';
+	import DrawerResize from '$lib/components/DrawerResize.svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import type { Host, ProgramEntry } from '$lib/api-types';
 	import type { CatalogEditorState } from '$lib/project-action';
@@ -76,6 +77,7 @@
 	{/if}
 	<!-- A drawer from the right, full width on a phone. The form scrolls between the header and its pinned Save footer. -->
 	<Sheet.Content side="right" class="data-[side=right]:w-full data-[side=right]:sm:max-w-2xl">
+		{#snippet after()}<DrawerResize type="program" />{/snippet}
 		<Sheet.Header class="pr-12 pb-0">
 			<Sheet.Title class="break-all">{mode === 'create' ? 'New service' : `Edit ${entry?.name ?? 'service'}`}</Sheet.Title>
 			<Sheet.Description>A program runs one command in a working directory.</Sheet.Description>

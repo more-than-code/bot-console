@@ -7,6 +7,7 @@
 	import { focusFallbackAfterClose } from '$lib/dialog-open';
 	import { buttonVariants } from '$lib/components/ui/button';
 	import * as Sheet from '$lib/components/ui/sheet';
+	import DrawerResize from '$lib/components/DrawerResize.svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import type { ImageEntry } from '$lib/api-types';
 	import {
@@ -207,6 +208,7 @@
 	{/if}
 	<!-- A drawer from the right, full width on a phone. The form scrolls between the header and its pinned Save footer. -->
 	<Sheet.Content side="right" class="data-[side=right]:w-full data-[side=right]:sm:max-w-2xl">
+		{#snippet after()}<DrawerResize type="container" />{/snippet}
 		<Sheet.Header class="pr-12 pb-0">
 			<Sheet.Title class="break-all">{mode === 'create' ? 'Container' : `Edit ${entry?.name ?? 'image'}`}</Sheet.Title>
 			<Sheet.Description>An image runs on a host that has Docker.</Sheet.Description>

@@ -12,6 +12,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import * as Select from '$lib/components/ui/select';
 	import * as Sheet from '$lib/components/ui/sheet';
+	import DrawerResize from '$lib/components/DrawerResize.svelte';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Switch } from '$lib/components/ui/switch';
 	import { formatTime } from '$lib/format';
@@ -205,6 +206,7 @@
 		</RowAction>
 	</span>
 	<Sheet.Content side="right" class="data-[side=right]:w-full data-[side=right]:sm:max-w-2xl" {onOpenAutoFocus} {onCloseAutoFocus}>
+		{#snippet after()}<DrawerResize type="logs" />{/snippet}
 		<Sheet.Header class="pr-12 pb-0">
 			<Sheet.Title id={titleId} tabindex={-1} class="break-all focus-visible:outline-none">{label} {entryName}</Sheet.Title>
 			<Sheet.Description class="break-all">

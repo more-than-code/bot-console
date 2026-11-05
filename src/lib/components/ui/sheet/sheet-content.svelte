@@ -19,12 +19,15 @@
 		showCloseButton = true,
 		portalProps,
 		children,
+		after,
 		...restProps
 	}: WithoutChildrenOrChild<SheetPrimitive.ContentProps> & {
 		portalProps?: WithoutChildrenOrChild<ComponentProps<typeof SheetPortal>>;
 		side?: Side;
 		showCloseButton?: boolean;
 		children: Snippet;
+		/** Rendered after the close button (Deploybot: the drawer resize handle, last in tab order). */
+		after?: Snippet;
 	} = $props();
 </script>
 
@@ -51,5 +54,6 @@
 				{/snippet}
 			</SheetPrimitive.Close>
 		{/if}
+		{@render after?.()}
 	</SheetPrimitive.Content>
 </SheetPortal>

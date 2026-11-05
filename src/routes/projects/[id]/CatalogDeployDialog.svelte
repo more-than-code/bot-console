@@ -5,6 +5,7 @@
 	import { focusFallbackAfterClose } from '$lib/dialog-open';
 	import { buttonVariants } from '$lib/components/ui/button';
 	import * as Sheet from '$lib/components/ui/sheet';
+	import DrawerResize from '$lib/components/DrawerResize.svelte';
 	import RowAction from '$lib/components/RowAction.svelte';
 	import type { Host, ImageEntry } from '$lib/api-types';
 	import { IMAGE_DEPLOY_TIP } from '$lib/catalog';
@@ -108,6 +109,7 @@
 		escapeKeydownBehavior={flight ? 'ignore' : 'close'}
 		interactOutsideBehavior={flight ? 'ignore' : 'close'}
 	>
+		{#snippet after()}<DrawerResize type="deploy" />{/snippet}
 		<Sheet.Header class="pr-12 pb-0">
 			<Sheet.Title class="break-all">{entry.spec.kind === 'job' ? 'Run' : 'Deploy'} {entry.name}</Sheet.Title>
 			<Sheet.Description>Choose a host in this project, or a host shared with it at deploy.</Sheet.Description>

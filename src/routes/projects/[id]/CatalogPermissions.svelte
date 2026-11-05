@@ -3,6 +3,7 @@
 	import { navigating, page } from '$app/state';
 	import { Button } from '$lib/components/ui/button';
 	import * as Sheet from '$lib/components/ui/sheet';
+	import DrawerResize from '$lib/components/DrawerResize.svelte';
 	import type { CatalogGrant, Member } from '$lib/api-types';
 	import { restoreFocusTo } from '$lib/dialog-focus';
 	import { isPlainClick, permissionsCloseTarget, permissionsRequested } from '$lib/url';
@@ -62,6 +63,7 @@
 <!-- A drawer from the right, full width on a phone. The grants scroll between the header and the pinned Save footer. -->
 <Sheet.Root bind:open {onOpenChangeComplete}>
 	<Sheet.Content side="right" class="data-[side=right]:w-full data-[side=right]:sm:max-w-2xl" {onCloseAutoFocus}>
+		{#snippet after()}<DrawerResize type="permissions" />{/snippet}
 		<Sheet.Header class="pr-12 pb-0">
 			<Sheet.Title class="break-all">Permissions for {name}</Sheet.Title>
 			<Sheet.Description>The owner always has every action. Admins, viewers, and members get only what is checked.</Sheet.Description>
