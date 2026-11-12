@@ -3,9 +3,11 @@
 
 /**
  * The sign-in page, relative so a local or dev console signs in to itself. On deploybot.dev the
- * Caddy apex block redirects every path outside its page allowlist, /signin included, to
- * https://console.deploybot.dev{uri}. Links using it must keep data-sveltekit-reload, so the
- * browser does a full load (and the redirect) instead of a client-side route on the apex.
+ * Caddy apex block 301s an allowlist of console paths (/signin and /projects, with their subpaths)
+ * to https://console.deploybot.dev{uri}; every other unknown apex path is rewritten to /not-found
+ * and answers 404 (umbrella docs/spec-seo-indexing-fixes.md). Links using it must keep
+ * data-sveltekit-reload, so the browser does a full load (and the redirect) instead of a
+ * client-side route on the apex.
  */
 export const SIGN_IN_URL = '/signin';
 

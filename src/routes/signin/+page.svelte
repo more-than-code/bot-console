@@ -4,6 +4,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
+	import { SITE_URL } from '$lib/site/links';
 
 	let { data, form } = $props();
 	const next = $derived(form?.next ?? data.next);
@@ -28,6 +29,6 @@
 	<Button type="submit">Sign in with Google</Button>
 </form>
 <p class="text-muted-foreground mt-4 text-sm">
-	By continuing you agree to the <a class={legalLink} href="/terms">Terms of Service</a> and
-	acknowledge the <a class={legalLink} href="/privacy">Privacy Policy</a>.
+	By continuing you agree to the <a class={legalLink} href="{SITE_URL}/terms">Terms of Service</a> and
+	acknowledge the <a class={legalLink} href="{SITE_URL}/privacy">Privacy Policy</a>.
 </p>

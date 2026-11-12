@@ -13,6 +13,7 @@
 	import { avatarInitial } from '$lib/avatar';
 	import { browserTimeZone, provideTimeZone, rememberTimeZone } from '$lib/time-zone';
 	import { cn } from '$lib/utils';
+	import { SITE_URL } from '$lib/site/links';
 	import '../app.css';
 
 	let { children, data } = $props();
@@ -120,8 +121,8 @@
 		</main>
 		<footer class="text-muted-foreground border-t py-4 text-sm">
 			<nav class="flex flex-wrap gap-x-4 gap-y-1" aria-label="Legal">
-				<a class={footerLink} href="/privacy">Privacy</a>
-				<a class={footerLink} href="/terms">Terms</a>
+				<a class={footerLink} href="{SITE_URL}/privacy">Privacy</a>
+				<a class={footerLink} href="{SITE_URL}/terms">Terms</a>
 			</nav>
 		</footer>
 	</div>

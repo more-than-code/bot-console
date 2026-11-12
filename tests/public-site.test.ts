@@ -126,9 +126,11 @@ describe('public site pages', () => {
 		for (const path of SITE_PAGES) assert.equal(isSitePath(path), true, path);
 	});
 
-	test('src/routes/(site) holds only +page.svelte and +layout.svelte files (no loads, no endpoints)', () => {
+	test('src/routes/(site) holds only pages, the layout and the error page; the one load is the 404 (no endpoints)', () => {
+		// Spec seo-indexing-fixes §3.1: /not-found's server load only throws a 404, and +error.svelte shows it.
 		for (const file of filesUnder('src/routes/(site)')) {
-			assert.ok(['+page.svelte', '+layout.svelte'].includes(basename(file)), file);
+			if (file === 'src/routes/(site)/not-found/+page.server.ts') continue;
+			assert.ok(['+page.svelte', '+layout.svelte', '+error.svelte'].includes(basename(file)), file);
 		}
 	});
 
@@ -308,7 +310,8 @@ describe('public site pages', () => {
 		assert.ok(app.includes('aria-label="Primary"'));
 		const footer = app.slice(app.indexOf('</main>'));
 		assert.ok(footer.includes('aria-label="Legal"'), 'legal footer after main');
-		assert.deepEqual(hrefs(footer), ['/privacy', '/terms']);
+		// Spec seo-indexing-fixes §3.3: the console host's copies 301 to the apex, so link there directly.
+		assert.deepEqual(hrefs(footer), ['https://deploybot.dev/privacy', 'https://deploybot.dev/terms']);
 	});
 
 	test('page titles are exact', () => {
@@ -433,6 +436,11 @@ describe('public site pages', () => {
 
 	test('public pages import only site and legal modules, and use no {@html}', () => {
 		const denied = ['$lib/server', '$lib/api', '$env', '$app/'];
+		// Spec seo-indexing-fixes §3.1: the error page reads the status, and the 404 load throws it.
+		const exceptions: Record<string, string> = {
+			'src/routes/(site)/+error.svelte': '$app/state',
+			'src/routes/(site)/not-found/+page.server.ts': '@sveltejs/kit'
+		};
 		const allowed = (spec: string) =>
 			spec === 'svelte' ||
 			/^@lucide\/svelte\/icons\/[a-z0-9-]+$/.test(spec) ||
@@ -450,6 +458,7 @@ describe('public site pages', () => {
 			].map((m) => m[1] ?? '');
 			scanned += imports.length;
 			for (const spec of imports) {
+				if (exceptions[file] === spec) continue;
 				for (const prefix of denied) {
 					assert.equal(
 						spec.startsWith(prefix),
@@ -479,8 +488,9 @@ describe('public site pages', () => {
 		for (const props of cases) {
 			const { body } = render(SigninPage, { props });
 			assert.ok(text(body).includes(sentence));
-			assert.equal(anchorText(body, '/terms'), 'Terms of Service');
-			assert.equal(anchorText(body, '/privacy'), 'Privacy Policy');
+			assert.equal(anchorText(body, 'https://deploybot.dev/terms'), 'Terms of Service');
+			assert.equal(anchorText(body, 'https://deploybot.dev/privacy'), 'Privacy Policy');
+			assert.equal(hrefs(body).includes('/terms') || hrefs(body).includes('/privacy'), false);
 		}
 	});
 });

@@ -12,6 +12,15 @@ export function setRouteId(id: string | null): void {
 	routeId = id;
 }
 
+let status = 200;
+let error: { message: string } | null = null;
+
+/** Tests set the status and error an +error.svelte reads, e.g. 404, before `render`. */
+export function setPageStatus(next: number, nextError: { message: string } | null = null): void {
+	status = next;
+	error = nextError;
+}
+
 export const page = {
 	get url() {
 		return current;
@@ -20,8 +29,12 @@ export const page = {
 	get route() {
 		return { id: routeId };
 	},
-	status: 200,
-	error: null,
+	get status() {
+		return status;
+	},
+	get error() {
+		return error;
+	},
 	data: {},
 	form: null,
 	state: {}
