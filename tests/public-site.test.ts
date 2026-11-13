@@ -473,15 +473,14 @@ describe('public site pages', () => {
 		assert.ok(scanned >= 8, 'the scan sees the imports in the script blocks');
 	});
 
-	test('sign-in shows the terms sentence with links, signed out, signed in and with an error', () => {
+	test('sign-in shows the terms sentence with links, signed out and with an error', () => {
 		const sentence =
 			'By continuing you agree to the Terms of Service and acknowledge the Privacy Policy.';
 		const layout = { user: null, theme: 'system' as const, timeZone: 'UTC', next: '/projects' };
 		const cases = [
-			{ data: { ...layout, signedInName: null }, form: null },
-			{ data: { ...layout, signedInName: 'Ada' }, form: null },
+			{ data: layout, form: null },
 			{
-				data: { ...layout, signedInName: null },
+				data: layout,
 				form: { message: 'Sign-in failed.', next: '/projects' }
 			}
 		];

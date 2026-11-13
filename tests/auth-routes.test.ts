@@ -149,6 +149,35 @@ describe('auth routes', { concurrency: false }, () => {
 		assert.equal(again.jar.has('bot_oauth'), false);
 	});
 
+	test('a signed-in visitor skips the sign-in page and goes to the safe next path', async () => {
+		useApi('https://api.test');
+		const cases: Array<[string, string]> = [
+			['http://console.example/signin', '/projects'],
+			['http://console.example/signin?next=%2Fdevice%3Fcode%3DABCD-EFGH', '/device?code=ABCD-EFGH'],
+			['http://console.example/signin?next=/projects/p1', '/projects/p1'],
+			['http://console.example/signin?next=%2Foauth%2Fconsent%3Frequest%3Dr1', '/oauth/consent?request=r1'],
+			['http://console.example/signin?next=//evil.com', '/projects'],
+			['http://console.example/signin?next=/signin', '/projects']
+		];
+		for (const [url, location] of cases) {
+			const { event } = fakeEvent({ url, session: TOKEN, user: USER });
+			await assert.rejects(async () => {
+				await signInLoad(event as never);
+			}, (err: unknown) => {
+				assert.equal(isRedirect(err), true, url);
+				if (!isRedirect(err)) return false;
+				assert.equal(err.status, 303, url);
+				assert.equal(err.location, location, url);
+				return true;
+			});
+		}
+
+		const signedOut = fakeEvent({ url: 'http://console.example/signin?next=/projects/p1' });
+		const data = pageData(await signInLoad(signedOut.event as never));
+		assert.equal(data.next, '/projects/p1');
+		assert.equal('signedInName' in data, false);
+	});
+
 	test('a public 401 does not clear an existing console session', async () => {
 		useApi('https://api.test');
 		installFetch(() => new Response('nope', { status: 401 }));
@@ -216,7 +245,7 @@ describe('auth routes', { concurrency: false }, () => {
 		assert.equal('email' in (layoutData.user ?? {}), false);
 		assert.equal(containsToken(layoutData), false);
 
-		const signIn = fakeEvent({ url: 'http://console.example/signin?next=//evil.com', session: TOKEN, user: USER });
+		const signIn = fakeEvent({ url: 'http://console.example/signin?next=//evil.com', session: TOKEN });
 		const signInData = pageData(await signInLoad(signIn.event as never));
 		assert.equal(signInData.next, '/projects');
 		assert.equal(containsToken(signInData), false);

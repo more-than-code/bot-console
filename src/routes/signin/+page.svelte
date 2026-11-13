@@ -18,9 +18,6 @@
 </svelte:head>
 
 <PageHeader title="Sign in" />
-{#if data.signedInName}
-	<p class="text-muted-foreground mb-3 text-sm">Signed in as {data.signedInName}. <a class="text-primary underline-offset-4 hover:underline" href="/projects">Go to projects</a>.</p>
-{/if}
 {#if form?.message}
 	<Notice kind="error">{form.message}</Notice>
 {/if}

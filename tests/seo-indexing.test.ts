@@ -130,7 +130,7 @@ describe('SEO indexing fixes', () => {
 		assert.deepEqual(hrefs(app.slice(app.indexOf('</main>'))), legal);
 		const signin = render(SigninPage, {
 			props: {
-				data: { user: null, theme: 'system' as const, timeZone: 'UTC', next: '/projects', signedInName: null },
+				data: { user: null, theme: 'system' as const, timeZone: 'UTC', next: '/projects' },
 				form: null
 			}
 		}).body;

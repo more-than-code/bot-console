@@ -31,10 +31,10 @@ function authorizeLocation(value: unknown): string | null {
 
 export const load: PageServerLoad = (event) => {
 	requireApi();
-	return present(event, {
-		next: safeNext(event.url.searchParams.get('next')),
-		signedInName: event.locals.user?.name ?? null
-	});
+	const next = safeNext(event.url.searchParams.get('next'));
+	// Already signed in: go where the sign-in would have led. Another account goes through Sign out.
+	if (event.locals.user) redirect(303, next);
+	return present(event, { next });
 };
 
 export const actions: Actions = {
