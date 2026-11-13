@@ -25,6 +25,13 @@
 		message: string | null;
 	} = $props();
 
+	/** References only: `KEY ← set.NAME`. The approval never carries a resolved secret (api-v1 v1.22). */
+	function secretLines(secret: Record<string, string>): string {
+		return Object.entries(secret)
+			.map(([key, reference]) => `${key} ← ${reference}`)
+			.join('\n');
+	}
+
 	function envLines(env: Record<string, string>): string {
 		return Object.entries(env)
 			.map(([key, value]) => `${key}=${value}`)
@@ -38,6 +45,8 @@
 		{ key: 'exec', label: 'Exec', value: (row) => row.exec },
 		{ key: 'args', label: 'Args', value: (row) => row.args.join(' ') },
 		{ key: 'env', label: 'Env', searchable: true, value: (row) => envLines(row.env) },
+		{ key: 'env_sets', label: 'Env sets', value: (row) => row.env_sets.join(', ') },
+		{ key: 'secret_env', label: 'Secret env', value: (row) => secretLines(row.secret_env) },
 		{ key: 'dir', label: 'Dir', value: (row) => row.dir },
 		{ key: 'run_as', label: 'Run as', value: (row) => row.run_as },
 		{ key: 'shell', label: 'Shell', value: (row) => (row.shell ? 'yes' : 'no') },
@@ -75,6 +84,8 @@
 				<td class="p-2 align-middle font-mono break-all">{item.exec}</td>
 				<td class="p-2 align-middle font-mono break-all whitespace-pre-wrap">{item.args.join(' ')}</td>
 				<td class="p-2 align-middle font-mono break-all whitespace-pre-wrap">{envLines(item.env)}</td>
+				<td class="p-2 align-middle font-mono break-all">{item.env_sets.join(', ')}</td>
+				<td class="p-2 align-middle font-mono break-all whitespace-pre-wrap">{secretLines(item.secret_env)}</td>
 				<td class="p-2 align-middle font-mono">{item.dir}</td>
 				<td class="p-2 align-middle">{item.run_as}</td>
 				<td class="p-2 align-middle">{item.shell ? 'yes' : 'no'}</td>

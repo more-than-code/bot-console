@@ -34,6 +34,9 @@ export type CatalogDraft = {
 	port: string;
 	restart: CatalogRestart;
 	env: Array<{ key: string; value: string }>;
+	/** Env set names in resolve order, and secret env rows (api-v1 v1.22). References only, never values. */
+	envSets: string[];
+	secrets: Array<{ key: string; set: string; name: string }>;
 };
 
 /** Create or edit dialog after a preview or a failed save. */

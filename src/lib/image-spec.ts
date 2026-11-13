@@ -488,6 +488,44 @@ export function loggingForPreview(maxSizeMb: string, maxFiles: string): ImageLog
 }
 
 /**
+ * `env_sets` and `secret_env` for an image or program entry (api-v1 rules 6 and 7, and v1.22 for programs).
+ * With `knownSets`, every set and secret key must exist; without it the API checks that.
+ */
+export function cleanEnvSources(
+	draftSets: readonly string[],
+	secrets: readonly { key: string; set: string; name: string }[],
+	knownSets?: readonly KnownSet[]
+): { ok: true; envSets: string[]; secretEnv: Record<string, string> } | { ok: false; field: string; message: string } {
+	if (draftSets.length > 8) return fail('env_sets', 'At most 8 env sets.');
+	const envSets: string[] = [];
+	for (const setName of draftSets) {
+		if (!SET_NAME.test(setName)) return fail('env_sets', 'Env set names use lowercase letters, digits, and hyphens.');
+		if (envSets.includes(setName)) return fail('env_sets', 'Each env set can appear once.');
+		if (knownSets && !knownSets.some((set) => set.name === setName)) return fail('env_sets', `Unknown env set ${setName}.`);
+		envSets.push(setName);
+	}
+	const secretEnv: Record<string, string> = {};
+	for (const row of secrets) {
+		const key = row.key.trim();
+		const setName = row.set.trim();
+		const secretName = row.name.trim();
+		if (key === '' && setName === '' && secretName === '') continue;
+		if (!ENV_KEY.test(key)) return fail('secret_env', 'Secret env keys use A-Z, digits, and underscore.');
+		if (deniedEnvKey(key) || RESERVED_ENV.has(key)) return fail('secret_env', 'This variable changes what the program runs.');
+		if (!SET_NAME.test(setName) || !ENV_KEY.test(secretName)) return fail('secret_env', 'Pick a set and a key from that set.');
+		const reference = `${setName}.${secretName}`;
+		if (Object.hasOwn(secretEnv, key)) return fail('secret_env', 'Each secret env key can appear once.');
+		if (Object.keys(secretEnv).length >= 64) return fail('secret_env', 'At most 64 secret env keys.');
+		if (knownSets) {
+			const set = knownSets.find((item) => item.name === setName);
+			if (!set || !set.keys.includes(secretName)) return fail('secret_env', `Unknown secret ${reference}.`);
+		}
+		secretEnv[key] = reference;
+	}
+	return { ok: true, envSets, secretEnv };
+}
+
+/**
  * Map a container form onto an ImageSpec. Empty command and entrypoint lists become null.
  * A job's restart is always `no`. A port is public only when the draft says so.
  */
@@ -514,32 +552,10 @@ export function imageSpecFromDraft(
 	if (!ports.ok) return ports;
 	const env = cleanInlineEnv(draft.env);
 	if (!env.ok) return env;
-	if (draft.envSets.length > 8) return fail('env_sets', 'At most 8 env sets.');
-	const envSets: string[] = [];
-	for (const setName of draft.envSets) {
-		if (!SET_NAME.test(setName)) return fail('env_sets', 'Env set names use lowercase letters, digits, and hyphens.');
-		if (envSets.includes(setName)) return fail('env_sets', 'Each env set can appear once.');
-		if (knownSets && !knownSets.some((set) => set.name === setName)) return fail('env_sets', `Unknown env set ${setName}.`);
-		envSets.push(setName);
-	}
-	const secretEnv: Record<string, string> = {};
-	for (const row of draft.secrets) {
-		const key = row.key.trim();
-		const setName = row.set.trim();
-		const secretName = row.name.trim();
-		if (key === '' && setName === '' && secretName === '') continue;
-		if (!ENV_KEY.test(key)) return fail('secret_env', 'Secret env keys use A-Z, digits, and underscore.');
-		if (deniedEnvKey(key) || RESERVED_ENV.has(key)) return fail('secret_env', 'This variable changes what the program runs.');
-		if (!SET_NAME.test(setName) || !ENV_KEY.test(secretName)) return fail('secret_env', 'Pick a set and a key from that set.');
-		const reference = `${setName}.${secretName}`;
-		if (Object.hasOwn(secretEnv, key)) return fail('secret_env', 'Each secret env key can appear once.');
-		if (Object.keys(secretEnv).length >= 64) return fail('secret_env', 'At most 64 secret env keys.');
-		if (knownSets) {
-			const set = knownSets.find((item) => item.name === setName);
-			if (!set || !set.keys.includes(secretName)) return fail('secret_env', `Unknown secret ${reference}.`);
-		}
-		secretEnv[key] = reference;
-	}
+	const sources = cleanEnvSources(draft.envSets, draft.secrets, knownSets);
+	if (!sources.ok) return sources;
+	const envSets = sources.envSets;
+	const secretEnv = sources.secretEnv;
 	const volumes = cleanVolumes(draft.volumes);
 	if (!volumes.ok) return volumes;
 	const files = cleanFiles(draft.files, volumes.volumes.map((volume) => volume.target), knownFiles);
@@ -1281,6 +1297,32 @@ function stringList(form: FormData, name: string, cap: number): { values: string
 		values.push(item);
 	}
 	return { values, bad: false };
+}
+
+/**
+ * The Env sets and Secret env fields of a program form (the same names the container form posts).
+ * Over-long values are clipped, as in `imageDraftFromForm`; the message says why a list was dropped.
+ */
+export function envSourcesFromForm(form: FormData): {
+	envSets: string[];
+	secrets: Array<{ key: string; set: string; name: string }>;
+	message: string | null;
+} {
+	const envSets = stringList(form, 'env_set', 12);
+	const secretKey = stringList(form, 'secret_key', 80);
+	const secretSet = stringList(form, 'secret_set', 80);
+	const secretName = stringList(form, 'secret_name', 80);
+	if (envSets.bad || secretKey.bad || secretSet.bad || secretName.bad) return { envSets: [], secrets: [], message: 'That form is too large.' };
+	const sets = envSets.values.map((name) => name.slice(0, 48));
+	if (secretKey.values.length !== secretSet.values.length || secretKey.values.length !== secretName.values.length) {
+		return { envSets: sets, secrets: [], message: 'Each secret env row needs a key, a set, and a name.' };
+	}
+	const secrets = secretKey.values.map((key, index) => ({
+		key: key.slice(0, 64),
+		set: (secretSet.values[index] ?? '').slice(0, 48),
+		name: (secretName.values[index] ?? '').slice(0, 64)
+	}));
+	return { envSets: sets, secrets, message: null };
 }
 
 /** Read a container form. Over-long values are dropped so a failure cannot echo them. */

@@ -108,6 +108,8 @@ export function programCatalogEntry(name = 'web', my_actions: CatalogAction[] = 
 			shell: false,
 			run_as: 'joe',
 			env: {},
+			env_sets: [],
+			secret_env: {},
 			port: 3031,
 			restart: 'on-failure'
 		},

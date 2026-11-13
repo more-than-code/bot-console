@@ -133,6 +133,12 @@ export type HostPrograms = {
 	logging: boolean;
 	/** True when the agent applies health failure policies (api-v1 v1.15). Missing on older hellos is false. */
 	health_policy: boolean;
+	/** True when the agent takes env sets and secret env on programs (api-v1 v1.22). Missing on older hellos is false. */
+	secrets: boolean;
+	/** The host's `projects` allowlist (api-v1 v1.23). Owner-project members only; null when unknown or not shown. */
+	projects: string[] | null;
+	/** Whether this project's slug is in that allowlist. Null when the agent did not send the list. */
+	project_listed: boolean | null;
 };
 
 export type ProgramSpec = {
@@ -142,6 +148,10 @@ export type ProgramSpec = {
 	shell: boolean;
 	run_as: string;
 	env: Record<string, string>;
+	/** Env set names in resolve order (api-v1 v1.22). Empty on an older API. */
+	env_sets: string[];
+	/** KEY → `<set>.<KEY>` references; never a value (api-v1 v1.22). Empty on an older API. */
+	secret_env: Record<string, string>;
 	port: number | null;
 	restart: CatalogRestart;
 };
@@ -358,6 +368,9 @@ export type Approval = {
 	exec: string;
 	args: string[];
 	env: Record<string, string>;
+	/** References only, never resolved values (api-v1 v1.22). Empty on an older API. */
+	env_sets: string[];
+	secret_env: Record<string, string>;
 	dir: string;
 	run_as: string;
 	shell: boolean;

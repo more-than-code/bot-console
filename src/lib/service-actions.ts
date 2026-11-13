@@ -1,5 +1,5 @@
 import type { CatalogAction, CatalogEntry, Host, HostStatus, ImageState, ImageStatus, ServiceRuntime } from '$lib/api-types';
-import { hostBlockReason, isCatalogHost } from '$lib/catalog';
+import { hostBlockReason, isCatalogHost, programUsesSecrets } from '$lib/catalog';
 import { shortDigest } from '$lib/image-spec';
 
 /** What a copy row needs from its catalog entry to act on that running copy. */
@@ -11,6 +11,8 @@ export type ServiceEntryRef = {
 	runAs: string;
 	/** Program only; false for an image. */
 	shell: boolean;
+	/** Program only: the entry reads env sets (`env_sets` or `secret_env`). False for an image. */
+	secrets: boolean;
 };
 
 /** A running container at or above this restart count says how many restarts it has had. */
@@ -40,8 +42,15 @@ export function hostDownNote(status: HostStatus): string {
 }
 
 export function entryRef(entry: CatalogEntry): ServiceEntryRef {
-	if (entry.kind === 'image') return { name: entry.name, kind: 'image', my_actions: [...entry.my_actions], runAs: '', shell: false };
-	return { name: entry.name, kind: 'program', my_actions: [...entry.my_actions], runAs: entry.spec.run_as, shell: entry.spec.shell };
+	if (entry.kind === 'image') return { name: entry.name, kind: 'image', my_actions: [...entry.my_actions], runAs: '', shell: false, secrets: false };
+	return {
+		name: entry.name,
+		kind: 'program',
+		my_actions: [...entry.my_actions],
+		runAs: entry.spec.run_as,
+		shell: entry.spec.shell,
+		secrets: programUsesSecrets(entry.spec)
+	};
 }
 
 export function runtimeFromImageState(state: ImageState, restartCount: number): ServiceRuntime {
@@ -136,10 +145,20 @@ export type ServiceControls = {
 	logs: boolean;
 	/** Restart count line: on Stop's tooltip when Stop is shown, else on Logs. */
 	crashNote: string | null;
+	/** A program that reads env sets: Start and Restart say when a changed secret takes effect. */
+	secrets: boolean;
 };
 
-/** Buttons for one owned copy on its host, by state and the caller's grants on the entry. */
-export function serviceControls(entry: ServiceEntryRef, hostStatus: HostStatus, runtime: ServiceRuntime): ServiceControls {
+/**
+ * Buttons for one owned copy on its host, by state and the caller's grants on the entry.
+ * `runBlock` (from `programRunBlockReason`) turns an enabled Start into a blocked one with that reason.
+ */
+export function serviceControls(
+	entry: ServiceEntryRef,
+	hostStatus: HostStatus,
+	runtime: ServiceRuntime,
+	runBlock: string | null = null
+): ServiceControls {
 	const can = (action: CatalogAction) => entry.my_actions.includes(action);
 	const base: ServiceControls = {
 		entry: entry.name,
@@ -148,7 +167,8 @@ export function serviceControls(entry: ServiceEntryRef, hostStatus: HostStatus, 
 		blockedReason: null,
 		restart: false,
 		logs: can('logs'),
-		crashNote: null
+		crashNote: null,
+		secrets: entry.kind === 'program' && entry.secrets
 	};
 	const blocked = (reason: string): ServiceControls => ({ ...base, blockedReason: can('run') ? reason : null });
 	if (hostStatus !== 'online') return blocked(hostDownNote(hostStatus));
@@ -167,6 +187,7 @@ export function serviceControls(entry: ServiceEntryRef, hostStatus: HostStatus, 
 		case 'paused':
 			return { ...base, stateAction: stop };
 		case 'stopped':
+			if (runBlock != null) return blocked(runBlock);
 			return { ...base, stateAction: can('run') ? 'run' : null };
 		case 'missing':
 			return blocked(NO_CONTAINER_NOTE);

@@ -1,5 +1,5 @@
 /**
- * Which env source wins for a catalog image entry (api-v1 rule 12):
+ * Which env source wins for a catalog image or program entry (api-v1 rule 12; programs from v1.22):
  * `env_sets` in order < `secret_env` < `env`. Keys are compared trimmed and case-sensitive.
  * Only key names are used; values never enter these notes.
  */

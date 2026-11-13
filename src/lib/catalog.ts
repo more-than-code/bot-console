@@ -131,6 +131,42 @@ export function hostBlockReason(host: Pick<Host, 'programs'>, runAs: string, she
 	return null;
 }
 
+/** Block reason when a program entry uses env sets and the host's agent lacks `programs.secrets` (api-v1 v1.22). */
+export const PROGRAM_SECRETS_BLOCK = "This host's agent does not support program secrets.";
+
+/** Block reason when the host's `projects` allowlist leaves this project out (api-v1 v1.23). */
+export const PROJECT_NOT_LISTED_BLOCK =
+	"This host's allowlist does not include this project. The host owner adds it to `projects` in `/etc/bot-agent/runner.toml`.";
+
+/** A program entry that reads env sets: Run needs `programs.secrets`, and Restart keeps the host's stored values. */
+export function programUsesSecrets(spec: { env_sets: readonly string[]; secret_env: Record<string, string> }): boolean {
+	return spec.env_sets.length > 0 || Object.keys(spec.secret_env).length > 0;
+}
+
+/** Hover note on Start and Restart of a program that uses env sets (spec-program-secrets §3.4). */
+export const PROGRAM_SECRET_START_NOTE = 'Start sends the current env set values.';
+export const PROGRAM_SECRET_RESTART_NOTE = 'Restart reuses the values stored on the host. A changed secret takes effect at the next Start.';
+
+/** Under a program's Secret env (spec-program-secrets §3.4): where the values live and who can read them. */
+export const PROGRAM_SECRET_HELP =
+	'Env set values are written to a root-only file on the host. A process running as the same run-as account, or as root, can read them, so give a sensitive program its own account. A changed value takes effect at the next Start, not at Restart.';
+
+/** Allowlist only: false means the host's agent reported a list without this project. Unknown (null) is not blocked. */
+export function projectListedBlockReason(host: Pick<Host, 'programs'>): string | null {
+	return host.programs?.project_listed === false ? PROJECT_NOT_LISTED_BLOCK : null;
+}
+
+/**
+ * Why Start (Run) of a program is refused on a host its policy already allows (`hostBlockReason` is null):
+ * the allowlist leaves the project out, or the entry uses env sets and the agent lacks `programs.secrets`.
+ */
+export function programRunBlockReason(host: Pick<Host, 'programs'>, usesSecrets: boolean): string | null {
+	const listed = projectListedBlockReason(host);
+	if (listed) return listed;
+	if (usesSecrets && host.programs?.secrets !== true) return PROGRAM_SECRETS_BLOCK;
+	return null;
+}
+
 /** Why this host cannot run a container. Null means the host can be chosen. */
 export function imageHostBlockReason(host: Pick<Host, 'programs'>): string | null {
 	if (host.programs == null || !host.programs.images || !host.programs.docker) return 'This host does not run containers.';

@@ -52,7 +52,7 @@ const SERVICE_ID = '00000000-0000-4000-8000-0000000000bb';
 const HASH = 'ab'.repeat(32);
 const KEY = 'run-key-1';
 
-const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: false, files: false, logging: false, health_policy: false };
+const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: false, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null };
 
 function host(overrides: Partial<Host> = {}): Host {
 	return {
@@ -88,6 +88,8 @@ function entry(my_actions: ProgramEntry['my_actions'], overrides: Partial<Progra
 			shell: false,
 			run_as: 'joe',
 			env: {},
+			env_sets: [],
+			secret_env: {},
 			port: 3031,
 			restart: 'on-failure'
 		},
@@ -480,13 +482,15 @@ describe('catalog', { concurrency: false }, () => {
 		assert.match(section, /await tick\(\);\s*filterForm\?\.requestSubmit\(\);/);
 	});
 
-	test('the new service button is owner-only', () => {
+	test('the Program button is owner-only', () => {
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const programButton = /<\/svg>\s*Program\s*<\/button>/;
 		const owner = render(ProjectPage, { props: { data: projectData(true) as never, form: null } }).body;
-		assert.equal(owner.includes('New service'), true);
+		assert.match(owner.replaceAll('<!---->', ''), programButton);
+		assert.equal(owner.includes('New service'), false);
 		assert.equal(owner.includes('Container'), true);
 		const admin = render(ProjectPage, { props: { data: projectData(false) as never, form: null } }).body;
-		assert.equal(admin.includes('New service'), false);
+		assert.doesNotMatch(admin.replaceAll('<!---->', ''), programButton);
 		assert.equal(admin.includes('Container'), false);
 		assert.equal(admin.includes('Edit web'), true);
 		assert.equal(admin.includes('Delete web'), false);
@@ -620,7 +624,9 @@ describe('catalog', { concurrency: false }, () => {
 						runAs: 'joe',
 						port: '',
 						restart: 'on-failure',
-						env: []
+						env: [],
+						envSets: [],
+						secrets: []
 					},
 					preview: { exec: 'npm', args: ['run', 'dev'], env: { PORT: '3031' }, command_display: 'npm run dev' },
 					previewMessage: null,
@@ -645,7 +651,9 @@ describe('catalog', { concurrency: false }, () => {
 						runAs: '',
 						port: '',
 						restart: 'on-failure',
-						env: []
+						env: [],
+						envSets: [],
+						secrets: []
 					},
 					preview: null,
 					previewMessage: null,
@@ -800,7 +808,7 @@ describe('catalog', { concurrency: false }, () => {
 
 	test('over-long fields are rejected, and the API env refusal is shown', async () => {
 		const account = `a${'b'.repeat(31)}`;
-		const allowed = host({ programs: { enabled: true, allow_shell: true, run_as: [account, 'joe'], policy_hash: 'policy-1', images: false, docker: false, files: false, logging: false, health_policy: false } });
+		const allowed = host({ programs: { enabled: true, allow_shell: true, run_as: [account, 'joe'], policy_hash: 'policy-1', images: false, docker: false, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null } });
 		async function post(form: Record<string, string>) {
 			const calls = installFetch((call) => {
 				if (call.url.pathname.endsWith('/hosts')) return envelope({ items: [allowed], next_cursor: null });
@@ -960,6 +968,8 @@ function approval() {
 		exec: '/usr/bin/npm',
 		args: ['run', 'dev'],
 		env: { PORT: '3031' },
+		env_sets: [],
+		secret_env: {},
 		dir: '/srv/app',
 		run_as: 'joe',
 		shell: false,
@@ -1109,7 +1119,7 @@ test('hoisted KEY=value words leave the command and win over an existing row', (
 	assert.equal(hoistPreviewEnv('pnpm run dev --watch', false, [{ key: 'PORT', value: '3031' }], 'pnpm run dev --watch', plain), null);
 
 	setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
-	const draft = { name: 'web', command: line, shell: false, dir: '/srv/web', runAs: 'joe', port: '', restart: 'on-failure' as const, env: [] };
+	const draft = { name: 'web', command: line, shell: false, dir: '/srv/web', runAs: 'joe', port: '', restart: 'on-failure' as const, env: [], envSets: [], secrets: [] };
 	const html = decode(
 		render(CatalogEntryForm, {
 			props: dialogProps({ mode: 'create', name: null, draft, preview, previewMessage: null, message: null })

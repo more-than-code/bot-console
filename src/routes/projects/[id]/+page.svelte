@@ -76,6 +76,7 @@
 					hosts={data.hosts ?? []}
 					saveAction={actionUrlFrom(page.url, 'catalogCreate')}
 					parseAction={actionUrlFrom(page.url, 'catalogParse')}
+					setsAction={actionUrlFrom(page.url, 'catalogEnvSets')}
 					revealed={catalogEditor?.mode === 'create'}
 					editor={catalogEditor?.mode === 'create' ? catalogEditor : null}
 				/>

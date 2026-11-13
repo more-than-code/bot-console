@@ -14,7 +14,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import type { Host, ImageDeploy, ImageEntry } from '$lib/api-types';
-	import { imageFilesBlockReason, imageHealthPolicyBlockReason, imageHostBlockReason, imageLoggingBlockReason, isCatalogHost, reuseIdempotencyKey } from '$lib/catalog';
+	import { imageFilesBlockReason, imageHealthPolicyBlockReason, imageHostBlockReason, imageLoggingBlockReason, isCatalogHost, projectListedBlockReason, reuseIdempotencyKey } from '$lib/catalog';
 	import { blockInFlightSubmit, deployProgressNote, flightFocusTarget, flightLabel } from '$lib/catalog-flight';
 	import {
 		applyHistoryResponse,
@@ -119,6 +119,7 @@
 	const loggingBlocked = $derived(selectedHost != null && imageLoggingBlockReason(selectedHost, entry.spec.logging != null) != null);
 	const hasHealthPolicy = $derived(entry.spec.kind === 'service' && !isDefaultHealthPolicy(entry.spec.health_policy));
 	const healthPolicyBlocked = $derived(selectedHost != null && imageHealthPolicyBlockReason(selectedHost, hasHealthPolicy) != null);
+	const projectBlocked = $derived(selectedHost != null && projectListedBlockReason(selectedHost) != null);
 	const notice = $derived(historyNotice({ hostCount: eligible.length, pending: historyPending, ready: historyReady, count: history.length }));
 	const targets = $derived(entry.spec.kind === 'job' ? [] : rollbackChoices(history));
 	const digest = $derived(shortDigest(result?.outcome?.digest ?? result?.status?.digest));
@@ -363,6 +364,10 @@
 					{@const filesReason = imageFilesBlockReason(host, entry.spec.files.length > 0)}
 					{@const loggingReason = imageLoggingBlockReason(host, entry.spec.logging != null)}
 					{@const policyReason = imageHealthPolicyBlockReason(host, hasHealthPolicy)}
+					{@const projectReason = projectListedBlockReason(host)}
+					{#if projectReason}
+						<p class="text-muted-foreground text-sm">{host.name}: {projectReason}</p>
+					{/if}
 					{#if reason}
 						<p class="text-muted-foreground text-sm">{host.name}: {reason}</p>
 					{/if}
@@ -509,7 +514,7 @@
 								<Button
 									type="submit"
 									variant="outline"
-									disabled={rollingThis ? undefined : busy || submitting || hostId === '' || containerBlocked || healthPolicyBlocked}
+									disabled={rollingThis ? undefined : busy || submitting || hostId === '' || containerBlocked || healthPolicyBlocked || projectBlocked}
 									aria-describedby={healthPolicyBlocked && !rollingThis ? `rollback-${entry.name}-blocked` : undefined}
 									aria-disabled={rollingThis ? 'true' : undefined}
 									aria-busy={rollingThis ? 'true' : undefined}
@@ -565,7 +570,7 @@
 				type="submit"
 				form={deployFormId}
 				bind:ref={deploySubmitEl}
-				disabled={activeFlight === 'deploy' ? undefined : busy || submitting || hostId === '' || containerBlocked || filesBlocked || loggingBlocked || healthPolicyBlocked}
+				disabled={activeFlight === 'deploy' ? undefined : busy || submitting || hostId === '' || containerBlocked || filesBlocked || loggingBlocked || healthPolicyBlocked || projectBlocked}
 				aria-disabled={activeFlight === 'deploy' ? 'true' : undefined}
 				aria-busy={activeFlight === 'deploy' ? 'true' : undefined}
 				onclick={(event) => {

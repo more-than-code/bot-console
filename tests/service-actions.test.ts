@@ -39,11 +39,11 @@ const FOREIGN_PROJECT = '00000000-0000-4000-8000-0000000000ff';
 const ALL = ['run', 'stop', 'restart', 'logs', 'status'] as const;
 
 function image(actions: CatalogAction[] = [...ALL], name = 'web'): ServiceEntryRef {
-	return { name, kind: 'image', my_actions: actions, runAs: '', shell: false };
+	return { name, kind: 'image', my_actions: actions, runAs: '', shell: false, secrets: false };
 }
 
 function program(actions: CatalogAction[] = [...ALL], name = 'api'): ServiceEntryRef {
-	return { name, kind: 'program', my_actions: actions, runAs: 'joe', shell: false };
+	return { name, kind: 'program', my_actions: actions, runAs: 'joe', shell: false, secrets: false };
 }
 
 function host(id = HOST_ID, name = 'pi1', overrides: Partial<Host> = {}): Host {
@@ -62,7 +62,7 @@ function host(id = HOST_ID, name = 'pi1', overrides: Partial<Host> = {}): Host {
 		revoked_at: null,
 		relation: 'owner',
 		share_level: null,
-		programs: { enabled: true, run_as: ['joe'], allow_shell: false, policy_hash: 'p', images: true, docker: true, files: false, logging: false, health_policy: false },
+		programs: { enabled: true, run_as: ['joe'], allow_shell: false, policy_hash: 'p', images: true, docker: true, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null },
 		...overrides
 	};
 }
@@ -555,7 +555,7 @@ describe('copies load for row actions', { concurrency: false }, () => {
 			my_actions: actions
 		};
 		if (kind === 'program') {
-			return { ...base, spec: { dir: '/srv', exec: 'npm', args: [], shell: false, run_as: 'joe', env: {}, port: null, restart: 'on-failure' } };
+			return { ...base, spec: { dir: '/srv', exec: 'npm', args: [], shell: false, run_as: 'joe', env: {}, env_sets: [], secret_env: {}, port: null, restart: 'on-failure' } };
 		}
 		return {
 			...base,

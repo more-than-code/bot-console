@@ -22,6 +22,7 @@ import { ApiError, actionFailure, apiFetch, apiList } from '$lib/server/api';
 import { formText } from '$lib/server/form';
 import { requireUser } from '$lib/server/guard';
 import { present } from '$lib/server/redact';
+import { cleanEnvSources, envSourcesFromForm } from '$lib/image-spec';
 import { saveImageEntry } from '$lib/server/image-actions';
 import { parseCatalogPreview, parseHost, parseImageLogs, parseImageStatus, parseMember, parseProgramLogs, parseProgramStatus } from '$lib/server/shape';
 import { isUuid } from '$lib/server/validate';
@@ -78,6 +79,7 @@ function readEnv(form: FormData): { rows: CatalogDraft['env']; message: string |
 
 function draftFrom(form: FormData): { draft: CatalogDraft; message: string | null } {
 	const env = readEnv(form);
+	const sources = envSourcesFromForm(form);
 	const restartRaw = formText(form, 'restart');
 	const name = formText(form, 'name');
 	const command = formText(form, 'command');
@@ -92,7 +94,9 @@ function draftFrom(form: FormData): { draft: CatalogDraft; message: string | nul
 		runAs,
 		port,
 		restart: restartRaw === 'no' ? 'no' : 'on-failure',
-		env: env.rows
+		env: env.rows,
+		envSets: sources.envSets,
+		secrets: sources.secrets
 	};
 	if (name.length > 48) {
 		return { draft, message: 'Name must start with a letter or digit and use lowercase letters, digits, and hyphens.' };
@@ -112,7 +116,7 @@ function draftFrom(form: FormData): { draft: CatalogDraft; message: string | nul
 	if (restartRaw !== '' && restartRaw !== 'on-failure' && restartRaw !== 'no') {
 		return { draft, message: 'Choose a restart policy.' };
 	}
-	return { draft, message: env.message };
+	return { draft, message: env.message ?? sources.message };
 }
 
 function editorResult(
@@ -168,6 +172,8 @@ function programBody(draft: CatalogDraft, hosts: Host[], includeName: boolean): 
 	if (!restart) return { ok: false, message: 'Choose a restart policy.' };
 	const env = cleanEnv(draft.env);
 	if (!env.ok) return { ok: false, message: env.message };
+	const sources = cleanEnvSources(draft.envSets, draft.secrets);
+	if (!sources.ok) return { ok: false, message: sources.message };
 	const body: Record<string, unknown> = { kind: 'program', command, shell: draft.shell, dir, run_as: runAs, restart };
 	if (includeName) {
 		if (!isCatalogName(draft.name)) {
@@ -176,6 +182,9 @@ function programBody(draft: CatalogDraft, hosts: Host[], includeName: boolean): 
 		body.name = draft.name;
 	}
 	if (Object.keys(env.env).length > 0) body.env = env.env;
+	// Left out when empty, like env. PUT replaces the whole spec, so an edit that clears them drops them.
+	if (sources.envSets.length > 0) body.env_sets = sources.envSets;
+	if (Object.keys(sources.secretEnv).length > 0) body.secret_env = sources.secretEnv;
 	if (port != null) body.port = port;
 	return { ok: true, body };
 }

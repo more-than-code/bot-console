@@ -64,7 +64,7 @@ describe('grouping copies under their entries', () => {
 
 	test('each entry gets its copies and the hosts it never ran on; the entries keep their order', () => {
 		const entries = [programCatalogEntry('api', ['run']), imageCatalogEntry('web')];
-		const ref = { name: 'api', kind: 'program' as const, my_actions: ['run' as const], runAs: 'joe', shell: false };
+		const ref = { name: 'api', kind: 'program' as const, my_actions: ['run' as const], runAs: 'joe', shell: false, secrets: false };
 		const notRunning: NotRunningPair[] = [
 			{ entry: ref, host: HOSTS[1] as Host },
 			{ entry: ref, host: HOSTS[2] as Host }
@@ -79,7 +79,7 @@ describe('grouping copies under their entries', () => {
 
 	test('a host keeps only what runs there and hides entries with nothing there', () => {
 		const entries = [imageCatalogEntry('web'), imageCatalogEntry('db'), programCatalogEntry('api', ['run'])];
-		const ref = { name: 'api', kind: 'program' as const, my_actions: ['run' as const], runAs: 'joe', shell: false };
+		const ref = { name: 'api', kind: 'program' as const, my_actions: ['run' as const], runAs: 'joe', shell: false, secrets: false };
 		const rows = catalogRows(
 			entries,
 			groupCopies([copy(1, 'web', PI1, 'pi1'), copy(2, 'web', PI2, 'pi2'), copy(3, 'db', PI2, 'pi2')], PROJECT.id, entries),

@@ -9,7 +9,7 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import type { Host, SnapshotView } from '$lib/api-types';
 	import { formatBytes, formatCapacity, formatLoad, formatPercent, formatRate, formatTemp, formatUptime } from '$lib/format';
-	import { alignSeries, METRIC_SPECS, type MetricChart, type MetricFormat } from '$lib/host-view';
+	import { alignSeries, hostPolicyLine, METRIC_SPECS, type MetricChart, type MetricFormat } from '$lib/host-view';
 	import type { Column } from '$lib/table';
 	import { actionUrlFrom } from '$lib/url';
 	import { RANGES, type RangeKey } from '$lib/ranges';
@@ -70,6 +70,8 @@
 		if (value == null || !Number.isFinite(value)) return 'n/a';
 		return String(value);
 	}
+
+	const policyLine = $derived(hostPolicyLine(host));
 </script>
 
 <dl class="mb-4 grid gap-3 sm:grid-cols-2">
@@ -78,6 +80,9 @@
 	<div><dt class="text-muted-foreground text-sm">Agent</dt><dd class="font-mono">{host.agent_version ?? 'n/a'}</dd></div>
 	<div><dt class="text-muted-foreground text-sm">System</dt><dd>{host.os}/{host.arch}</dd></div>
 	<div><dt class="text-muted-foreground text-sm">Always on</dt><dd>{host.always_on ? 'yes' : 'no'}</dd></div>
+	{#if policyLine}
+		<div><dt class="text-muted-foreground text-sm">Host policy</dt><dd class="break-words">{policyLine}</dd></div>
+	{/if}
 </dl>
 
 <nav class="mb-3 flex flex-wrap gap-2" aria-label="Time range">

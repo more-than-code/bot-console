@@ -165,6 +165,8 @@ function programEntry(): CatalogEntry {
 			shell: false,
 			run_as: 'joe',
 			env: {},
+			env_sets: [],
+			secret_env: {},
 			port: 3031,
 			restart: 'on-failure'
 		},
@@ -193,7 +195,7 @@ function host(): Host {
 		revoked_at: null,
 		relation: 'owner',
 		share_level: null,
-		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false, health_policy: false }
+		programs: { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null }
 	};
 }
 
@@ -1639,7 +1641,7 @@ describe('catalog images', { concurrency: false }, () => {
 		const admin = render(ProjectPage, { props: { data: data as never, form: null } }).body;
 		assert.equal(admin.includes('>Settings<'), true);
 		assert.equal(admin.includes('Container'), false);
-		assert.equal(admin.includes('New service'), false);
+		assert.equal(admin.includes('New program'), false);
 	});
 
 	test('a secret env value is blanked before a failed save returns the draft', async () => {
@@ -2448,7 +2450,7 @@ describe('catalog images', { concurrency: false }, () => {
 		assert.deepEqual(historyFetch(HOST_ID, '', false), { submit: false, pending: false });
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 		const second = '00000000-0000-4000-8000-0000000000ab';
-		const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: true, files: false, logging: false, health_policy: false };
+		const programs = { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: false, docker: true, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null };
 		const blockedHost = { ...host(), programs };
 		const openHost = { ...host(), id: second, name: 'pi2', programs: { ...programs, images: true, docker: true } };
 		const props = {
@@ -2524,6 +2526,13 @@ describe('catalog images', { concurrency: false }, () => {
 		const stuck = render(CatalogDeployForm, { props: { ...props, hosts: [], result: null, historyInFlight: true } }).body;
 		assert.equal(stuck.includes('No hosts in this project.'), true);
 		assert.equal(stuck.includes('Loading history'), false);
+		// api-v1 v1.23: a host whose allowlist leaves the project out says why, and Deploy stays disabled on it.
+		const unlistedHost = { ...openHost, programs: { ...openHost.programs, project_listed: false } };
+		const unlisted = render(CatalogDeployForm, { props: { ...props, hosts: [unlistedHost], result: null } }).body;
+		assert.equal(unlisted.replaceAll('&#39;', "'").includes("pi2: This host's allowlist does not include this project."), true);
+		assert.equal(markedDisabled(control(unlisted, 'Deploy')), true);
+		const known = render(CatalogDeployForm, { props: { ...props, hosts: [{ ...openHost, programs: { ...openHost.programs, project_listed: true } }], result: null } }).body;
+		assert.equal(known.includes('allowlist'), false);
 	});
 
 	test('deploy notices wrap and remove waits for a host', () => {

@@ -245,8 +245,42 @@ export function parseHostPrograms(value: unknown): HostPrograms | null {
 	const files = reportedBool(value, 'files');
 	const logging = reportedBool(value, 'logging');
 	const health_policy = reportedBool(value, 'health_policy');
-	if (images === null || docker === null || files === null || logging === null || health_policy === null) return null;
-	return { enabled: value.enabled, run_as, allow_shell: value.allow_shell, policy_hash: value.policy_hash, images, docker, files, logging, health_policy };
+	const secrets = reportedBool(value, 'secrets');
+	if (images === null || docker === null || files === null || logging === null || health_policy === null || secrets === null) return null;
+	const projects = parseAllowlist(value);
+	if (projects === undefined) return null;
+	const listed = Object.hasOwn(value, 'project_listed') ? value.project_listed : null;
+	if (listed !== null && typeof listed !== 'boolean') return null;
+	return {
+		enabled: value.enabled,
+		run_as,
+		allow_shell: value.allow_shell,
+		policy_hash: value.policy_hash,
+		images,
+		docker,
+		files,
+		logging,
+		health_policy,
+		secrets,
+		projects,
+		project_listed: listed
+	};
+}
+
+/** The agent sends at most 32 slugs (agent-protocol v1.12). */
+const ALLOWLIST_CAP = 32;
+const SLUG = /^[a-z0-9-]{1,80}$/;
+
+/** Missing or null is unknown (null). A present list that is not slugs is not a policy (undefined). */
+function parseAllowlist(value: Record<string, unknown>): string[] | null | undefined {
+	if (!Object.hasOwn(value, 'projects') || value.projects == null) return null;
+	if (!Array.isArray(value.projects) || value.projects.length > ALLOWLIST_CAP) return undefined;
+	const slugs: string[] = [];
+	for (const item of value.projects) {
+		if (typeof item !== 'string' || !SLUG.test(item) || slugs.includes(item)) return undefined;
+		slugs.push(item);
+	}
+	return slugs;
 }
 
 /** Missing or null is false. A present non-boolean is not a policy. */
@@ -868,7 +902,20 @@ export function parseProgramSpec(value: unknown): ProgramSpec | null {
 	const port = parseProgramPort(value.port);
 	if (!dir || !exec || !args || !run_as || run_as === 'root' || !RUN_AS.test(run_as) || !env || port === undefined) return null;
 	if (value.restart !== 'on-failure' && value.restart !== 'no') return null;
-	return { dir, exec, args, shell: value.shell, run_as, env, port, restart: value.restart };
+	const sources = parseEnvSources(value);
+	if (!sources) return null;
+	return { dir, exec, args, shell: value.shell, run_as, env, ...sources, port, restart: value.restart };
+}
+
+/**
+ * Program `env_sets` and `secret_env` (api-v1 v1.22). Missing or null is none, as from an API before
+ * v1.22. A present value that does not parse rejects the row, as for images.
+ */
+function parseEnvSources(value: Record<string, unknown>): { env_sets: string[]; secret_env: Record<string, string> } | null {
+	const env_sets = value.env_sets == null ? [] : parseNameList(value.env_sets);
+	const secret_env = value.secret_env == null ? {} : parseSecretEnv(value.secret_env);
+	if (!env_sets || !secret_env) return null;
+	return { env_sets, secret_env };
 }
 
 function parseMyActions(value: unknown): CatalogAction[] | null {
@@ -1000,6 +1047,7 @@ export function parseApproval(value: unknown): Approval | null {
 	const exec = text(value.exec, 256);
 	const args = parseArgs(value.args);
 	const env = parseEnv(value.env);
+	const sources = parseEnvSources(value);
 	const dir = parseDir(value.dir);
 	const run_as = text(value.run_as, 32);
 	const requested_by = text(value.requested_by, 36);
@@ -1008,7 +1056,7 @@ export function parseApproval(value: unknown): Approval | null {
 	const approved_at = optionalText(value.approved_at, 64);
 	if (!entry_id || !isUuid(entry_id) || !entry_name || !CATALOG_NAME.test(entry_name)) return null;
 	if (!project_id || !isUuid(project_id) || !project_name || !host_id || !isUuid(host_id)) return null;
-	if (!spec_hash || !SPEC_HASH.test(spec_hash) || !command_display || !exec || !args || !env || !dir) return null;
+	if (!spec_hash || !SPEC_HASH.test(spec_hash) || !command_display || !exec || !args || !env || !sources || !dir) return null;
 	if (!run_as || run_as === 'root' || !RUN_AS.test(run_as) || !requested_by || !isUuid(requested_by) || !requested_at) return null;
 	if (approved_by === undefined || approved_at === undefined) return null;
 	if (value.status !== 'pending' && value.status !== 'approved') return null;
@@ -1023,6 +1071,7 @@ export function parseApproval(value: unknown): Approval | null {
 		exec,
 		args,
 		env,
+		...sources,
 		dir,
 		run_as,
 		shell: value.shell,

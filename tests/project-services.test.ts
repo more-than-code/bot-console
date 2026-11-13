@@ -373,7 +373,7 @@ describe('project services', { concurrency: false }, () => {
 
 	test('a malformed row of another project is skipped, not left out, so not-running rows stay', async () => {
 		const runnable = programCatalogEntry('api', ['run'], '00000000-0000-4000-8000-0000000000c2');
-		const programs = { enabled: true, run_as: ['joe'], allow_shell: false, policy_hash: 'p', images: true, docker: true, files: false, logging: false, health_policy: false };
+		const programs = { enabled: true, run_as: ['joe'], allow_shell: false, policy_hash: 'p', images: true, docker: true, files: false, logging: false, health_policy: false, secrets: false, projects: null, project_listed: null };
 		installFetch((call) => {
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/catalog`) return envelope({ items: [runnable], next_cursor: null });
 			if (call.url.pathname === `/v1/projects/${PROJECT.id}/hosts`) return envelope({ items: [{ ...HOST, programs }], next_cursor: null });

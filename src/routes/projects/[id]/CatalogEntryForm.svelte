@@ -11,8 +11,20 @@
 	import * as Sheet from '$lib/components/ui/sheet';
 	import Notice from '$lib/components/Notice.svelte';
 	import type { Host, ProgramEntry } from '$lib/api-types';
-	import { hoistPreviewEnv, previewToken, runAsChoices, shellRisk, shouldApplyPreviewUpdate, submitCatalogPreview } from '$lib/catalog';
+	import InfoIcon from '@lucide/svelte/icons/info';
+	import {
+		PROGRAM_SECRET_HELP,
+		hoistPreviewEnv,
+		previewToken,
+		runAsChoices,
+		shellRisk,
+		shouldApplyPreviewUpdate,
+		submitCatalogPreview
+	} from '$lib/catalog';
+	import { envOverrideNote, envOverrides } from '$lib/env-precedence';
+	import type { KnownSet } from '$lib/image-spec';
 	import type { CatalogDraft, CatalogEditorState } from '$lib/project-action';
+	import EnvSourceFields from './EnvSourceFields.svelte';
 
 	let {
 		mode,
@@ -21,6 +33,10 @@
 		saveAction,
 		parseAction,
 		editor = null,
+		sets = [],
+		setsMessage = null,
+		setsStatus = 'loading',
+		retrySets,
 		cancel
 	}: {
 		mode: 'create' | 'edit';
@@ -29,11 +45,16 @@
 		saveAction: string;
 		parseAction: string;
 		editor?: CatalogEditorState | null;
+		/** Env set names and key names (never values), loaded when the drawer opens. */
+		sets?: KnownSet[];
+		setsMessage?: string | null;
+		setsStatus?: 'loading' | 'ready' | 'error';
+		retrySets?: () => void;
 		cancel?: Snippet;
 	} = $props();
 
 	function emptyDraft(): CatalogDraft {
-		return { name: '', command: '', shell: false, dir: '', runAs: '', port: '', restart: 'on-failure', env: [] };
+		return { name: '', command: '', shell: false, dir: '', runAs: '', port: '', restart: 'on-failure', env: [], envSets: [], secrets: [] };
 	}
 
 	function fromEntry(item: ProgramEntry): CatalogDraft {
@@ -45,7 +66,12 @@
 			runAs: item.spec.run_as,
 			port: item.spec.port == null ? '' : String(item.spec.port),
 			restart: item.spec.restart,
-			env: Object.entries(item.spec.env).map(([key, value]) => ({ key, value }))
+			env: Object.entries(item.spec.env).map(([key, value]) => ({ key, value })),
+			envSets: [...item.spec.env_sets],
+			secrets: Object.entries(item.spec.secret_env).map(([key, reference]) => {
+				const dot = reference.indexOf('.');
+				return { key, set: reference.slice(0, dot), name: reference.slice(dot + 1) };
+			})
 		};
 	}
 
@@ -67,6 +93,8 @@
 	let port = $state(initial.port);
 	let restart = $state(initial.restart);
 	let envRows = $state(initial.env.map((row) => ({ key: row.key, value: row.value })));
+	let envSets = $state([...initial.envSets]);
+	let secrets = $state(initial.secrets.map((row) => ({ ...row })));
 	let formEl = $state<HTMLFormElement | null>(null);
 	let previewButton = $state<HTMLButtonElement | null>(null);
 	let previewRequest = 0;
@@ -93,6 +121,14 @@
 	const saveMessage = $derived(editor?.message ?? null);
 	const argv = $derived(preview ? [preview.exec, ...preview.args] : []);
 	const risk = $derived(shellRisk(runAs));
+	// api-v1 rule 12, for programs from v1.22: env_sets in order < secret_env < env. Notes only.
+	const overrides = $derived(
+		envOverrides(
+			envRows.map((row) => row.key),
+			secrets,
+			envSets.map((name) => ({ name, keys: sets.find((set) => set.name === name)?.keys ?? [] }))
+		)
+	);
 
 	$effect(() => {
 		if (runAs !== '' && !choices.includes(runAs)) runAs = '';
@@ -219,10 +255,18 @@
 		<div class="grid gap-2">
 			<p class="text-sm font-medium">Environment</p>
 			{#each envRows as row, index (index)}
+				{@const note = envOverrideNote(overrides, row.key)}
 				<div class="flex flex-wrap items-end gap-2">
 					<Label class="grid min-w-0 flex-1 gap-1.5" for="{fieldId}-env-key-{index}">
 						Key
-						<Input id="{fieldId}-env-key-{index}" name="env_key" bind:value={envRows[index].key} maxlength={64} autocomplete="off" />
+						<Input
+							id="{fieldId}-env-key-{index}"
+							name="env_key"
+							bind:value={envRows[index].key}
+							maxlength={64}
+							autocomplete="off"
+							aria-describedby={note ? `${fieldId}-env-note-${index}` : undefined}
+						/>
 					</Label>
 					<Label class="grid min-w-0 flex-1 gap-1.5" for="{fieldId}-env-value-{index}">
 						Value
@@ -230,9 +274,17 @@
 					</Label>
 					<Button type="button" variant="outline" onclick={() => removeEnv(index)}>Remove</Button>
 				</div>
+				{#if note}
+					<p id="{fieldId}-env-note-{index}" class="text-muted-foreground flex min-w-0 items-start gap-1.5 text-sm break-words">
+						<InfoIcon class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+						<span class="min-w-0">{note}</span>
+					</p>
+				{/if}
 			{/each}
 			<Button type="button" variant="outline" disabled={envRows.length >= 64} onclick={addEnv}>Add variable</Button>
 		</div>
+		<EnvSourceFields {fieldId} bind:envSets bind:secrets {sets} {setsStatus} {setsMessage} {retrySets} {overrides} />
+		<p class="text-muted-foreground text-sm">{PROGRAM_SECRET_HELP}</p>
 		{#if preview}
 			<p class="flex flex-wrap items-center gap-1">
 				will run:

@@ -241,6 +241,7 @@
 						{hosts}
 						saveAction={actionUrlFrom(page.url, 'catalogUpdate')}
 						parseAction={actionUrlFrom(page.url, 'catalogParse')}
+						setsAction={actionUrlFrom(page.url, 'catalogEnvSets')}
 						revealed={editor?.mode === 'edit' && editor.name === entry.name}
 						editor={editor?.mode === 'edit' && editor.name === entry.name ? editor : null}
 						disabled={rowBusy}

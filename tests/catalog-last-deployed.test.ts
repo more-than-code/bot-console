@@ -27,7 +27,7 @@ function raw(id: string, name: string, last?: unknown): Record<string, unknown> 
 		created_at: '2026-10-14T00:00:00Z',
 		updated_at: '2026-10-14T00:00:00Z',
 		my_actions: [],
-		spec: { dir: '/srv/app', exec: 'npm', args: ['run', 'dev'], shell: false, run_as: 'joe', env: {}, port: 3031, restart: 'on-failure' }
+		spec: { dir: '/srv/app', exec: 'npm', args: ['run', 'dev'], shell: false, run_as: 'joe', env: {}, env_sets: [], secret_env: {}, port: 3031, restart: 'on-failure' }
 	};
 	if (last !== undefined) value.last_deployed_at = last;
 	return value;

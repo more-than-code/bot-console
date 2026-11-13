@@ -226,3 +226,16 @@ export function alignSeries(series: ReadonlyArray<{ points: readonly MetricPoint
 	});
 	return { times, columns };
 }
+
+/**
+ * The host page "Host policy" line (spec-projects-gate-programs §3.4), for members of the owning project only:
+ * `Programs on, Images off, Projects: a, b`. Null for any other caller. The list comes from the agent's hello;
+ * an older agent does not send it ("not reported").
+ */
+export function hostPolicyLine(host: Pick<Host, 'relation' | 'programs'>): string | null {
+	if (host.relation !== 'owner') return null;
+	const programs = host.programs;
+	const onOff = (value: boolean) => (value ? 'on' : 'off');
+	const projects = programs?.projects == null ? 'not reported' : programs.projects.length === 0 ? 'none' : programs.projects.join(', ');
+	return `Programs ${onOff(programs?.enabled === true)}, Images ${onOff(programs?.images === true)}, Projects: ${projects}`;
+}

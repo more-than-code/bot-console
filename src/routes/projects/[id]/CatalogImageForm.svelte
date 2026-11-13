@@ -46,9 +46,10 @@
 	} from '$lib/image-tags';
 	import { ImageTagLookup } from '$lib/image-tag-lookup';
 	import { settleImageForm, type DialogOutcome } from '$lib/dialog-open';
-	import { envOverrideNote, envOverrides, secretOverrideNote, setConflictNotes, setOrderLine } from '$lib/env-precedence';
+	import { envOverrideNote, envOverrides } from '$lib/env-precedence';
 	import type { ImageEditorState } from '$lib/project-action';
 	import ImageLookupPost from './ImageLookupPost.svelte';
+	import EnvSourceFields from './EnvSourceFields.svelte';
 	import ImageTagNotes from './ImageTagNotes.svelte';
 
 	let {
@@ -152,11 +153,6 @@
 	const fieldId = $derived(mode === 'edit' && entry ? `catalog-image-${entry.name}` : 'catalog-image-new');
 	const message = $derived(clientMessage ?? editor?.message ?? null);
 	const field = $derived(clientField ?? editor?.field ?? null);
-	const setOptions = $derived.by(() => {
-		const names = new Set(sets.map((set) => set.name));
-		for (const name of draft.envSets) names.add(name);
-		return [...names].sort();
-	});
 	const fileOptions = $derived.by(() => {
 		const names = new Set(files.map((file) => file.name));
 		for (const row of draft.files) {
@@ -198,16 +194,6 @@
 			draft.envSets.map((name) => ({ name, keys: sets.find((set) => set.name === name)?.keys ?? [] }))
 		)
 	);
-	const setNotes = $derived(setConflictNotes(overrides));
-	const orderLine = $derived(setOrderLine(draft.envSets));
-
-	/** Ids of the order line (for a selected set) and the set notes that name this set, for its checkbox. */
-	function setNoteIds(name: string): string | undefined {
-		const order = orderLine && draft.envSets.includes(name) ? [`${fieldId}-set-order`] : [];
-		const ids = [...order, ...setNotes.flatMap((note, index) => (note.sets.includes(name) ? [`${fieldId}-set-note-${index}`] : []))];
-		return ids.length > 0 ? ids.join(' ') : undefined;
-	}
-
 	/** A row input is described by its override note (when shown) and then its error. */
 	function withNote(noteId: string | null, name: string): string | undefined {
 		const ids = [noteId, describedBy(name) ?? null].filter((id) => id != null);
@@ -229,24 +215,10 @@
 		void tick().then(() => focusError());
 	});
 
-	function keysFor(setName: string, current: string): string[] {
-		const keys = sets.find((set) => set.name === setName)?.keys ?? [];
-		if (current !== '' && !keys.includes(current)) return [current, ...keys];
-		return [...keys];
-	}
-
 	function optionsFor(current: string): string[] {
 		const names = new Set(files.map((file) => file.name));
 		if (current !== '' && !names.has(current)) names.add(current);
 		return [...names].sort();
-	}
-
-	function toggleSet(name: string, checked: boolean) {
-		if (checked) {
-			if (!draft.envSets.includes(name)) draft.envSets = [...draft.envSets, name];
-			return;
-		}
-		draft.envSets = draft.envSets.filter((item) => item !== name);
 	}
 
 	function applyPaste() {
@@ -509,88 +481,19 @@
 			<Button type="button" variant="outline" disabled={draft.env.length >= 64} onclick={() => (draft.env = [...draft.env, { key: '', value: '' }])}>Add variable</Button>
 			{@render fieldNotice('env')}
 		</div>
-		<div class="grid gap-1.5">
-			<p class="text-sm font-medium">Env sets</p>
-			<!-- Posted in draft order, not the alphabetical list order: a later set wins (api-v1 rule 12). -->
-			{#each draft.envSets as name (name)}
-				<Input type="hidden" name="env_set" value={name} />
-			{/each}
-			{#if setsStatus === 'loading'}
-				<p class="text-muted-foreground text-sm">Loading env sets…</p>
-			{:else if setsStatus === 'error'}
-				<Notice kind="error">{setsMessage ?? 'Env sets could not be loaded.'}</Notice>
-				{#if retrySets}
-					<Button type="button" variant="outline" onclick={retrySets}>Retry</Button>
-				{/if}
-			{:else if setOptions.length === 0}
-				<p class="text-muted-foreground text-sm">No env sets yet.</p>
-			{:else}
-				{#each setOptions as name (name)}
-					<Label class="flex min-w-0 items-start gap-2">
-						<Checkbox checked={draft.envSets.includes(name)} aria-describedby={setNoteIds(name)} onCheckedChange={(value) => toggleSet(name, value === true)} />
-						<span class="min-w-0 break-all">{name}</span>
-					</Label>
-				{/each}
-				{#if orderLine}
-					<p id="{fieldId}-set-order" class="text-muted-foreground text-sm break-words">{orderLine}</p>
-				{/if}
-				{#each setNotes as note, index (note.key)}
-					{@render overrideNote(`${fieldId}-set-note-${index}`, note.text)}
-				{/each}
-			{/if}
-			{@render fieldNotice('env_sets')}
-		</div>
-		<div class="grid gap-1.5">
-			<p class="text-sm font-medium">Secret env</p>
-			{#each draft.secrets as row, index (index)}
-				{@const note = secretOverrideNote(overrides, row.key)}
-				<div class="grid gap-2">
-					<div class="flex flex-wrap items-center gap-2">
-						<Label class="sr-only" for="{fieldId}-secret-key-{index}">Secret key {index + 1}</Label>
-						<Input
-							id="{fieldId}-secret-key-{index}"
-							name="secret_key"
-							bind:value={draft.secrets[index].key}
-							maxlength={64}
-							placeholder="KEY"
-							spellcheck="false"
-							aria-invalid={invalid('secret_env')}
-							aria-describedby={withNote(note ? `${fieldId}-secret-note-${index}` : null, 'secret_env')}
-						/>
-						<Button type="button" variant="outline" aria-label="Remove secret {index + 1}" onclick={() => (draft.secrets = draft.secrets.filter((_, item) => item !== index))}>Remove</Button>
-					</div>
-					{#if note}
-						{@render overrideNote(`${fieldId}-secret-note-${index}`, note)}
-					{/if}
-					<Input type="hidden" name="secret_set" value={row.set} />
-					<div role="radiogroup" aria-label="Secret set {index + 1}" class="grid min-w-0 gap-1">
-						{#each setOptions as name (name)}
-							<Button
-								type="button"
-								role="radio"
-								variant={row.set === name ? 'secondary' : 'outline'}
-								aria-checked={row.set === name}
-								class="h-auto w-full min-w-0 justify-start text-left whitespace-normal break-all"
-								onclick={() => (draft.secrets[index].set = name)}>{name}</Button>
-						{/each}
-					</div>
-					<Input type="hidden" name="secret_name" value={row.name} />
-					<div role="radiogroup" aria-label="Secret name {index + 1}" class="grid min-w-0 gap-1">
-						{#each keysFor(row.set, row.name) as key (key)}
-							<Button
-								type="button"
-								role="radio"
-								variant={row.name === key ? 'secondary' : 'outline'}
-								aria-checked={row.name === key}
-								class="h-auto w-full min-w-0 justify-start text-left whitespace-normal break-all"
-								onclick={() => (draft.secrets[index].name = key)}>{key}</Button>
-						{/each}
-					</div>
-				</div>
-			{/each}
-			<Button type="button" variant="outline" disabled={draft.secrets.length >= 64} onclick={() => (draft.secrets = [...draft.secrets, { key: '', set: '', name: '' }])}>Add secret</Button>
-			{@render fieldNotice('secret_env')}
-		</div>
+		<EnvSourceFields
+			{fieldId}
+			bind:envSets={draft.envSets}
+			bind:secrets={draft.secrets}
+			{sets}
+			{setsStatus}
+			{setsMessage}
+			{retrySets}
+			{overrides}
+			{invalid}
+			{describedBy}
+			notice={fieldNotice}
+		/>
 		<div class="grid gap-1.5">
 			<p class="text-sm font-medium">Volumes</p>
 			{#each draft.volumes as row, index (index)}

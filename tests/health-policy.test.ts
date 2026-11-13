@@ -85,7 +85,7 @@ function entry(policy: ImageHealthPolicy | null, kind: ImageSpec['kind'] = 'serv
 }
 
 function programs(healthPolicy: boolean): HostPrograms {
-	return { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false, health_policy: healthPolicy };
+	return { enabled: true, run_as: ['joe'], allow_shell: true, policy_hash: 'policy-1', images: true, docker: true, files: false, logging: false, health_policy: healthPolicy, secrets: false, projects: null, project_listed: null };
 }
 
 function host(id: string, name: string, healthPolicy: boolean): Host {

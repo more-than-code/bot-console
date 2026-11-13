@@ -880,7 +880,7 @@ describe('env sets, docker health, and catalog edit', { concurrency: false }, ()
 		assert.equal(admin.includes('Edit web'), true);
 		assert.equal(admin.includes('Delete web'), false);
 		assert.equal(admin.includes('Permissions web'), false);
-		assert.equal(admin.includes('New service'), false);
+		assert.equal(admin.includes('New program'), false);
 		assert.equal(admin.includes('Container'), false);
 		const viewer = render(CatalogSection, {
 			props: {

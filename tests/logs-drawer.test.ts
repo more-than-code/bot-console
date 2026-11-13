@@ -599,7 +599,8 @@ describe('Logs drawer', () => {
 		blockedReason: null,
 		restart: true,
 		logs: true,
-		crashNote: null
+		crashNote: null,
+		secrets: false
 	};
 
 	test('Logs on a row opens the drawer with no confirm step; Run, Stop and Restart keep their dialogs', () => {

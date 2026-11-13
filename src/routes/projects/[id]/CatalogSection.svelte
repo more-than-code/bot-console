@@ -19,7 +19,8 @@
 		catalogKindInfo,
 		catalogKindOf,
 		LAST_DEPLOYED_SORT,
-		lastDeployedValue
+		lastDeployedValue,
+		programRunBlockReason
 	} from '$lib/catalog';
 	import {
 		CATALOG_CELL,
@@ -319,7 +320,8 @@
 		if (entry == null) return null;
 		const runtime = runtimeOf(copy);
 		if (runtime == null) return 'checking';
-		return serviceControls(entry, copy.host_status, runtime);
+		const host = entry.kind === 'program' ? hosts.find((item) => item.id === copy.host_id) : undefined;
+		return serviceControls(entry, copy.host_status, runtime, host ? programRunBlockReason(host, entry.secrets) : null);
 	}
 
 	/** The copy's badge word. A copy of an entry without a grant has no state read (`undefined`). */

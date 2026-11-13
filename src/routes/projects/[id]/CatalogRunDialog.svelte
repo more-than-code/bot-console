@@ -20,6 +20,7 @@
 		result = null,
 		entryKind = 'program',
 		tip,
+		note = null,
 		blockedReason = null,
 		onRowBusy,
 		openRequest = 0,
@@ -38,6 +39,8 @@
 		entryKind?: 'program' | 'image';
 		/** Extra hover sentence. Omit it to keep the tooltip as the action and the name. */
 		tip?: string;
+		/** A line in the form, above its buttons (a program's secret note). */
+		note?: string | null;
 		/** The trigger stays focusable but does nothing, and says why. */
 		blockedReason?: string | null;
 		onRowBusy?: (busy: boolean) => void;
@@ -154,7 +157,7 @@
 					{/snippet}
 				</CatalogRunResult>
 			{:else}
-				<CatalogRunForm {kind} {entryName} {hostId} {serviceId} {action} {entryKind} {onBusy}>
+				<CatalogRunForm {kind} {entryName} {hostId} {serviceId} {action} {entryKind} {note} {onBusy}>
 					{#snippet cancel()}
 						<Dialog.Close type="button" disabled={flight}>Cancel</Dialog.Close>
 					{/snippet}

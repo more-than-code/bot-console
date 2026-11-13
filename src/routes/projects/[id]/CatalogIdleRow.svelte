@@ -2,6 +2,7 @@
 	import type { Host } from '$lib/api-types';
 	import RowMenu from '$lib/components/RowMenu.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import { programRunBlockReason } from '$lib/catalog';
 	import { CATALOG_CELL, NOT_STARTED, SERVICES_CELL } from '$lib/catalog-copies';
 	import type { CatalogRunState } from '$lib/project-action';
 	import { copyMenuItems, type MenuKey } from '$lib/row-menu';
@@ -25,7 +26,9 @@
 		runResult?: CatalogRunState | null;
 	} = $props();
 
-	const controls = $derived(entryRef ? serviceControls(entryRef, host.status, { state: 'stopped', restarts: null }) : null);
+	const controls = $derived(
+		entryRef ? serviceControls(entryRef, host.status, { state: 'stopped', restarts: null }, programRunBlockReason(host, entryRef.secrets)) : null
+	);
 	const menuId = $derived(`${id}-menu`);
 	const items = $derived(
 		copyMenuItems({

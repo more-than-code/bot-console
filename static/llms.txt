@@ -13,7 +13,7 @@ Hosted service: console at https://console.deploybot.dev, MCP server at https://
 - An MCP client acts as the signed-in user, with that user's role in each project, and no more.
 - Only catalog entries can run. There are no free-form commands, no shell tool and no file tools.
 - Every change made over MCP (deploy, rollback, run, stop, restart, health-check and catalog edits) first returns a plan and a `confirmation_id`. Nothing happens until the `confirm` tool is called with the same `idempotency_key`.
-- Each host has its own root-owned allowlist that the server cannot change: the accounts, directories and commands programs may use, and the images and projects for containers.
+- Each host has its own root-owned allowlist that the server cannot change: the projects that may run programs and containers on it, the accounts, directories and commands programs may use, and the images containers may use.
 - Secret values (env sets, files and registry logins) are encrypted at rest and write-only for people. MCP tools return env key names, never env values. Logs are redacted.
 - Changes are recorded in an audit log.
 

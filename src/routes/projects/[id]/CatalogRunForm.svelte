@@ -18,6 +18,7 @@
 		serviceId = null,
 		action,
 		entryKind = 'program',
+		note = null,
 		onBusy,
 		cancel
 	}: {
@@ -29,6 +30,8 @@
 		serviceId?: string | null;
 		action: string;
 		entryKind?: 'program' | 'image';
+		/** A line above the buttons, such as when a changed secret takes effect. */
+		note?: string | null;
 		onBusy?: (busy: boolean) => void;
 		cancel?: Snippet;
 	} = $props();
@@ -94,6 +97,9 @@
 	<Input type="hidden" name="host_id" value={hostId} />
 	{#if serviceId}
 		<Input type="hidden" name="service_id" value={serviceId} />
+	{/if}
+	{#if note}
+		<p class="text-muted-foreground text-sm">{note}</p>
 	{/if}
 	<div class="flex flex-wrap items-center gap-2">
 		<Button

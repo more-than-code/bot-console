@@ -60,7 +60,7 @@ function program(id: string, name: string): CatalogEntry {
 	return {
 		...base(id, name, 'npm run dev'),
 		kind: 'program',
-		spec: { dir: '/srv/app', exec: 'npm', args: ['run', 'dev'], shell: false, run_as: 'joe', env: {}, port: 3031, restart: 'on-failure' }
+		spec: { dir: '/srv/app', exec: 'npm', args: ['run', 'dev'], shell: false, run_as: 'joe', env: {}, env_sets: [], secret_env: {}, port: 3031, restart: 'on-failure' }
 	};
 }
 
