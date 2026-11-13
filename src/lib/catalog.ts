@@ -155,6 +155,10 @@ export const PROGRAM_SECRET_RESTART_NOTE = 'Restart reuses the values stored on 
 export const PROGRAM_SECRET_HELP =
 	'Env set values are written to a root-only file on the host. A process running as the same run-as account, or as root, can read them, so give a sensitive program its own account. A changed value takes effect at the next Start, not at Restart.';
 
+/** Under a program's Secret env (api-v1 v1.22 amendment 2): keys a secret value may not set. The API refuses them. */
+export const PROGRAM_SECRET_KEYS_HELP =
+	'Proxy, SSL certificate, Java and Git hook variables (for example HTTPS_PROXY, SSL_CERT_FILE, JAVA_TOOL_OPTIONS, GIT_SSH_COMMAND) cannot come from a secret, because they change what the program runs. Set them as plain values.';
+
 /** Allowlist only: false means the host's agent reported a list without this project. Unknown (null) is not blocked. */
 export function projectListedBlockReason(host: Pick<Host, 'programs'>): string | null {
 	return host.programs?.project_listed === false ? PROJECT_NOT_LISTED_BLOCK : null;

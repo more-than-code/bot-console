@@ -920,11 +920,32 @@ export function parseProgramSpec(value: unknown): ProgramSpec | null {
  */
 function parseApprovalSources(
 	value: Record<string, unknown>
-): { env_sets: string[] | null; secret_env: Record<string, string> | null } | null {
+): {
+	env_sets: string[] | null;
+	secret_env: Record<string, string> | null;
+	env_set_values: Record<string, Record<string, string>> | null;
+} | null {
 	const env_sets = value.env_sets == null ? null : parseNameList(value.env_sets);
 	const secret_env = value.secret_env == null ? null : parseSecretEnv(value.secret_env);
+	const env_set_values = value.env_set_values == null ? null : parseSetValues(value.env_set_values);
 	if ((value.env_sets != null && !env_sets) || (value.secret_env != null && !secret_env)) return null;
-	return { env_sets, secret_env };
+	if (value.env_set_values != null && !env_set_values) return null;
+	return { env_sets, secret_env, env_set_values };
+}
+
+/** `{<set>: {KEY: value}}`: at most 8 sets, each an env map (64 keys, values up to 4096 bytes, one line). */
+function parseSetValues(value: unknown): Record<string, Record<string, string>> | null {
+	if (!isRecord(value)) return null;
+	const names = Object.keys(value);
+	if (names.length > 8) return null;
+	const sets: Record<string, Record<string, string>> = {};
+	for (const name of names) {
+		if (!isSetName(name)) return null;
+		const env = parseEnv(value[name]);
+		if (!env) return null;
+		sets[name] = env;
+	}
+	return sets;
 }
 
 function parseEnvSources(value: Record<string, unknown>): { env_sets: string[]; secret_env: Record<string, string> } | null {

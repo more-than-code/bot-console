@@ -14,6 +14,7 @@
 	import InfoIcon from '@lucide/svelte/icons/info';
 	import {
 		PROGRAM_SECRET_HELP,
+		PROGRAM_SECRET_KEYS_HELP,
 		hoistPreviewEnv,
 		previewToken,
 		runAsChoices,
@@ -285,6 +286,7 @@
 		</div>
 		<EnvSourceFields {fieldId} bind:envSets bind:secrets {sets} {setsStatus} {setsMessage} {retrySets} {overrides} />
 		<p class="text-muted-foreground text-sm">{PROGRAM_SECRET_HELP}</p>
+		<p class="text-muted-foreground text-sm">{PROGRAM_SECRET_KEYS_HELP}</p>
 		{#if preview}
 			<p class="flex flex-wrap items-center gap-1">
 				will run:

@@ -970,6 +970,7 @@ function approval() {
 		env: { PORT: '3031' },
 		env_sets: [],
 		secret_env: {},
+		env_set_values: {},
 		dir: '/srv/app',
 		run_as: 'joe',
 		shell: false,

@@ -119,9 +119,9 @@ describe('program secrets and the projects allowlist (console)', { concurrency: 
 		assert.equal(parseProgramSpec({ ...base, secret_env: { GH_TOKEN: 'no-dot' } }), null);
 		const approval = parseApproval({ ...approvalRow(), env_sets: ['gh'], secret_env: { GH_TOKEN: 'gh.GH_TOKEN' } });
 		assert.deepEqual(approval?.secret_env, { GH_TOKEN: 'gh.GH_TOKEN' });
-		const { env_sets: _sets, secret_env: _secret, ...older } = approvalRow();
+		const { env_sets: _sets, secret_env: _secret, env_set_values: _values, ...older } = approvalRow();
 		const unreported = parseApproval(older);
-		assert.deepEqual([unreported?.env_sets, unreported?.secret_env], [null, null]);
+		assert.deepEqual([unreported?.env_sets, unreported?.secret_env, unreported?.env_set_values], [null, null, null]);
 		assert.equal(parseApproval({ ...older, env_sets: null, secret_env: null })?.env_sets, null);
 		assert.equal(parseApproval({ ...approvalRow(), env_sets: 'gh' }), null);
 		// Unknown means the console cannot say the entry has no secrets.
@@ -325,6 +325,7 @@ describe('program secrets and the projects allowlist (console)', { concurrency: 
 		assert.match(html, /<input[^>]*value="gh"[^>]*name="secret_set"/);
 		assert.equal(html.includes('Overrides the value from env set gh and the secret env. This value is used.'), true);
 		assert.equal(html.includes('A changed value takes effect at the next Start, not at Restart.'), true);
+		assert.equal(html.includes('cannot come from a secret'), true);
 		// The container form uses the same component.
 		const image = readFileSync(new URL('../src/routes/projects/[id]/CatalogImageForm.svelte', import.meta.url), 'utf8');
 		assert.equal(image.includes('<EnvSourceFields'), true);
@@ -381,31 +382,74 @@ describe('program secrets and the projects allowlist (console)', { concurrency: 
 	});
 
 	test('an approval from an older API reads "not reported", not "none"', () => {
-		const { env_sets: _sets, secret_env: _secret, ...older } = approvalRow();
+		const { env_sets: _sets, secret_env: _secret, env_set_values: _values, ...older } = approvalRow();
 		const parsed = parseApproval(older);
 		assert.ok(parsed);
 		const html = render(CatalogApprovals, { props: { approvals: [parsed], omitted: 0, truncated: false, message: null } }).body;
 		assert.equal(html.split('not reported').length - 1, 2);
 	});
 
+	test('env_set_values: plain values per set parse, missing is not reported, malformed rejects the row', () => {
+		const parsed = parseApproval(approvalRow());
+		assert.deepEqual(parsed?.env_set_values, { gh: { GH_HOST: 'github.com' }, db: {} });
+		const { env_set_values: _values, ...missing } = approvalRow();
+		assert.equal(parseApproval(missing)?.env_set_values, null);
+		assert.equal(parseApproval({ ...missing, env_set_values: null })?.env_set_values, null);
+		for (const bad of [
+			['gh'],
+			{ 'Bad Set': {} },
+			{ gh: { lower: 'x' } },
+			{ gh: { GH_HOST: 'a\nb' } },
+			{ gh: { GH_HOST: 'x'.repeat(4097) } },
+			{ gh: { GH_HOST: 7 } },
+			Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`s${i}`, {}])),
+			{ gh: Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`K${i}`, 'v'])) }
+		]) {
+			assert.equal(parseApproval({ ...approvalRow(), env_set_values: bad }), null, JSON.stringify(bad).slice(0, 60));
+		}
+	});
+
+	test('the approval view lists the plain values under each set, and "values not reported" without them', () => {
+		const shown = decode(render(CatalogApprovals, { props: { approvals: [parseApproval(approvalRow()) as Approval], omitted: 0, truncated: false, message: null } }).body);
+		assert.equal(shown.includes('gh\n  GH_HOST=github.com\ndb\n  no plain values'), true);
+		const { env_set_values: _values, ...missing } = approvalRow();
+		const older = decode(render(CatalogApprovals, { props: { approvals: [parseApproval(missing) as Approval], omitted: 0, truncated: false, message: null } }).body);
+		assert.equal(older.includes('gh\n  values not reported\ndb\n  values not reported'), true);
+		// A set a secret_env reference reads a plain key from, but not in env_sets, is listed after them.
+		const extra = parseApproval({ ...approvalRow(), env_sets: ['db'], env_set_values: { db: {}, gh: { GH_HOST: 'github.com' } } }) as Approval;
+		const extraHtml = decode(render(CatalogApprovals, { props: { approvals: [extra], omitted: 0, truncated: false, message: null } }).body);
+		assert.equal(extraHtml.includes('db\n  no plain values\ngh\n  GH_HOST=github.com'), true);
+		// Values are text: markup in a value is escaped, never rendered.
+		const markup = parseApproval({ ...approvalRow(), env_set_values: { gh: { GH_HOST: '<b>x</b>' }, db: {} } }) as Approval;
+		const markupHtml = render(CatalogApprovals, { props: { approvals: [markup], omitted: 0, truncated: false, message: null } }).body;
+		assert.equal(markupHtml.includes('<b>x</b>'), false);
+		assert.equal(markupHtml.includes('&lt;b>x&lt;/b>') || markupHtml.includes('&lt;b&gt;x&lt;/b&gt;'), true);
+	});
+
 	test('a resolved value in an unexpected approval field never reaches the parsed row or the page', () => {
 		const sentinel = 'sentinel-value-7f3a';
-		const parsed = parseApproval({ ...approvalRow(), resolved_env: { GH_TOKEN: sentinel }, secret_values: [sentinel] });
+		const parsed = parseApproval({
+			...approvalRow(),
+			resolved_env: { GH_TOKEN: sentinel },
+			secret_values: [sentinel],
+			env_set_secret_values: { gh: { GH_TOKEN: sentinel } }
+		});
 		assert.ok(parsed);
 		assert.equal(JSON.stringify(parsed).includes(sentinel), false);
 		const html = render(CatalogApprovals, { props: { approvals: [parsed], omitted: 0, truncated: false, message: null } }).body;
 		assert.equal(html.includes(sentinel), false);
 		assert.equal(decode(html).includes('GH_TOKEN ← gh.GH_TOKEN'), true);
+		assert.equal(decode(html).includes('GH_HOST=github.com'), true);
 	});
 
-	test('the approval view shows env set references, never a value', () => {
+	test('the approval view shows secret env references, never a secret value', () => {
 		const html = decode(
 			render(CatalogApprovals, {
 				props: { approvals: [{ ...approvalRow(), env: { PORT: '3031' } } as Approval], omitted: 0, truncated: false, message: null }
 			}).body
 		);
 		assert.equal(html.includes('GH_TOKEN ← gh.GH_TOKEN'), true);
-		assert.equal(html.includes('gh, db'), true);
+		assert.equal(html.includes('gh\n  GH_HOST=github.com'), true);
 		assert.equal(html.includes('PORT=3031'), true);
 		assert.equal(html.includes('ghp_'), false);
 	});
@@ -444,6 +488,7 @@ function approvalRow() {
 		env: {},
 		env_sets: ['gh', 'db'],
 		secret_env: { GH_TOKEN: 'gh.GH_TOKEN' },
+		env_set_values: { gh: { GH_HOST: 'github.com' }, db: {} },
 		dir: '/srv/tra',
 		run_as: 'joe',
 		shell: false,

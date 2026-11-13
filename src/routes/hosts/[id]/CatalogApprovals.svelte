@@ -28,8 +28,22 @@
 	/** An approval from an API before v1.22 does not say whether the entry reads env sets. */
 	const NOT_REPORTED = 'not reported';
 
-	function setNames(sets: string[] | null): string {
-		return sets == null ? NOT_REPORTED : sets.join(', ');
+	/**
+	 * Each set the entry uses, with the plain values the host owner approves under it (api-v1 v1.22 amendment 1):
+	 * the `env_sets` in order, then any other set a `secret_env` reference reads a plain key from. Text only.
+	 */
+	function setLines(row: Pick<Approval, 'env_sets' | 'env_set_values'>): string {
+		if (row.env_sets == null) return NOT_REPORTED;
+		const values = row.env_set_values;
+		const names = [...row.env_sets, ...Object.keys(values ?? {}).filter((name) => !row.env_sets?.includes(name))];
+		return names
+			.flatMap((name) => {
+				if (values == null) return [name, `  values ${NOT_REPORTED}`];
+				const plain = Object.entries(values[name] ?? {});
+				if (plain.length === 0) return [name, '  no plain values'];
+				return [name, ...plain.map(([key, value]) => `  ${key}=${value}`)];
+			})
+			.join('\n');
 	}
 
 	/** References only: `KEY ← set.NAME`. The approval never carries a resolved secret (api-v1 v1.22). */
@@ -53,7 +67,7 @@
 		{ key: 'exec', label: 'Exec', value: (row) => row.exec },
 		{ key: 'args', label: 'Args', value: (row) => row.args.join(' ') },
 		{ key: 'env', label: 'Env', searchable: true, value: (row) => envLines(row.env) },
-		{ key: 'env_sets', label: 'Env sets', value: (row) => setNames(row.env_sets) },
+		{ key: 'env_sets', label: 'Env sets', value: (row) => setLines(row) },
 		{ key: 'secret_env', label: 'Secret env', value: (row) => secretLines(row.secret_env) },
 		{ key: 'dir', label: 'Dir', value: (row) => row.dir },
 		{ key: 'run_as', label: 'Run as', value: (row) => row.run_as },
@@ -92,7 +106,7 @@
 				<td class="p-2 align-middle font-mono break-all">{item.exec}</td>
 				<td class="p-2 align-middle font-mono break-all whitespace-pre-wrap">{item.args.join(' ')}</td>
 				<td class="p-2 align-middle font-mono break-all whitespace-pre-wrap">{envLines(item.env)}</td>
-				<td class="p-2 align-middle font-mono break-all">{setNames(item.env_sets)}</td>
+				<td class="p-2 align-middle font-mono break-all whitespace-pre-wrap">{setLines(item)}</td>
 				<td class="p-2 align-middle font-mono break-all whitespace-pre-wrap">{secretLines(item.secret_env)}</td>
 				<td class="p-2 align-middle font-mono">{item.dir}</td>
 				<td class="p-2 align-middle">{item.run_as}</td>

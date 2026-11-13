@@ -371,6 +371,11 @@ export type Approval = {
 	/** References only, never resolved values (api-v1 v1.22). Null when the API did not report them (older API). */
 	env_sets: string[] | null;
 	secret_env: Record<string, string> | null;
+	/**
+	 * Plain (non-secret) values of the set keys the entry uses, per set, which the host owner approves
+	 * (api-v1 v1.22 amendment 1). Secret keys never appear here. Null when the API did not report them.
+	 */
+	env_set_values: Record<string, Record<string, string>> | null;
 	dir: string;
 	run_as: string;
 	shell: boolean;
