@@ -13,7 +13,7 @@ Hosted service: console at https://console.deploybot.dev, MCP server at https://
 - An MCP client acts as the signed-in user, with that user's role in each project, and no more.
 - Only catalog entries can run. There are no free-form commands, no shell tool and no file tools.
 - Every change made over MCP (deploy, rollback, run, stop, restart, health-check and catalog edits) first returns a plan and a `confirmation_id`. Nothing happens until the `confirm` tool is called with the same `idempotency_key`.
-- Each host has its own root-owned allowlist of images and projects that the server cannot change.
+- Each host has its own root-owned allowlist that the server cannot change: the accounts, directories and commands programs may use, and the images and projects for containers.
 - Secret values (env sets, files and registry logins) are encrypted at rest and write-only for people. MCP tools return env key names, never env values. Logs are redacted.
 - Changes are recorded in an audit log.
 
@@ -38,6 +38,7 @@ Hosted service: console at https://console.deploybot.dev, MCP server at https://
 
 ## Add a host
 
+- The user needs a project in the console first. Creating a project and creating a join token are console-only; there is no MCP tool for either, so tell the user before you prepare the host.
 - AI agents: follow "Enrol with an AI agent" in the install guide below. The user gives you access to the host (their SSH, a shell on the host, their cloud console, or commands they paste); you run the download, checks and install with the policy flags they agree to, then hand them the enrol command from the install output. The user creates the join token in the console, which gives them instructions for you that include the server URL; put exactly that URL into the enrol command, never a guessed one. The user types the token at the enrol prompt themselves. Never ask for, read or handle the join token.
 - [Install bot-agent](https://github.com/more-than-code/bot-agent/blob/main/docs/install.md): `install.sh`, enrolling with a one-time join token, the optional root runner for catalog entries, and the host allowlist (`/etc/bot-agent/runner.toml`).
 - [bot-agent README](https://github.com/more-than-code/bot-agent/blob/main/README.md): what the agent collects, how it deploys images and programs, and health checks.
