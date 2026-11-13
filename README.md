@@ -1,5 +1,7 @@
 # bot-console
 
+> **Archived (2026-11-14).** This repo moved into [more-than-code/bot-control-plane](https://github.com/more-than-code/bot-control-plane) as [`console/`](https://github.com/more-than-code/bot-control-plane/tree/main/console), with its full history. Releases from v0.2.29 on come from there. This repo is read-only.
+
 SvelteKit console for Deploybot. It is a BFF in front of bot-api-server: the browser never calls the API, and this app has no database login. Sign in with Google, then open a project and a host. A project has a Catalog & services tab: each catalog entry with its running copies nested under it. A host has Overview and Processes tabs.
 
 JavaScript is required. Search, sort, paging, tabs, and filters stay in the URL. Writes are SvelteKit form actions. Brand files (favicons, apple-touch and manifest icons, header lockups) are copied from the umbrella `docs/brand/logo/` into `static/brand/`; `static/manifest.webmanifest` lists the app icons. The UI is Tailwind CSS v4 and shadcn-svelte (style `nova`, neutral base, Lucide icons). `cn()` lives in `src/lib/utils.ts`. Colours are the tokens in `src/app.css` (light on `:root`, dark on `.dark`), including the Deploybot status tokens. The header theme switch posts to `/theme` and stores `bot_theme` (`system`, `light`, or `dark`; default `system`).
