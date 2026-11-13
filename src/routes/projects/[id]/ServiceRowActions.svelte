@@ -1,10 +1,9 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import type { Snippet } from 'svelte';
-	import { IMAGE_RUN_TIP, PROGRAM_SECRET_RESTART_NOTE, PROGRAM_SECRET_START_NOTE } from '$lib/catalog';
 	import type { CatalogRunKind, CatalogRunState } from '$lib/project-action';
 	import { RUN_FORM_ACTION } from '$lib/run-actions';
-	import { CHECKING_NOTE, type ServiceControls } from '$lib/service-actions';
+	import { CHECKING_NOTE, restartNote, startNote, stateTip, type ServiceControls } from '$lib/service-actions';
 	import { actionUrlFrom } from '$lib/url';
 	import CatalogRunDialog from './CatalogRunDialog.svelte';
 	import LogsDrawer from './LogsDrawer.svelte';
@@ -65,13 +64,6 @@
 		return runResult;
 	}
 
-	function stateTip(state: ServiceControls): string | undefined {
-		if (state.stateAction === 'stop') return state.crashNote ?? undefined;
-		if (state.stateAction === 'run' && state.entryKind === 'image') return IMAGE_RUN_TIP;
-		if (state.stateAction === 'run' && state.secrets) return PROGRAM_SECRET_START_NOTE;
-		return undefined;
-	}
-
 	function onRowBusy(next: boolean) {
 		busy = next;
 	}
@@ -98,7 +90,7 @@
 					result={resultFor(['run', 'stop'])}
 					entryKind={live.entryKind}
 					tip={stateTip(live)}
-					note={live.secrets && (live.stateAction ?? 'run') === 'run' ? PROGRAM_SECRET_START_NOTE : null}
+					note={startNote(live)}
 					blockedReason={live.stateAction ? null : live.blockedReason}
 					{onRowBusy}
 					openRequest={stateRequest}
@@ -119,8 +111,8 @@
 					action={actionUrlFrom(page.url, RUN_FORM_ACTION.restart)}
 					result={resultFor(['restart'])}
 					entryKind={live.entryKind}
-					tip={live.secrets ? PROGRAM_SECRET_RESTART_NOTE : undefined}
-					note={live.secrets ? PROGRAM_SECRET_RESTART_NOTE : null}
+					tip={restartNote(live) ?? undefined}
+					note={restartNote(live)}
 					{onRowBusy}
 					openRequest={restartRequest}
 					{fallbackFocusId}

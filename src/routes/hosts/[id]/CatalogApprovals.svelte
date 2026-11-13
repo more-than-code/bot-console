@@ -25,8 +25,16 @@
 		message: string | null;
 	} = $props();
 
+	/** An approval from an API before v1.22 does not say whether the entry reads env sets. */
+	const NOT_REPORTED = 'not reported';
+
+	function setNames(sets: string[] | null): string {
+		return sets == null ? NOT_REPORTED : sets.join(', ');
+	}
+
 	/** References only: `KEY ← set.NAME`. The approval never carries a resolved secret (api-v1 v1.22). */
-	function secretLines(secret: Record<string, string>): string {
+	function secretLines(secret: Record<string, string> | null): string {
+		if (secret == null) return NOT_REPORTED;
 		return Object.entries(secret)
 			.map(([key, reference]) => `${key} ← ${reference}`)
 			.join('\n');
@@ -45,7 +53,7 @@
 		{ key: 'exec', label: 'Exec', value: (row) => row.exec },
 		{ key: 'args', label: 'Args', value: (row) => row.args.join(' ') },
 		{ key: 'env', label: 'Env', searchable: true, value: (row) => envLines(row.env) },
-		{ key: 'env_sets', label: 'Env sets', value: (row) => row.env_sets.join(', ') },
+		{ key: 'env_sets', label: 'Env sets', value: (row) => setNames(row.env_sets) },
 		{ key: 'secret_env', label: 'Secret env', value: (row) => secretLines(row.secret_env) },
 		{ key: 'dir', label: 'Dir', value: (row) => row.dir },
 		{ key: 'run_as', label: 'Run as', value: (row) => row.run_as },
@@ -84,7 +92,7 @@
 				<td class="p-2 align-middle font-mono break-all">{item.exec}</td>
 				<td class="p-2 align-middle font-mono break-all whitespace-pre-wrap">{item.args.join(' ')}</td>
 				<td class="p-2 align-middle font-mono break-all whitespace-pre-wrap">{envLines(item.env)}</td>
-				<td class="p-2 align-middle font-mono break-all">{item.env_sets.join(', ')}</td>
+				<td class="p-2 align-middle font-mono break-all">{setNames(item.env_sets)}</td>
 				<td class="p-2 align-middle font-mono break-all whitespace-pre-wrap">{secretLines(item.secret_env)}</td>
 				<td class="p-2 align-middle font-mono">{item.dir}</td>
 				<td class="p-2 align-middle">{item.run_as}</td>

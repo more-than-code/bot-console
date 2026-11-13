@@ -1,5 +1,12 @@
 import type { CatalogAction, CatalogEntry, Host, HostStatus, ImageState, ImageStatus, ServiceRuntime } from '$lib/api-types';
-import { hostBlockReason, isCatalogHost, programUsesSecrets } from '$lib/catalog';
+import {
+	hostBlockReason,
+	IMAGE_RUN_TIP,
+	isCatalogHost,
+	PROGRAM_SECRET_RESTART_NOTE,
+	PROGRAM_SECRET_START_NOTE,
+	programUsesSecrets
+} from '$lib/catalog';
 import { shortDigest } from '$lib/image-spec';
 
 /** What a copy row needs from its catalog entry to act on that running copy. */
@@ -194,6 +201,24 @@ export function serviceControls(
 		default:
 			return blocked(STATE_UNKNOWN_NOTE);
 	}
+}
+
+/** Hover sentence on the Start/Stop control: the restart count on Stop, what Start does otherwise. */
+export function stateTip(state: ServiceControls): string | undefined {
+	if (state.stateAction === 'stop') return state.crashNote ?? undefined;
+	if (state.stateAction === 'run' && state.entryKind === 'image') return IMAGE_RUN_TIP;
+	if (state.stateAction === 'run' && state.secrets) return PROGRAM_SECRET_START_NOTE;
+	return undefined;
+}
+
+/** The line in the Start dialog of a program that uses env sets. Null otherwise, or while Stop is shown. */
+export function startNote(state: ServiceControls): string | null {
+	return state.secrets && (state.stateAction ?? 'run') === 'run' ? PROGRAM_SECRET_START_NOTE : null;
+}
+
+/** Restart's hover sentence and dialog line for a program that uses env sets (spec-program-secrets §3.4). */
+export function restartNote(state: ServiceControls): string | null {
+	return state.secrets ? PROGRAM_SECRET_RESTART_NOTE : null;
 }
 
 /**

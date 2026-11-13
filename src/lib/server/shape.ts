@@ -197,7 +197,9 @@ export function parseHost(value: unknown): Host | null {
 	if (agent_version === undefined || last_seen_at === undefined || revoked_at === undefined) return null;
 	const share = parseHostShare(value);
 	if (!share) return null;
-	const programs = parseProgramsField(value);
+	const parsed = parseProgramsField(value);
+	// The allowlist names other projects; only members of the owning project may see it (api-v1 v1.23 item 1).
+	const programs = parsed && share.relation !== 'owner' ? { ...parsed, projects: null } : parsed;
 	return {
 		id,
 		project_id,
@@ -277,8 +279,9 @@ function parseAllowlist(value: Record<string, unknown>): string[] | null | undef
 	if (!Array.isArray(value.projects) || value.projects.length > ALLOWLIST_CAP) return undefined;
 	const slugs: string[] = [];
 	for (const item of value.projects) {
-		if (typeof item !== 'string' || !SLUG.test(item) || slugs.includes(item)) return undefined;
-		slugs.push(item);
+		if (typeof item !== 'string' || !SLUG.test(item)) return undefined;
+		// A repeated slug is dropped, not refused: refusing would null `programs` and read as "no programs".
+		if (!slugs.includes(item)) slugs.push(item);
 	}
 	return slugs;
 }
@@ -911,6 +914,19 @@ export function parseProgramSpec(value: unknown): ProgramSpec | null {
  * Program `env_sets` and `secret_env` (api-v1 v1.22). Missing or null is none, as from an API before
  * v1.22. A present value that does not parse rejects the row, as for images.
  */
+/**
+ * Approval `env_sets` and `secret_env`. Unlike a ProgramSpec, missing or null is "not reported" (null), so the
+ * host owner never reads an approval from an older API as having no secrets. A present bad value rejects the row.
+ */
+function parseApprovalSources(
+	value: Record<string, unknown>
+): { env_sets: string[] | null; secret_env: Record<string, string> | null } | null {
+	const env_sets = value.env_sets == null ? null : parseNameList(value.env_sets);
+	const secret_env = value.secret_env == null ? null : parseSecretEnv(value.secret_env);
+	if ((value.env_sets != null && !env_sets) || (value.secret_env != null && !secret_env)) return null;
+	return { env_sets, secret_env };
+}
+
 function parseEnvSources(value: Record<string, unknown>): { env_sets: string[]; secret_env: Record<string, string> } | null {
 	const env_sets = value.env_sets == null ? [] : parseNameList(value.env_sets);
 	const secret_env = value.secret_env == null ? {} : parseSecretEnv(value.secret_env);
@@ -1047,7 +1063,7 @@ export function parseApproval(value: unknown): Approval | null {
 	const exec = text(value.exec, 256);
 	const args = parseArgs(value.args);
 	const env = parseEnv(value.env);
-	const sources = parseEnvSources(value);
+	const sources = parseApprovalSources(value);
 	const dir = parseDir(value.dir);
 	const run_as = text(value.run_as, 32);
 	const requested_by = text(value.requested_by, 36);

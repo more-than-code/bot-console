@@ -1426,7 +1426,9 @@ describe('catalog images', { concurrency: false }, () => {
 		const run = readFileSync(new URL('../src/routes/projects/[id]/CatalogRunDialog.svelte', import.meta.url), 'utf8');
 		const deploy = readFileSync(new URL('../src/routes/projects/[id]/CatalogDeployDialog.svelte', import.meta.url), 'utf8');
 		const row = readFileSync(new URL('../src/lib/components/RowAction.svelte', import.meta.url), 'utf8');
-		assert.match(section, /state\.stateAction === 'run' && state\.entryKind === 'image'\) return IMAGE_RUN_TIP/);
+		const actions = readFileSync(new URL('../src/lib/service-actions.ts', import.meta.url), 'utf8');
+		assert.match(actions, /state\.stateAction === 'run' && state\.entryKind === 'image'\) return IMAGE_RUN_TIP/);
+		assert.match(section, /tip=\{stateTip\(live\)\}/);
 		assert.match(run, /label="\{label\} \{entryName\} on \{hostName\}" \{tip\}/);
 		assert.match(deploy, /label="Deploy \{entry\.name\}" tip=\{IMAGE_DEPLOY_TIP\}/);
 		assert.match(row, /const hover = \$derived\(blockedReason \? `\$\{label\}\. \$\{blockedReason\}` : tip \? `\$\{label\}\. \$\{tip\}` : label\)/);
@@ -2531,6 +2533,32 @@ describe('catalog images', { concurrency: false }, () => {
 		const unlisted = render(CatalogDeployForm, { props: { ...props, hosts: [unlistedHost], result: null } }).body;
 		assert.equal(unlisted.replaceAll('&#39;', "'").includes("pi2: This host's allowlist does not include this project."), true);
 		assert.equal(markedDisabled(control(unlisted, 'Deploy')), true);
+		const reason = "pi2: This host's allowlist does not include this project. The host owner adds it to `projects` in `/etc/bot-agent/runner.toml`.";
+		assert.equal(unlisted.replaceAll('&#39;', "'").includes(reason), true);
+		const withHistory = render(CatalogDeployForm, {
+			props: {
+				...props,
+				hosts: [unlistedHost],
+				result: {
+					name: 'web',
+					resultId: '00000000-0000-4000-8000-0000000000f3',
+					hostId: second,
+					workload: 'service' as const,
+					waitSec: 30,
+					outcome: null,
+					status: null,
+					lines: [],
+					history: [deployRow('00000000-0000-4000-8000-0000000000e2', 'succeeded', digest('a')), deployRow('00000000-0000-4000-8000-0000000000e3', 'succeeded', digest('b'))],
+					confirmation: null,
+					confirmKind: null,
+					message: null
+				}
+			}
+		}).body;
+		const rollback = control(withHistory, 'Roll back to');
+		assert.equal(markedDisabled(rollback), true);
+		assert.match(rollback, /aria-describedby="rollback-web-project"/);
+		assert.equal(withHistory.includes('id="rollback-web-project"'), true);
 		const known = render(CatalogDeployForm, { props: { ...props, hosts: [{ ...openHost, programs: { ...openHost.programs, project_listed: true } }], result: null } }).body;
 		assert.equal(known.includes('allowlist'), false);
 	});

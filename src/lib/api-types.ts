@@ -368,9 +368,9 @@ export type Approval = {
 	exec: string;
 	args: string[];
 	env: Record<string, string>;
-	/** References only, never resolved values (api-v1 v1.22). Empty on an older API. */
-	env_sets: string[];
-	secret_env: Record<string, string>;
+	/** References only, never resolved values (api-v1 v1.22). Null when the API did not report them (older API). */
+	env_sets: string[] | null;
+	secret_env: Record<string, string> | null;
 	dir: string;
 	run_as: string;
 	shell: boolean;

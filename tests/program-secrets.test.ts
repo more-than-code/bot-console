@@ -15,9 +15,10 @@ import {
 } from '../src/lib/catalog.ts';
 import { hostPolicyLine } from '../src/lib/host-view.ts';
 import { cleanEnvSources, envSourcesFromForm } from '../src/lib/image-spec.ts';
-import { parseApproval, parseHostPrograms, parseProgramSpec } from '../src/lib/server/shape.ts';
-import { notRunningPairs, serviceControls, type ServiceEntryRef } from '../src/lib/service-actions.ts';
+import { parseApproval, parseHost, parseHostPrograms, parseProgramSpec } from '../src/lib/server/shape.ts';
+import { notRunningPairs, restartNote, serviceControls, startNote, stateTip, type ServiceEntryRef } from '../src/lib/service-actions.ts';
 import CatalogApprovals from '../src/routes/hosts/[id]/CatalogApprovals.svelte';
+import CatalogIdleRow from '../src/routes/projects/[id]/CatalogIdleRow.svelte';
 import OverviewTab from '../src/routes/hosts/[id]/OverviewTab.svelte';
 import CatalogEntryDialog from '../src/routes/projects/[id]/CatalogEntryDialog.svelte';
 import CatalogEntryForm from '../src/routes/projects/[id]/CatalogEntryForm.svelte';
@@ -25,6 +26,7 @@ import CatalogRunForm from '../src/routes/projects/[id]/CatalogRunForm.svelte';
 import { actions as projectActions } from '../src/routes/projects/[id]/+page.server.ts';
 import { envelope, fakeEvent, installFetch, PROJECT, restoreEnv, TOKEN, useApi, USER } from './harness.ts';
 import { setPageUrl } from './stubs/app-state.ts';
+import { copyRow, programCatalogEntry, renderCopies } from './copies.ts';
 
 const HOST_ID = '22222222-2222-4222-8222-222222222222';
 const HASH = 'a'.repeat(64);
@@ -96,6 +98,16 @@ describe('program secrets and the projects allowlist (console)', { concurrency: 
 		assert.equal(parseHostPrograms({ ...RAW_PROGRAMS, projects: ['Bad Slug'] }), null);
 		assert.equal(parseHostPrograms({ ...RAW_PROGRAMS, projects: Array.from({ length: 33 }, (_, i) => `p${i}`) }), null);
 		assert.equal(parseHostPrograms({ ...RAW_PROGRAMS, project_listed: 'no' }), null);
+		// A repeated slug is dropped, not refused (refusing would read as "no programs").
+		assert.deepEqual(parseHostPrograms({ ...RAW_PROGRAMS, projects: ['a', 'b', 'a'] })?.projects, ['a', 'b']);
+	});
+
+	test('parseHost keeps the allowlist only for the owning project', () => {
+		const raw = { ...host(), programs: { ...RAW_PROGRAMS, projects: ['home-lab', 'other'], project_listed: true } };
+		assert.deepEqual(parseHost(raw)?.programs?.projects, ['home-lab', 'other']);
+		const shared = parseHost({ ...raw, relation: 'shared', share_level: 'deploy' });
+		assert.equal(shared?.programs?.projects, null);
+		assert.equal(shared?.programs?.project_listed, true);
 	});
 
 	test('ProgramSpec and Approval read env set references; an older API has none', () => {
@@ -108,7 +120,12 @@ describe('program secrets and the projects allowlist (console)', { concurrency: 
 		const approval = parseApproval({ ...approvalRow(), env_sets: ['gh'], secret_env: { GH_TOKEN: 'gh.GH_TOKEN' } });
 		assert.deepEqual(approval?.secret_env, { GH_TOKEN: 'gh.GH_TOKEN' });
 		const { env_sets: _sets, secret_env: _secret, ...older } = approvalRow();
-		assert.deepEqual(parseApproval(older)?.env_sets, []);
+		const unreported = parseApproval(older);
+		assert.deepEqual([unreported?.env_sets, unreported?.secret_env], [null, null]);
+		assert.equal(parseApproval({ ...older, env_sets: null, secret_env: null })?.env_sets, null);
+		assert.equal(parseApproval({ ...approvalRow(), env_sets: 'gh' }), null);
+		// Unknown means the console cannot say the entry has no secrets.
+		assert.equal(programUsesSecrets({ env_sets: null, secret_env: null }), true);
 	});
 
 	test('block reasons: secrets need programs.secrets, and an unlisted project blocks Start and Deploy', () => {
@@ -140,6 +157,65 @@ describe('program secrets and the projects allowlist (console)', { concurrency: 
 		// A "Not started" row is still listed for a host whose policy allows the program, so the reason shows.
 		const pairs = notRunningPairs([ref(true)], [host()], {});
 		assert.equal(pairs.length, 1);
+		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
+		const idle = decode(
+			render(CatalogIdleRow, { props: { entry: 'tra', entryRef: pairs[0].entry, host: pairs[0].host, id: 'idle-tra' } }).body
+		);
+		assert.equal(idle.includes(PROGRAM_SECRETS_BLOCK), true);
+		assert.match(idle, /<button[^>]*aria-label="Start tra on pi1"[^>]*aria-disabled="true"|<button[^>]*aria-disabled="true"[^>]*aria-label="Start tra on pi1"/);
+		const unlisted = { ...pairs[0].host, programs: policy({ secrets: true, project_listed: false }) };
+		const idleUnlisted = decode(render(CatalogIdleRow, { props: { entry: 'tra', entryRef: ref(false), host: unlisted, id: 'idle-tra' } }).body);
+		assert.equal(idleUnlisted.includes(PROJECT_NOT_LISTED_BLOCK), true);
+	});
+
+	test('copy rows: Start shows the reason and is not enabled; Stop and Restart stay enabled', () => {
+		const actions = ['run', 'stop', 'restart', 'logs', 'status'] as const;
+		const entry = programCatalogEntry('tra', [...actions]);
+		if (entry.kind !== 'program') throw new Error('program entry');
+		const withSets = { ...entry, spec: { ...entry.spec, env_sets: ['gh'] } };
+		const program = { kind: 'process', catalog_entry: 'tra', name: 'tra', container_name: null } as const;
+		const isStopped = { gone_at: '2026-11-13T00:00:00Z', runtime: { state: 'stopped', restarts: null } } as const;
+		const isRunning = { gone_at: null, runtime: { state: 'running', restarts: null } } as const;
+		function startTag(html: string): string {
+			const tags = [...html.matchAll(/<button\b[^>]*>/g)].map((match) => match[0]);
+			return tags.find((tag) => tag.includes('aria-label="Start tra on pi1"')) ?? '';
+		}
+		function enabled(html: string, label: string): boolean {
+			const tag = [...html.matchAll(/<button\b[^>]*>/g)].map((match) => match[0]).find((item) => item.includes(`aria-label="${label}"`));
+			assert.ok(tag, label);
+			return !/aria-disabled="true"|\sdisabled(?:=|\s|>)/.test(tag);
+		}
+		// (a) A stopped copy of an entry with sets, on a host whose agent lacks programs.secrets.
+		const stopped = decode(
+			renderCopies({
+				rows: [copyRow({ ...program, ...isStopped })],
+				entries: [withSets],
+				hosts: [{ ...host(), id: copyRow().host_id }]
+			})
+		);
+		assert.equal(stopped.includes(PROGRAM_SECRETS_BLOCK), true);
+		assert.match(startTag(stopped), /aria-disabled="true"/);
+		// (b) A running copy on a host whose allowlist leaves the project out: Stop and Restart are not blocked.
+		const running = decode(
+			renderCopies({
+				rows: [copyRow({ ...program, ...isRunning })],
+				entries: [withSets],
+				hosts: [{ ...host(policy({ secrets: true, project_listed: false })), id: copyRow().host_id }]
+			})
+		);
+		assert.equal(enabled(running, 'Stop tra on pi1'), true);
+		assert.equal(enabled(running, 'Restart tra on pi1'), true);
+		assert.equal(running.includes(PROJECT_NOT_LISTED_BLOCK), false);
+		// Stopped there instead: Start shows the allowlist reason.
+		const stoppedUnlisted = decode(
+			renderCopies({
+				rows: [copyRow({ ...program, ...isStopped })],
+				entries: [entry],
+				hosts: [{ ...host(policy({ project_listed: false })), id: copyRow().host_id }]
+			})
+		);
+		assert.equal(stoppedUnlisted.includes(PROJECT_NOT_LISTED_BLOCK), true);
+		assert.match(startTag(stoppedUnlisted), /aria-disabled="true"/);
 	});
 
 	test('Start and Restart dialogs say when a changed secret takes effect', () => {
@@ -148,8 +224,16 @@ describe('program secrets and the projects allowlist (console)', { concurrency: 
 			assert.equal(html.includes(note), true, kind);
 		}
 		assert.equal(PROGRAM_SECRET_RESTART_NOTE.includes('next Start'), true);
-		const rows = readFileSync(new URL('../src/routes/projects/[id]/ServiceRowActions.svelte', import.meta.url), 'utf8');
-		assert.match(rows, /tip=\{live\.secrets \? PROGRAM_SECRET_RESTART_NOTE : undefined\}/);
+		// The tooltips are not server-rendered; ServiceRowActions passes these straight to them.
+		const stopped = serviceControls(ref(true), 'online', { state: 'stopped', restarts: null });
+		const running = serviceControls(ref(true), 'online', { state: 'running', restarts: 0 });
+		assert.equal(stateTip(stopped), PROGRAM_SECRET_START_NOTE);
+		assert.equal(startNote(stopped), PROGRAM_SECRET_START_NOTE);
+		assert.equal(startNote(running), null);
+		assert.equal(restartNote(running), PROGRAM_SECRET_RESTART_NOTE);
+		const plain = serviceControls(ref(false), 'online', { state: 'running', restarts: 0 });
+		assert.equal(restartNote(plain), null);
+		assert.equal(stateTip(serviceControls(ref(false), 'online', { state: 'stopped', restarts: null })), undefined);
 	});
 
 	test('the env sources reader and validation are shared with the container form', () => {
@@ -246,6 +330,43 @@ describe('program secrets and the projects allowlist (console)', { concurrency: 
 		assert.equal(image.includes('<EnvSourceFields'), true);
 	});
 
+	test('edit: the form hydrates set and secret references; a cleared edit PUTs neither field', async () => {
+		const entry = programCatalogEntry('tra', ['run']);
+		if (entry.kind !== 'program') throw new Error('program entry');
+		const withSets = { ...entry, spec: { ...entry.spec, env_sets: ['gh', 'db'], secret_env: { GH_TOKEN: 'gh.GH_TOKEN', DB_PW: 'db.PASSWORD' } } };
+		const html = render(CatalogEntryForm, {
+			props: { mode: 'edit', entry: withSets, hosts: [host()], saveAction: '?/catalogUpdate', parseAction: '?/catalogParse', sets: [], setsStatus: 'ready' }
+		}).body;
+		const hidden = (name: string) => [...html.matchAll(new RegExp(`<input[^>]*value="([^"]*)"[^>]*name="${name}"`, 'g'))].map((match) => match[1]);
+		assert.deepEqual(hidden('env_set'), ['gh', 'db']);
+		assert.deepEqual(hidden('secret_set'), ['gh', 'db']);
+		assert.deepEqual(hidden('secret_name'), ['GH_TOKEN', 'PASSWORD']);
+		assert.match(html, /<input[^>]*value="DB_PW"[^>]*name="secret_key"/);
+
+		const calls = installFetch((call) => {
+			if (call.url.pathname.endsWith('/hosts')) return envelope({ items: [host()], next_cursor: null });
+			return envelope({}, 200);
+		});
+		const result = await Promise.resolve(
+			projectActions.catalogUpdate(
+				fakeEvent({
+					url: `http://console.example/projects/${PROJECT.id}?tab=catalog&/catalogUpdate`,
+					session: TOKEN,
+					user: USER,
+					projects: [PROJECT],
+					params: { id: PROJECT.id },
+					form: { editor_mode: 'edit', entry_name: 'tra', command: 'gh api user', dir: '/srv/tra', run_as: 'joe', restart: 'on-failure' }
+				}).event as never
+			)
+		).catch((err: unknown) => err);
+		assert.equal(isRedirect(result), true);
+		const put = calls.find((call) => call.method === 'PUT');
+		assert.equal(put?.url.pathname, `/v1/projects/${PROJECT.id}/catalog/tra`);
+		const body = JSON.parse(put?.body ?? '{}');
+		assert.equal(Object.hasOwn(body, 'env_sets'), false);
+		assert.equal(Object.hasOwn(body, 'secret_env'), false);
+	});
+
 	test('labels: the create button is Program, the drawer New program, the edit fallback program', () => {
 		setPageUrl(`http://console.example/projects/${PROJECT.id}?tab=catalog`);
 		const html = render(CatalogEntryDialog, {
@@ -257,6 +378,24 @@ describe('program secrets and the projects allowlist (console)', { concurrency: 
 		assert.equal(source.includes("mode === 'create' ? 'New program' : `Edit ${entry?.name ?? 'program'}`"), true);
 		assert.equal(source.includes('New service'), false);
 		assert.equal(source.includes("'service'"), false);
+	});
+
+	test('an approval from an older API reads "not reported", not "none"', () => {
+		const { env_sets: _sets, secret_env: _secret, ...older } = approvalRow();
+		const parsed = parseApproval(older);
+		assert.ok(parsed);
+		const html = render(CatalogApprovals, { props: { approvals: [parsed], omitted: 0, truncated: false, message: null } }).body;
+		assert.equal(html.split('not reported').length - 1, 2);
+	});
+
+	test('a resolved value in an unexpected approval field never reaches the parsed row or the page', () => {
+		const sentinel = 'sentinel-value-7f3a';
+		const parsed = parseApproval({ ...approvalRow(), resolved_env: { GH_TOKEN: sentinel }, secret_values: [sentinel] });
+		assert.ok(parsed);
+		assert.equal(JSON.stringify(parsed).includes(sentinel), false);
+		const html = render(CatalogApprovals, { props: { approvals: [parsed], omitted: 0, truncated: false, message: null } }).body;
+		assert.equal(html.includes(sentinel), false);
+		assert.equal(decode(html).includes('GH_TOKEN ← gh.GH_TOKEN'), true);
 	});
 
 	test('the approval view shows env set references, never a value', () => {

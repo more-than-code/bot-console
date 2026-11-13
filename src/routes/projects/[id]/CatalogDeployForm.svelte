@@ -120,6 +120,16 @@
 	const hasHealthPolicy = $derived(entry.spec.kind === 'service' && !isDefaultHealthPolicy(entry.spec.health_policy));
 	const healthPolicyBlocked = $derived(selectedHost != null && imageHealthPolicyBlockReason(selectedHost, hasHealthPolicy) != null);
 	const projectBlocked = $derived(selectedHost != null && projectListedBlockReason(selectedHost) != null);
+
+	/** The reasons a Roll back button is disabled for the chosen host, for its aria-describedby. */
+	function rollbackBlockedBy(rollingThis: boolean): string | undefined {
+		if (rollingThis) return undefined;
+		const ids = [
+			...(healthPolicyBlocked ? [`rollback-${entry.name}-blocked`] : []),
+			...(projectBlocked ? [`rollback-${entry.name}-project`] : [])
+		];
+		return ids.length > 0 ? ids.join(' ') : undefined;
+	}
 	const notice = $derived(historyNotice({ hostCount: eligible.length, pending: historyPending, ready: historyReady, count: history.length }));
 	const targets = $derived(entry.spec.kind === 'job' ? [] : rollbackChoices(history));
 	const digest = $derived(shortDigest(result?.outcome?.digest ?? result?.status?.digest));
@@ -500,6 +510,11 @@
 					{selectedHost.name}: {imageHealthPolicyBlockReason(selectedHost, hasHealthPolicy)}
 				</p>
 			{/if}
+			{#if historyReady && targets.length > 0 && projectBlocked && selectedHost}
+				<p id="rollback-{entry.name}-project" class="text-muted-foreground text-sm">
+					{selectedHost.name}: {projectListedBlockReason(selectedHost)}
+				</p>
+			{/if}
 			{#if historyReady}
 				{#each targets as item (item.digest)}
 					{@const rollingThis = activeFlight === 'rollback' && shownDigest === item.digest}
@@ -515,7 +530,7 @@
 									type="submit"
 									variant="outline"
 									disabled={rollingThis ? undefined : busy || submitting || hostId === '' || containerBlocked || healthPolicyBlocked || projectBlocked}
-									aria-describedby={healthPolicyBlocked && !rollingThis ? `rollback-${entry.name}-blocked` : undefined}
+									aria-describedby={rollbackBlockedBy(rollingThis)}
 									aria-disabled={rollingThis ? 'true' : undefined}
 									aria-busy={rollingThis ? 'true' : undefined}
 									onclick={(event) => {

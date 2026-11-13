@@ -138,8 +138,12 @@ export const PROGRAM_SECRETS_BLOCK = "This host's agent does not support program
 export const PROJECT_NOT_LISTED_BLOCK =
 	"This host's allowlist does not include this project. The host owner adds it to `projects` in `/etc/bot-agent/runner.toml`.";
 
-/** A program entry that reads env sets: Run needs `programs.secrets`, and Restart keeps the host's stored values. */
-export function programUsesSecrets(spec: { env_sets: readonly string[]; secret_env: Record<string, string> }): boolean {
+/**
+ * A program entry that reads env sets: Run needs `programs.secrets`, and Restart keeps the host's stored values.
+ * Null (not reported) counts as reading them, so an unknown entry is never shown as safe to start without support.
+ */
+export function programUsesSecrets(spec: { env_sets: readonly string[] | null; secret_env: Record<string, string> | null }): boolean {
+	if (spec.env_sets == null || spec.secret_env == null) return true;
 	return spec.env_sets.length > 0 || Object.keys(spec.secret_env).length > 0;
 }
 
